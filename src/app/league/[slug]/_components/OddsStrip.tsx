@@ -114,7 +114,7 @@ export default function OddsStrip({
             </p>
           ) : null}
           <p className="mt-1.5 text-center text-[10px] text-zinc-600">
-            Context, not advice — picks cost nothing here.
+            Context, not advice.
           </p>
         </div>
       ) : null}
