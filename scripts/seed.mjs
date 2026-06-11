@@ -78,13 +78,14 @@ for (const m of fixturesJson) {
 const userCount = sqlite.prepare('SELECT COUNT(*) AS c FROM users').get().c;
 if (userCount === 0) {
   const nowMs = Date.now();
-  const adminPassword = crypto.randomBytes(8).toString('base64url');
+  // Hosted deploys can pin these via env (DEPLOY.md); otherwise generated here.
+  const adminPassword = process.env.ADMIN_PASSWORD ?? crypto.randomBytes(8).toString('base64url');
   const passwordHash = bcrypt.hashSync(adminPassword, 10);
   const { lastInsertRowid: adminId } = sqlite
     .prepare('INSERT INTO users (username, display_name, password_hash, created_at) VALUES (?, ?, ?, ?)')
     .run('admin', 'Pool Admin', passwordHash, nowMs);
 
-  const inviteToken = crypto.randomBytes(12).toString('hex');
+  const inviteToken = process.env.INVITE_TOKEN ?? crypto.randomBytes(12).toString('hex');
   const leagueName = process.env.SEED_LEAGUE_NAME ?? "Fabian's Red Card";
   const { lastInsertRowid: leagueId } = sqlite
     .prepare(`INSERT INTO leagues (name, slug, invite_token, admin_user_id, created_at)
