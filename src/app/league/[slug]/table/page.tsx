@@ -3,6 +3,8 @@ import { schema } from '@/db';
 import { getLeaderboard } from '@/lib/services/leaderboard';
 import { prizePool } from '@/lib/services/leagues';
 import LiveTable from '../_components/LiveTable';
+import LiveNow from '../_components/LiveNow';
+import { getLiveBoards } from '@/lib/services/live';
 import { loadLeagueContext } from '../_components/league-data';
 import { getLockedPicksByEntry } from '../_components/leaderboard-picks';
 import { getTodayPointsByEntry } from '../_components/today-points';
@@ -41,16 +43,20 @@ export default async function TablePage({
     .where(eq(schema.memberships.leagueId, league.id))
     .all().length;
   const pool = prizePool(league, entryCount) as PrizePoolView;
+  const liveBoards = getLiveBoards(db, league.id);
 
   return (
-    <LiveTable
-      slug={slug}
-      initialRows={rows}
-      initialPool={pool}
-      initialMemberCount={memberCount}
-      buyInCents={league.buyInCents}
-      currency={league.currency}
-      meUserId={user.id}
-    />
+    <div className="space-y-4">
+      <LiveNow slug={slug} initial={liveBoards} />
+      <LiveTable
+        slug={slug}
+        initialRows={rows}
+        initialPool={pool}
+        initialMemberCount={memberCount}
+        buyInCents={league.buyInCents}
+        currency={league.currency}
+        meUserId={user.id}
+      />
+    </div>
   );
 }

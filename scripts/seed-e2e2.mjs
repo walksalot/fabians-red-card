@@ -82,6 +82,13 @@ const insertPick = sqlite.prepare(`
 insertPick.run(paulaEntry, 1, 2, 1, 'Raul Jimenez', 'home', t('2026-06-11T10:00:00Z'), t('2026-06-11T10:00:00Z'));
 insertPick.run(victorEntry, 1, 1, 0, 'Hirving Lozano', 'home', t('2026-06-11T11:00:00Z'), t('2026-06-11T11:00:00Z'));
 
+// Match 1 is mid-game at FAKE_NOW: live feed snapshot for the "if it ended
+// now" board. Paula (2-1 RJ home): outcome 2 + scorer 8 + first-team 2 = 12.
+// Victor (1-0 HL home): exact 10 + first-team 2 = 12.
+sqlite.prepare(`UPDATE matches SET live_home = 1, live_away = 0, live_status = 'in',
+  live_updated_at = ?, live_first_scorer = 'Raúl Jiménez', live_first_scoring_team = 'home'
+  WHERE id = 1`).run(t('2026-06-11T23:59:00Z'));
+
 const counts = sqlite
   .prepare(`SELECT (SELECT COUNT(*) FROM users) AS users, (SELECT COUNT(*) FROM picks) AS picks,
             (SELECT COUNT(*) FROM matches) AS matches`)

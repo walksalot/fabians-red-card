@@ -117,10 +117,12 @@ function writeResult(db: Db, input: EnterResultInput, source: 'manual' | 'auto')
         firstScorer,
         firstScoringTeam,
         resultSource: source,
-        // a final result clears any lingering live score
+        // a final result clears any lingering live state
         liveHome: null,
         liveAway: null,
         liveStatus: null,
+        liveFirstScorer: null,
+        liveFirstScoringTeam: null,
       })
       .where(eq(schema.matches.id, input.matchId))
       .returning()
@@ -152,7 +154,14 @@ export function enterResultAuto(db: Db, input: EnterResultInput): MatchRow | nul
 /** Record an in-progress live score from the feed (display only; never scores points). */
 export function setLiveScore(
   db: Db,
-  input: { matchId: number; liveHome: number; liveAway: number; updatedAtMs: number },
+  input: {
+    matchId: number;
+    liveHome: number;
+    liveAway: number;
+    updatedAtMs: number;
+    firstScorer?: string | null;
+    firstScoringTeam?: 'home' | 'away' | null;
+  },
 ): void {
   const match = getMatchOrThrow(db, input.matchId);
   if (match.resultSource === 'manual' || match.status === 'finished') return;
@@ -162,6 +171,8 @@ export function setLiveScore(
       liveAway: input.liveAway,
       liveStatus: 'in',
       liveUpdatedAt: input.updatedAtMs,
+      liveFirstScorer: input.firstScorer ?? null,
+      liveFirstScoringTeam: input.firstScoringTeam ?? null,
     })
     .where(eq(schema.matches.id, input.matchId))
     .run();

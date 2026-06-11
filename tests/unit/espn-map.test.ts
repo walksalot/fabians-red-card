@@ -209,7 +209,7 @@ describe('planSync', () => {
       [espnEvent({ state: 'in', home: { score: '1' }, away: { score: '0' } })],
       [M1],
     );
-    expect(plan.actions).toEqual([{ kind: 'live', matchId: 1, liveHome: 1, liveAway: 0 }]);
+    expect(plan.actions).toEqual([{ kind: 'live', matchId: 1, liveHome: 1, liveAway: 0, firstScorer: null, firstScoringTeam: null }]);
   });
 
   it('is idempotent for already-applied auto results', () => {
@@ -290,7 +290,7 @@ describe('planSync', () => {
       ],
       [M1],
     );
-    expect(plan.actions).toEqual([{ kind: 'live', matchId: 1, liveHome: 1, liveAway: 1 }]);
+    expect(plan.actions).toEqual([{ kind: 'live', matchId: 1, liveHome: 1, liveAway: 1, firstScorer: null, firstScoringTeam: null }]);
   });
 
   it('handles the real captured ESPN payload for June 11 (pre-game: no actions, no errors)', () => {

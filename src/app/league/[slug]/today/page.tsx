@@ -2,9 +2,11 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { schema } from '@/db';
 import { nowMs } from '@/lib/clock';
 import { getTodayBoard } from '@/lib/services/today';
+import { getLiveBoards } from '@/lib/services/live';
 import EmptyState from '@/components/EmptyState';
 import EntrySwitcher from '../_components/EntrySwitcher';
 import TodayBoard from '../_components/TodayBoard';
+import LiveNow from '../_components/LiveNow';
 import {
   loadLeagueContext,
   pickSelectedEntry,
@@ -201,8 +203,11 @@ export default async function TodayPage({
   const stages = [...new Set(items.map((i) => i.stage))];
   const commonStage = stages.length === 1 ? stages[0] : null;
 
+  const liveBoards = getLiveBoards(db, league.id);
+
   return (
     <div className="space-y-4">
+      <LiveNow slug={slug} initial={liveBoards} />
       {entries.length > 1 && (
         <EntrySwitcher
           entries={entries.map((e) => ({ id: e.id, label: e.label }))}

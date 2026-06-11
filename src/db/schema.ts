@@ -118,6 +118,9 @@ export const matches = sqliteTable('matches', {
   liveAway: integer('live_away'),
   liveStatus: text('live_status'), // 'in' while playing, cleared otherwise
   liveUpdatedAt: integer('live_updated_at'),
+  // Live first-goal facts (drive the "if it ended now" provisional board).
+  liveFirstScorer: text('live_first_scorer'),
+  liveFirstScoringTeam: text('live_first_scoring_team'), // 'home'|'away'
 });
 
 // Small key/value store for server housekeeping (last auto-sync time, last

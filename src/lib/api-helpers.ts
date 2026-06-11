@@ -104,6 +104,13 @@ export function requireLeagueAdmin(db: Db, leagueId: number, userId: number): vo
   }
 }
 
+/** Throws 403 unless the user is a member (any role) of this league. */
+export function requireMember(db: Db, leagueId: number, userId: number): void {
+  if (!membershipOf(db, leagueId, userId)) {
+    throw new AppError('Members only', 403);
+  }
+}
+
 /**
  * Throws 403 unless the user may write GLOBAL match data (results, knockout
  * teams, underdog flags): an admin of the primary (seeded) league. League

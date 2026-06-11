@@ -173,6 +173,8 @@ export async function runSync(
           liveHome: action.liveHome,
           liveAway: action.liveAway,
           updatedAtMs: nowMs,
+          firstScorer: action.firstScorer,
+          firstScoringTeam: action.firstScoringTeam,
         });
         liveUpdates++;
       } else if (action.kind === 'teams') {

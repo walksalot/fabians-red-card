@@ -62,7 +62,15 @@ export interface MatchSnapshot {
 
 export type SyncAction =
   | { kind: 'teams'; matchId: number; homeCode: string; awayCode: string }
-  | { kind: 'live'; matchId: number; liveHome: number; liveAway: number }
+  | {
+      kind: 'live';
+      matchId: number;
+      liveHome: number;
+      liveAway: number;
+      /** First-goal facts as they stand mid-match (null until the first goal). */
+      firstScorer: string | null;
+      firstScoringTeam: 'home' | 'away' | null;
+    }
   | {
       kind: 'result';
       matchId: number;
@@ -250,7 +258,25 @@ export function planSync(events: EspnEvent[], matches: MatchSnapshot[]): SyncPla
         firstScoringTeam,
       });
     } else if (state === 'in') {
-      actions.push({ kind: 'live', matchId: match.id, liveHome: homeScore, liveAway: awayScore });
+      // Same first-goal extraction as at full time, applied mid-match — it
+      // feeds the display-only "if it ended now" board, never real points.
+      const goal = firstGoal(comp.details);
+      const homeId = sides.home.team?.id;
+      const awayId = sides.away.team?.id;
+      const firstScoringTeam =
+        goal?.teamId && homeId && goal.teamId === homeId
+          ? ('home' as const)
+          : goal?.teamId && awayId && goal.teamId === awayId
+            ? ('away' as const)
+            : null;
+      actions.push({
+        kind: 'live',
+        matchId: match.id,
+        liveHome: homeScore,
+        liveAway: awayScore,
+        firstScorer: goal?.scorer ?? null,
+        firstScoringTeam,
+      });
     }
   }
 

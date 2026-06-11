@@ -50,7 +50,8 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     const locked = page.getByTestId('pick-form-1');
     await expect(locked).toBeVisible();
     await expect(locked.getByText('Picks are locked for this match.')).toBeVisible();
-    await expect(locked.getByText('In progress')).toBeVisible();
+    // seeded live feed data → the card shows the live score, not a bare badge
+    await expect(locked.getByText('1–0').first()).toBeVisible();
     await expect(locked.getByTestId('pick-save')).toHaveCount(0);
 
     const open = page.getByTestId('pick-form-2');
@@ -85,6 +86,33 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     await expect(page.getByTestId('pick-form-1').getByTestId('booster-toggle')).toBeDisabled();
   });
 
+  test('"if it ended now" live board shows engine-true provisional points', async () => {
+    // Paula is signed in from test 1. The strip appears on Today and Table.
+    await page.goto('/league/fabians-red-card/today');
+    const strip = page.getByTestId('live-now');
+    await expect(strip).toBeVisible();
+    await expect(strip).toContainText('1–0'); // the live snapshot score
+
+    await page.getByTestId('live-now-toggle-1').click();
+    const board = page.getByTestId('live-board-1');
+    await expect(board).toContainText('First goal:');
+    await expect(board).toContainText('Raúl Jiménez');
+
+    // Engine math against the 1-0 snapshot: paula 2-1+scorer+1st = 12;
+    // victor exact 1-0 + 1st = 12. Both rows must show +12.
+    const rows = board.getByTestId('live-board-row');
+    const paulaRow = rows.filter({ hasText: 'Paula' });
+    const victorRow = rows.filter({ hasText: 'Victor' });
+    await expect(paulaRow.getByTestId('live-board-total')).toHaveText('+12');
+    await expect(victorRow.getByTestId('live-board-total')).toHaveText('+12');
+    // admin holds no entry, so the no-pick sink shows the picked rows only
+    await expect(board).toContainText('Provisional');
+
+    // Same strip on the Table tab, above the real leaderboard.
+    await page.getByTestId('tab-table').click();
+    await expect(page.getByTestId('live-now')).toBeVisible();
+  });
+
   test('admin enters a result in the browser and the leaderboard reorders with live points', async () => {
     const adminContext = await browserRef.newContext(CONTEXT_OPTIONS);
     const admin = await adminContext.newPage();
@@ -101,6 +129,8 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
 
     // paula: exact (10) + scorer (8) + first team (2) = 20; victor: outcome (2) + first team (2) = 4
     await page.goto('/league/fabians-red-card/table');
+    // the final whistle retires the live board — provisional hands off to real points
+    await expect(page.getByTestId('live-now')).toHaveCount(0);
     const rows = page.getByTestId('leaderboard-row');
     await expect(rows.first()).toContainText('Paula');
     await expect(rows.first().getByTestId('row-total')).toHaveText('20');
