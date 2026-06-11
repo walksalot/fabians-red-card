@@ -10,8 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # install deps first (better layer caching)
+# the lockfile is written by npm 11 — npm 10 (image default) rejects it
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm install -g npm@11 && npm ci
 
 # app source + production build
 COPY . .
