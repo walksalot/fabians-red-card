@@ -1,7 +1,9 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { schema, type Db } from '@/db';
 import { getBooster, setBooster } from '@/lib/services/boosters';
+// Deliberately unmocked: the recompute-on-move contract is exercised end to end.
+import { enterResult } from '@/lib/services/results';
 import { freshDb, withFakeNow } from '../helpers/db';
 
 const MATCHDAY = '2026-06-11';
@@ -87,6 +89,45 @@ function boosterRows(db: Db, entryId: number) {
     .where(eq(schema.boosters.entryId, entryId))
     .all();
 }
+
+/** Make the user a results admin (admin membership in the only/primary league). */
+function seedAdminMembership(db: Db, leagueId: number, userId: number) {
+  db.insert(schema.memberships)
+    .values({ leagueId, userId, role: 'admin', createdAt: 0 })
+    .run();
+}
+
+/** Direct pick insert: 1-0 home (exact vs the 1-0 result below → base 10). */
+function seedPick(db: Db, entryId: number, matchId: number) {
+  db.insert(schema.picks)
+    .values({
+      entryId,
+      matchId,
+      predHome: 1,
+      predAway: 0,
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    .run();
+}
+
+function totalFor(db: Db, entryId: number, matchId: number): number | null {
+  const row = db
+    .select()
+    .from(schema.matchPoints)
+    .where(
+      and(eq(schema.matchPoints.entryId, entryId), eq(schema.matchPoints.matchId, matchId)),
+    )
+    .get();
+  return row?.total ?? null;
+}
+
+const RESULT_1_0 = {
+  homeScore: 1,
+  awayScore: 0,
+  firstScorer: null,
+  firstScoringTeam: 'home' as const,
+};
 
 describe('setBooster / getBooster', () => {
   it('daily booster applies to exactly one chosen match per matchday', async () => {
@@ -249,5 +290,58 @@ describe('setBooster / getBooster', () => {
   it('getBooster returns null when no booster is set', async () => {
     const { db, entry } = setup();
     expect(await getBooster(db, entry.id, MATCHDAY)).toBeNull();
+  });
+
+  it('moving the booster OFF an already-finished match recomputes its points back to x1', async () => {
+    const { db, user, league, entry } = setup();
+    seedAdminMembership(db, league.id, user.id);
+    seedPick(db, entry.id, EARLY_ID);
+
+    await withFakeNow(MORNING, async () => {
+      // Result entered ahead of kickoff: EARLY is finished but unkicked.
+      enterResult(db, user.id, { matchId: EARLY_ID, ...RESULT_1_0 });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(10); // exact, unboosted
+
+      await setBooster(db, user.id, {
+        entryId: entry.id,
+        matchday: MATCHDAY,
+        matchId: EARLY_ID,
+      });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(20); // boosted x2
+
+      // Allowed: EARLY has not kicked off. The old match's points must drop
+      // back to x1 immediately — no stale doubled points on the leaderboard.
+      await setBooster(db, user.id, {
+        entryId: entry.id,
+        matchday: MATCHDAY,
+        matchId: LATE_ID,
+      });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(10);
+      expect((await getBooster(db, entry.id, MATCHDAY))?.matchId).toBe(LATE_ID);
+    });
+  });
+
+  it('moving the booster ONTO an already-finished match recomputes its points to x2', async () => {
+    const { db, user, league, entry } = setup();
+    seedAdminMembership(db, league.id, user.id);
+    seedPick(db, entry.id, EARLY_ID);
+
+    await withFakeNow(MORNING, async () => {
+      await setBooster(db, user.id, {
+        entryId: entry.id,
+        matchday: MATCHDAY,
+        matchId: LATE_ID,
+      });
+
+      enterResult(db, user.id, { matchId: EARLY_ID, ...RESULT_1_0 });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(10); // not boosted yet
+
+      await setBooster(db, user.id, {
+        entryId: entry.id,
+        matchday: MATCHDAY,
+        matchId: EARLY_ID,
+      });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(20); // boost applied on move
+    });
   });
 });

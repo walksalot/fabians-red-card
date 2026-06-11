@@ -104,20 +104,13 @@ export function requireLeagueAdmin(db: Db, leagueId: number, userId: number): vo
   }
 }
 
-/** Throws 403 unless the user is an admin of at least one league (global results entry). */
-export function requireAnyLeagueAdmin(db: Db, userId: number): void {
-  const row = db
-    .select({ id: schema.memberships.id })
-    .from(schema.memberships)
-    .where(
-      and(
-        eq(schema.memberships.userId, userId),
-        eq(schema.memberships.role, 'admin'),
-      ),
-    )
-    .get();
-  if (!row) throw new AppError('Admin only', 403);
-}
+/**
+ * Throws 403 unless the user may write GLOBAL match data (results, knockout
+ * teams, underdog flags): an admin of the primary (seeded) league. League
+ * creation is open to everyone, so "admin of any league" must never count.
+ * Single implementation lives in the results service.
+ */
+export { requireResultsAdmin } from '@/lib/services/results';
 
 /** Number of memberships in a league. */
 export function memberCountOf(db: Db, leagueId: number): number {

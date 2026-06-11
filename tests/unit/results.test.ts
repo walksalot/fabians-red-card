@@ -4,14 +4,16 @@ import { schema, type Db } from '@/db';
 import { AppError } from '@/lib/errors';
 import type { PointsBreakdown } from '@/lib/scoring';
 import {
+  clearResult,
   enterResult,
   recomputeMatch,
   recomputeLeague,
-  requireLeagueAdmin,
+  requireResultsAdmin,
   setMatchTeams,
   setUnderdog,
 } from '@/lib/services/results';
 import { getLeaderboard } from '@/lib/services/leaderboard';
+import { updateLeagueSettings } from '@/lib/services/leagues';
 import { freshDb } from '../helpers/db';
 
 // ---------------------------------------------------------------------------
@@ -319,28 +321,41 @@ describe('results service', () => {
     expect(after?.total).toBe(9); // recomputed because match already finished
   });
 
-  it('enterResult requires the caller to be admin of at least one league', () => {
+  it('enterResult requires the caller to be an admin of the primary league', () => {
     const db = freshDb();
     const admin = makeUser(db);
-    const league = makeLeague(db, admin.id);
+    const league = makeLeague(db, admin.id); // primary league (lowest id)
     const member = makeUser(db);
     db.insert(schema.memberships)
       .values({ leagueId: league.id, userId: member.id, role: 'member', createdAt: 1 })
       .run();
     makeMatch(db, 1);
+    const result = {
+      matchId: 1,
+      homeScore: 1,
+      awayScore: 0,
+      firstScorer: null,
+      firstScoringTeam: 'home' as const,
+    };
 
-    expectAppError(() => requireLeagueAdmin(db, member.id), 403);
+    // A plain member is rejected.
+    expectAppError(() => requireResultsAdmin(db, member.id), 403);
+    expectAppError(() => enterResult(db, member.id, result), 403);
+
+    // Creating their own league (which grants an 'admin' membership there)
+    // must NOT grant global results authority — that would let any player
+    // overwrite every league's results via a throwaway league.
+    makeLeague(db, member.id);
+    expectAppError(() => requireResultsAdmin(db, member.id), 403);
+    expectAppError(() => enterResult(db, member.id, result), 403);
     expectAppError(
-      () =>
-        enterResult(db, member.id, {
-          matchId: 1,
-          homeScore: 1,
-          awayScore: 0,
-          firstScorer: null,
-          firstScoringTeam: 'home',
-        }),
+      () => setUnderdog(db, member.id, { matchId: 1, underdogTeamId: null }),
       403,
     );
+    expectAppError(() => clearResult(db, member.id, 1), 403);
+
+    // The primary league's admin still can.
+    expect(enterResult(db, admin.id, result).status).toBe('finished');
   });
 
   it('enterResult validates scores are integers between 0 and 30', () => {
@@ -425,6 +440,102 @@ describe('results service', () => {
       () => setMatchTeams(db, admin.id, { matchId: 80, homeTeamId: 1, awayTeamId: 999 }),
       404,
     );
+  });
+
+  it('setMatchTeams on a finished match recomputes points and clears a stale underdog flag', () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    const league = makeLeague(db, admin.id);
+    const entry = makeEntry(db, league.id, makeUser(db).id);
+    makeTeam(db, 1, 'FRA');
+    makeTeam(db, 2, 'PAN');
+    makeTeam(db, 3, 'GER');
+    makeTeam(db, 4, 'JPN');
+    makeMatch(db, 80, { stage: 'r16', homeTeamId: 1, awayTeamId: 2 });
+    makePick(db, entry.id, 80, { predHome: 0, predAway: 2, predFirstTeam: 'away' });
+
+    setUnderdog(db, admin.id, { matchId: 80, underdogTeamId: 2 });
+    enterResult(db, admin.id, {
+      matchId: 80,
+      homeScore: 0,
+      awayScore: 2,
+      firstScorer: null,
+      firstScoringTeam: 'away',
+    });
+    const before = pointsFor(db, entry.id, 80);
+    expect(before?.parsed.underdog).toBe(5);
+    expect(before?.total).toBe(17); // exact 10 + firstTeam 2 + underdog 5
+
+    // Correction keeps team 2 but flips it to the home slot: the flag stays,
+    // and the recompute drops the bonus (the underdog side no longer won).
+    const flipped = setMatchTeams(db, admin.id, { matchId: 80, homeTeamId: 2, awayTeamId: 3 });
+    expect(flipped.underdogTeamId).toBe(2);
+    const afterFlip = pointsFor(db, entry.id, 80);
+    expect(afterFlip?.parsed.underdog).toBe(0);
+    expect(afterFlip?.total).toBe(12);
+
+    // Correction to a pair that no longer contains the flagged team clears it.
+    const reassigned = setMatchTeams(db, admin.id, { matchId: 80, homeTeamId: 3, awayTeamId: 4 });
+    expect(reassigned.underdogTeamId).toBeNull();
+    const afterReassign = pointsFor(db, entry.id, 80);
+    expect(afterReassign?.parsed.underdog).toBe(0);
+    expect(afterReassign?.total).toBe(12); // exact + firstTeam only, no stale bonus
+  });
+
+  it('clearing a result reverts the match to scheduled and deletes its points', () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    const league = makeLeague(db, admin.id);
+    const entry = makeEntry(db, league.id, makeUser(db).id);
+    makeMatch(db, 1);
+    makePick(db, entry.id, 1, { predHome: 2, predAway: 1, predFirstTeam: 'home' });
+
+    expectAppError(() => clearResult(db, admin.id, 1), 409); // nothing to clear yet
+
+    enterResult(db, admin.id, {
+      matchId: 1,
+      homeScore: 2,
+      awayScore: 1,
+      firstScorer: null,
+      firstScoringTeam: 'home',
+    });
+    expect(pointsFor(db, entry.id, 1)?.total).toBe(12);
+
+    const cleared = clearResult(db, admin.id, 1);
+    expect(cleared.status).toBe('scheduled');
+    expect(cleared.homeScore).toBeNull();
+    expect(cleared.awayScore).toBeNull();
+    expect(cleared.firstScorer).toBeNull();
+    expect(cleared.firstScoringTeam).toBeNull();
+    expect(pointsFor(db, entry.id, 1)).toBeNull(); // phantom points removed
+
+    expectAppError(() => clearResult(db, admin.id, 999), 404);
+  });
+
+  it('changing scoring settings via updateLeagueSettings recomputes stored points (unmocked)', async () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    const league = makeLeague(db, admin.id);
+    const entry = makeEntry(db, league.id, makeUser(db).id);
+    makeMatch(db, 1);
+    makePick(db, entry.id, 1, { predHome: 2, predAway: 1, predFirstTeam: 'home' });
+    enterResult(db, admin.id, {
+      matchId: 1,
+      homeScore: 2,
+      awayScore: 1,
+      firstScorer: null,
+      firstScoringTeam: 'home',
+    });
+    expect(pointsFor(db, entry.id, 1)?.total).toBe(12); // exact 10 + firstTeam 2
+
+    // End-to-end through the leagues service (no mocks): the settings write
+    // and the recompute must be wired together.
+    await updateLeagueSettings(db, league.id, admin.id, {
+      scoringRules: { exact: 20, outcome: 2, scorer: 8, firstTeam: 2, underdog: 5 },
+    });
+    const after = pointsFor(db, entry.id, 1);
+    expect(after?.parsed.exact).toBe(20);
+    expect(after?.total).toBe(22);
   });
 
   it("setUnderdog rejects a team that is not one of the match's teams", () => {

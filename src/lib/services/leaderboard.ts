@@ -35,6 +35,16 @@ export interface EntryStats {
 
 type Standing = Omit<LeaderboardRow, 'rank'>;
 
+/**
+ * Admin-configurable REAL multipliers make totals floats, and float sums
+ * depend on addend order — two mathematically equal totals can differ by
+ * ~1e-13 and silently skip the contractual tiebreaks. Round to micro-points
+ * before comparing or displaying.
+ */
+function roundTotal(value: number): number {
+  return Math.round(value * 1e6) / 1e6;
+}
+
 function compareStandings(a: Standing, b: Standing): number {
   if (a.total !== b.total) return b.total - a.total;
   if (a.exactCount !== b.exactCount) return b.exactCount - a.exactCount;
@@ -99,7 +109,7 @@ export function getLeaderboard(db: Db, leagueId: number): LeaderboardRow[] {
       userId: entry.userId,
       label: entry.label,
       displayName: user.displayName,
-      total: agg?.total ?? 0,
+      total: roundTotal(agg?.total ?? 0),
       exactCount: agg?.exactCount ?? 0,
       scorerHits: agg?.scorerHits ?? 0,
       outcomeCount: agg?.outcomeCount ?? 0,
@@ -186,7 +196,7 @@ export function getEntryStats(db: Db, entryId: number): EntryStats {
   }
 
   return {
-    total,
+    total: roundTotal(total),
     exactCount,
     scorerHits,
     picksMade: pickRows.length,

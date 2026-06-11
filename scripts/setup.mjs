@@ -8,12 +8,23 @@ import { spawnSync } from 'node:child_process';
 const root = process.cwd();
 const envPath = path.join(root, '.env.local');
 
-if (!fs.existsSync(envPath) || !fs.readFileSync(envPath, 'utf8').includes('SESSION_SECRET=')) {
+// Line-anchored check: a glued "FOO=barSESSION_SECRET=..." (hand-edited file
+// without a trailing newline) must NOT count as configured.
+const existingEnv = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+if (!/^SESSION_SECRET=.+$/m.test(existingEnv)) {
   const secret = crypto.randomBytes(32).toString('hex');
-  fs.appendFileSync(envPath, `SESSION_SECRET=${secret}\n`);
+  // Never glue onto a previous line that lacks a trailing newline.
+  const prefix = existingEnv.length > 0 && !existingEnv.endsWith('\n') ? '\n' : '';
+  fs.appendFileSync(envPath, `${prefix}SESSION_SECRET=${secret}\n`);
   console.log('Generated SESSION_SECRET in .env.local');
 } else {
   console.log('.env.local already has SESSION_SECRET — keeping it');
+}
+
+// Verify the file actually carries a SESSION_SECRET line before claiming success.
+if (!/^SESSION_SECRET=.+$/m.test(fs.readFileSync(envPath, 'utf8'))) {
+  console.error('setup: .env.local still has no usable SESSION_SECRET line — aborting.');
+  process.exit(1);
 }
 
 const seed = spawnSync('node', ['scripts/seed.mjs'], { stdio: 'inherit' });

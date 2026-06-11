@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
 import {
   getEntryPicks,
@@ -121,6 +122,26 @@ describe('upsertPick', () => {
   it('picks are rejected server-side after kickoff', async () => {
     const { db, user, entry } = setup();
     await withFakeNow(AFTER_KICKOFF, async () => {
+      await expect(
+        upsertPick(db, user.id, basePick(entry.id)),
+      ).rejects.toMatchObject({
+        status: 409,
+        message: 'Picks are locked for this match',
+      });
+    });
+    expect(await getEntryPicks(db, entry.id)).toHaveLength(0);
+  });
+
+  it('picks are rejected once a result is entered, even before kickoff', async () => {
+    const { db, user, entry, match } = setup();
+    // The admin can enter a result ahead of kickoff; the result is then
+    // visible to everyone, so a "prediction" must no longer be accepted.
+    db.update(schema.matches)
+      .set({ status: 'finished', homeScore: 2, awayScore: 1, firstScoringTeam: 'home' })
+      .where(eq(schema.matches.id, match.id))
+      .run();
+
+    await withFakeNow(BEFORE_KICKOFF, async () => {
       await expect(
         upsertPick(db, user.id, basePick(entry.id)),
       ).rejects.toMatchObject({

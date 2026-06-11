@@ -59,6 +59,22 @@ test.describe('world cup pool journey (mobile dark)', () => {
     await form.getByTestId('pick-save').click();
     await expect(form.getByText(/saved/i).first()).toBeVisible();
 
+    // Editing after a save must clear 'Saved ✓' — the badge may only ever
+    // describe the values currently in the form (the server still has 2-1).
+    await form.getByTestId('pick-home').fill('3');
+    await expect(form.getByText(/saved/i)).toHaveCount(0);
+    await form.getByTestId('pick-home').fill('2');
+    await form.getByTestId('pick-save').click();
+    await expect(form.getByText(/saved/i).first()).toBeVisible();
+
+    // Entry-ownership barrier: requesting another member's entryId is refused
+    // (entry 1 is the seeded admin's — rival picks must stay hidden pre-kickoff).
+    const foreign = await page.request.get(
+      '/api/leagues/fabians-red-card/today?entryId=1',
+    );
+    expect(foreign.status()).toBe(403);
+    expect(((await foreign.json()) as { ok: boolean }).ok).toBe(false);
+
     await page.reload();
     const persisted = page.getByTestId(firstPickFormTestId);
     await expect(persisted.getByTestId('pick-home')).toHaveValue('2');
@@ -149,5 +165,51 @@ test.describe('world cup pool journey (mobile dark)', () => {
     // Table reflects the smaller league: 2 members left (admin + daisy)
     await page.goto('/league/fabians-red-card/table');
     await expect(page.getByTestId('member-count')).toContainText('2');
+  });
+
+  test('admin enters a result; points recompute onto the table and history', async () => {
+    // Still signed in as the seeded admin from the previous test. Enter the
+    // result that exactly matches daisy's pick from test 1 (2-1, 'Test
+    // Scorer', home first): exact 10 + scorer 8 + first team 2 = 20.
+    const matchId = Number(firstPickFormTestId.replace('pick-form-', ''));
+    expect(Number.isInteger(matchId)).toBe(true);
+
+    await page.goto('/league/fabians-red-card/admin');
+    const resultForm = page.getByTestId(`result-form-${matchId}`);
+    await resultForm.getByTestId(`result-home-${matchId}`).fill('2');
+    await resultForm.getByTestId(`result-away-${matchId}`).fill('1');
+    await resultForm.getByTestId(`result-scorer-${matchId}`).fill('Test Scorer');
+    await resultForm
+      .getByTestId(`result-firstteam-${matchId}`)
+      .selectOption('home');
+    await resultForm.getByTestId(`result-save-${matchId}`).click();
+    await expect(resultForm.getByText(/saved/i).first()).toBeVisible();
+
+    // Leaderboard recomputed automatically.
+    await page.goto('/league/fabians-red-card/table');
+    const daisyRow = page
+      .getByTestId('leaderboard-row')
+      .filter({ hasText: 'Daisy' });
+    await expect(daisyRow).toBeVisible();
+    await expect(daisyRow).toContainText('20');
+    await expect(daisyRow).toContainText('1 exact');
+
+    // History, as daisy, shows the result and the full points breakdown.
+    await context.clearCookies();
+    await page.goto('/login');
+    await page.getByTestId('auth-username').fill('daisy');
+    await page.getByTestId('auth-password').fill('e2e-daisy-pass');
+    await page.getByTestId('auth-submit').click();
+    await expect(page).toHaveURL(/\/league\/fabians-red-card/);
+
+    await page.goto('/league/fabians-red-card/history');
+    const historyItem = page.getByTestId(`history-match-${matchId}`);
+    await expect(historyItem).toBeVisible();
+    await expect(historyItem).toContainText('2–1');
+    await expect(historyItem).toContainText('Test Scorer');
+    await expect(historyItem).toContainText('+20 pts');
+    await expect(historyItem).toContainText('Exact +10');
+    await expect(historyItem).toContainText('Scorer +8');
+    await expect(historyItem).toContainText('First team +2');
   });
 });

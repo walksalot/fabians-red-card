@@ -38,7 +38,7 @@ function makeUser(db: Db, username: string, displayName?: string): Promise<Publi
   return createUser(db, {
     username,
     displayName: displayName ?? username.toUpperCase(),
-    password: `pw-${username}`,
+    password: `pass-${username}`, // >= 8 chars for any valid (>= 3 char) username
   });
 }
 
@@ -84,7 +84,7 @@ describe('createUser / verifyLogin', () => {
     const user = await createUser(db, {
       username: '  KrIs_99 ',
       displayName: '  Kris  ',
-      password: 'hunter2',
+      password: 'hunter2boss',
     });
     expect(user.username).toBe('kris_99');
     expect(user.displayName).toBe('Kris');
@@ -92,7 +92,7 @@ describe('createUser / verifyLogin', () => {
 
     const row = db.select().from(schema.users).where(eq(schema.users.id, user.id)).get();
     expect(row?.passwordHash).toBeTruthy();
-    expect(row?.passwordHash).not.toContain('hunter2');
+    expect(row?.passwordHash).not.toContain('hunter2boss');
   });
 
   it('rejects invalid usernames with 400', async () => {
@@ -117,14 +117,27 @@ describe('createUser / verifyLogin', () => {
   it('rejects duplicate usernames with 409 (case-insensitive)', async () => {
     await makeUser(db, 'fabian');
     await expectAppError(
-      createUser(db, { username: 'FABIAN', displayName: 'F2', password: 'p' }),
+      createUser(db, { username: 'FABIAN', displayName: 'F2', password: 'password1' }),
       409,
     );
   });
 
+  it('rejects passwords shorter than 8 characters with 400', async () => {
+    await expectAppError(
+      createUser(db, { username: 'shortpw', displayName: 'S', password: 'seven77' }),
+      400,
+    );
+    const ok = await createUser(db, {
+      username: 'okpw',
+      displayName: 'O',
+      password: 'eight888',
+    });
+    expect(ok.username).toBe('okpw');
+  });
+
   it('verifyLogin succeeds with good credentials and throws 401 on bad ones', async () => {
     const created = await makeUser(db, 'fabian');
-    const user = await verifyLogin(db, { username: ' Fabian ', password: 'pw-fabian' });
+    const user = await verifyLogin(db, { username: ' Fabian ', password: 'pass-fabian' });
     expect(user.id).toBe(created.id);
     await expectAppError(verifyLogin(db, { username: 'fabian', password: 'wrong' }), 401);
     await expectAppError(verifyLogin(db, { username: 'nobody', password: 'pw' }), 401);
@@ -381,6 +394,36 @@ describe('league settings', () => {
     // Re-submitting identical scoring settings is not a change.
     await updateLeagueSettings(db, league.id, admin.id, { boosterMultiplier: 3 });
     expect(recomputeLeague).toHaveBeenCalledTimes(3);
+  });
+
+  it('a failed recompute rolls back the settings write, so a retry recomputes again', async () => {
+    const { recomputeLeague } = await import('@/lib/services/results');
+    const admin = await makeUser(db, 'fabian');
+    const league = await createLeague(db, admin.id, { name: 'Pool' });
+    const patch = {
+      scoringRules: { exact: 20, outcome: 2, scorer: 8, firstTeam: 2, underdog: 5 },
+    };
+
+    vi.mocked(recomputeLeague).mockImplementationOnce(() => {
+      throw new Error('recompute exploded');
+    });
+    await expect(updateLeagueSettings(db, league.id, admin.id, patch)).rejects.toThrow(
+      'recompute exploded',
+    );
+
+    // The settings write rolled back with the failed recompute — otherwise a
+    // retry would compute scoringChanged=false and leave points stale forever.
+    const stored = db
+      .select()
+      .from(schema.leagues)
+      .where(eq(schema.leagues.id, league.id))
+      .get();
+    expect((JSON.parse(stored!.scoringRules) as { exact: number }).exact).toBe(10);
+
+    // Retry: the change is still detected, recompute runs, write persists.
+    const updated = await updateLeagueSettings(db, league.id, admin.id, patch);
+    expect((JSON.parse(updated.scoringRules) as { exact: number }).exact).toBe(20);
+    expect(recomputeLeague).toHaveBeenCalledTimes(2);
   });
 });
 

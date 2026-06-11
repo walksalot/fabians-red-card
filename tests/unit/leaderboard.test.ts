@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { schema, type Db } from '@/db';
 import type { PointsBreakdown } from '@/lib/scoring';
+import { entryCountOf } from '@/lib/api-helpers';
+import { prizePool } from '@/lib/services/leagues';
 import { getEntryStats, getLeaderboard } from '@/lib/services/leaderboard';
 import { getSchedule, getTodayBoard } from '@/lib/services/today';
 import { freshDb, withFakeNow } from '../helpers/db';
@@ -196,6 +198,55 @@ describe('leaderboard service', () => {
     expect(rows[2].lastPickAt).toBeNull(); // no picks sorts last on this key
   });
 
+  it('tiebreak: float-rounded totals — mathematically equal sums tie before tiebreaks', () => {
+    const db = freshDb();
+    const { league, entries } = standingsFixture(db, 2, 2);
+    const [e1, e2] = entries;
+    // e1 accumulates 0.1 + 0.2 (raw float sum = 0.30000000000000004);
+    // e2 holds exactly 0.3 plus an exact hit. The totals are mathematically
+    // equal, so the exact-count tiebreak must decide — not a 1e-17 artifact.
+    awardPoints(db, e1.id, 1, { total: 0.1 });
+    awardPoints(db, e1.id, 2, { total: 0.2 });
+    awardPoints(db, e2.id, 1, { exact: 10, total: 0.3 });
+
+    const rows = getLeaderboard(db, league.id);
+    expect(rows.map((r) => r.entryId)).toEqual([e2.id, e1.id]);
+    expect(rows[0].total).toBe(0.3);
+    expect(rows[1].total).toBe(0.3); // identical after rounding
+  });
+
+  it('a user with multiple entries holds independent leaderboard rows and the prize pool counts entries', () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    const league = makeLeague(db, admin.id);
+    makeMatch(db, 1, { status: 'finished', homeScore: 1, awayScore: 0 });
+    const multi = makeUser(db);
+    const solo = makeUser(db);
+    const entryA = makeEntry(db, league.id, multi.id, 'Multi A');
+    const entryB = makeEntry(db, league.id, multi.id, 'Multi B');
+    const entryC = makeEntry(db, league.id, solo.id, 'Solo');
+    awardPoints(db, entryA.id, 1, { exact: 10, total: 10 });
+    awardPoints(db, entryB.id, 1, { outcome: 2, total: 2 });
+    awardPoints(db, entryC.id, 1, { scorer: 8, total: 8 });
+
+    // Two entries of one user are fully independent rows (totals, labels, ranks).
+    const rows = getLeaderboard(db, league.id);
+    expect(rows.map((r) => [r.rank, r.entryId, r.userId, r.label, r.total])).toEqual([
+      [1, entryA.id, multi.id, 'Multi A', 10],
+      [2, entryC.id, solo.id, 'Solo', 8],
+      [3, entryB.id, multi.id, 'Multi B', 2],
+    ]);
+
+    // The prize pool is driven by ENTRIES (3), not members (2).
+    expect(entryCountOf(db, league.id)).toBe(3);
+    const pool = prizePool(
+      { buyInCents: 2000, payoutSplit: '[60,30,10]' },
+      entryCountOf(db, league.id),
+    );
+    expect(pool.totalCents).toBe(6000);
+    expect(pool.payouts.map((p) => p.amountCents)).toEqual([3600, 1800, 600]);
+  });
+
   it('leaderboard ranks are deterministic and unique', () => {
     const db = freshDb();
     const { league, entries } = standingsFixture(db, 4, 1);
@@ -286,7 +337,7 @@ describe('leaderboard service', () => {
 });
 
 describe('today board', () => {
-  it('shows all matches of the earliest matchday with an unfinished match', () => {
+  it('shows all matches of the earliest matchday with an unfinished match', async () => {
     const db = freshDb();
     const admin = makeUser(db);
     const league = makeLeague(db, admin.id);
@@ -302,10 +353,39 @@ describe('today board', () => {
     makeMatch(db, 3, { matchday: '2026-06-12', kickoffUtc: '2026-06-12T16:00:00Z' });
     makeMatch(db, 4, { matchday: '2026-06-13', kickoffUtc: '2026-06-13T16:00:00Z' });
 
-    const board = getTodayBoard(db, league.id, entry.id);
-    expect(board.matchday).toBe('2026-06-12');
-    // Ordered by kickoff within the matchday.
-    expect(board.matches.map((m) => m.match.id)).toEqual([3, 2]);
+    await withFakeNow('2026-06-10T12:00:00Z', () => {
+      const board = getTodayBoard(db, league.id, entry.id);
+      expect(board.matchday).toBe('2026-06-12');
+      // Ordered by kickoff within the matchday.
+      expect(board.matches.map((m) => m.match.id)).toEqual([3, 2]);
+    });
+  });
+
+  it('advances past a fully kicked-off matchday awaiting results, carrying in-progress matches', async () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    const league = makeLeague(db, admin.id);
+    const entry = makeEntry(db, league.id, makeUser(db).id);
+    // m1 kicked off hours ago, result not yet entered (admin asleep);
+    // m2 is tomorrow's match — its pick form must already be reachable.
+    makeMatch(db, 1, { matchday: '2026-06-11', kickoffUtc: '2026-06-11T16:00:00Z' });
+    makeMatch(db, 2, { matchday: '2026-06-12', kickoffUtc: '2026-06-12T16:00:00Z' });
+    db.insert(schema.boosters)
+      .values({ entryId: entry.id, matchday: '2026-06-11', matchId: 1, createdAt: 1, updatedAt: 1 })
+      .run();
+
+    await withFakeNow('2026-06-11T23:00:00Z', () => {
+      const board = getTodayBoard(db, league.id, entry.id);
+      // Next matchday with an unkicked-off match — never pinned to yesterday.
+      expect(board.matchday).toBe('2026-06-12');
+      // In-progress m1 (kicked off, unfinished) is carried over, kickoff order.
+      expect(board.matches.map((m) => m.match.id)).toEqual([1, 2]);
+      expect(board.matches[0].locked).toBe(true);
+      expect(board.matches[1].locked).toBe(false);
+      // Booster flags resolve per matchday, even across the carryover.
+      expect(board.matches[0].booster).toBe(true);
+      expect(board.matches[1].booster).toBe(false);
+    });
   });
 
   it('joins my pick, booster state, and lock state per match', async () => {

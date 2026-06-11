@@ -139,7 +139,8 @@ prizePool(league, entryCount): { totalCents, payouts: { place, percent, amountCe
 ### picks.ts
 ```ts
 upsertPick(db, userId, { entryId, matchId, predHome, predAway, predScorer, predFirstTeam })
-  // throws 403 if entry not owned by user; 409 'locked' if clock.now() >= kickoffUtc;
+  // throws 403 if entry not owned by user; 409 'locked' if clock.now() >= kickoffUtc
+  // OR match.status === 'finished' (a result may be entered ahead of kickoff);
   // 0<=scores<=20; if predHome===0&&predAway===0 coerce predScorer=null, predFirstTeam='none'
 getEntryPicks(db, entryId): Pick[]
 getMatchPicksPublic(db, leagueId, matchId): { entryId, label, pick }[]
@@ -158,9 +159,14 @@ getBooster(db, entryId, matchday): Booster | null
 ### results.ts
 ```ts
 enterResult(db, adminUserId, { matchId, homeScore, awayScore, firstScorer, firstScoringTeam })
-  // adminUserId must be admin of >=1 league (global results, one deployment per friend group);
+  // adminUserId must be an admin of the PRIMARY league (lowest league id — the
+  // seeded one). League creation is open to everyone, so 'admin of any league'
+  // must never grant global results authority.
   // sets status='finished'; editable (re-enter overwrites); then recomputeMatch(db, matchId)
-setMatchTeams(db, adminUserId, { matchId, homeTeamId, awayTeamId })  // knockout slots
+clearResult(db, adminUserId, matchId)  // undo a mistaken result: status back to
+  // 'scheduled', score fields nulled, recomputeMatch deletes the match's points
+setMatchTeams(db, adminUserId, { matchId, homeTeamId, awayTeamId })  // knockout slots;
+  // clears underdogTeamId when it matches neither new team; recomputeMatch if finished
 setUnderdog(db, adminUserId, { matchId, underdogTeamId | null })     // → recomputeMatch if finished
 recomputeMatch(db, matchId)   // for every league: rules; for every entry pick: scorePick with
   // boosted = (booster of that entry for match.matchday)?.matchId === matchId; upsert matchPoints
@@ -208,10 +214,15 @@ GET  /api/leagues/[slug]/today?entryId=    → today board
 POST /api/picks                            upsertPick body
 POST /api/boosters                         setBooster body
 GET  /api/leagues/[slug]/history?entryId=  → finished matches + picks + points
-POST /api/results          (league admin)  enterResult body
-POST /api/matches/teams    (league admin)  setMatchTeams body
-POST /api/matches/underdog (league admin)  setUnderdog body
+POST /api/results          (primary-league admin)  enterResult body
+POST /api/results/clear    (primary-league admin)  { matchId }
+POST /api/matches/teams    (primary-league admin)  setMatchTeams body
+POST /api/matches/underdog (primary-league admin)  setUnderdog body
 ```
+
+Rate limits (in-memory, `src/lib/rate-limit.ts`): login 10/(ip,username)/15min,
+register 20/ip/hour, join-by-password 10/(ip,league)/15min → 429.
+Passwords: minimum 8 characters at register (zod schema + createUser).
 
 Session: `@/lib/session` exports `createSessionCookie(user)`, `getSessionUser(db)` (reads
 cookie via next/headers, returns user row or null), `requireUser(db)` (throws 401).

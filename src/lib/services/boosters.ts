@@ -74,52 +74,56 @@ export async function setBooster(
   const finishedMatchIds = new Set<number>();
   if (changed && match.status === 'finished') finishedMatchIds.add(match.id);
 
-  const ts = nowMs();
-  let row: Booster;
-  if (existing) {
-    if (existing.matchId !== input.matchId) {
-      const previous = db
-        .select()
-        .from(schema.matches)
-        .where(eq(schema.matches.id, existing.matchId))
-        .get();
-      if (previous && hasKickedOff(previous.kickoffUtc)) {
-        throw new AppError('Booster already locked for this matchday', 409);
-      }
-      if (previous?.status === 'finished') finishedMatchIds.add(previous.id);
+  if (existing && existing.matchId !== input.matchId) {
+    const previous = db
+      .select()
+      .from(schema.matches)
+      .where(eq(schema.matches.id, existing.matchId))
+      .get();
+    if (previous && hasKickedOff(previous.kickoffUtc)) {
+      throw new AppError('Booster already locked for this matchday', 409);
     }
-    row = db
-      .update(schema.boosters)
-      .set({ matchId: input.matchId, updatedAt: ts }) // createdAt preserved
-      .where(eq(schema.boosters.id, existing.id))
-      .returning()
-      .get();
-  } else {
-    row = db
-      .insert(schema.boosters)
-      .values({
-        entryId: input.entryId,
-        matchday: input.matchday,
-        matchId: input.matchId,
-        createdAt: ts,
-        updatedAt: ts,
-      })
-      .returning()
-      .get();
+    if (previous?.status === 'finished') finishedMatchIds.add(previous.id);
   }
 
   // Per CONTRACTS.md: if either the old or new match is already finished
   // (admin can enter results ahead of kickoff), points must not go stale.
   // results.ts owns recomputation; imported lazily because it statically
   // depends on this module (boosted-match lookup) — avoids an import cycle.
-  if (finishedMatchIds.size > 0) {
-    const results = await import('./results');
-    for (const id of finishedMatchIds) {
-      await results.recomputeMatch(db, id);
-    }
-  }
+  // Resolved BEFORE the transaction: better-sqlite3 transactions are sync.
+  const recomputeMatch =
+    finishedMatchIds.size > 0 ? (await import('./results')).recomputeMatch : null;
 
-  return row;
+  // Booster write + recompute commit together: if the recompute throws, the
+  // booster move rolls back too, so a retry never skips the recompute via the
+  // `changed` short-circuit. Statements via `db` inside the callback run on
+  // the same better-sqlite3 connection, i.e. inside this transaction.
+  const ts = nowMs();
+  return db.transaction(() => {
+    const row = existing
+      ? db
+          .update(schema.boosters)
+          .set({ matchId: input.matchId, updatedAt: ts }) // createdAt preserved
+          .where(eq(schema.boosters.id, existing.id))
+          .returning()
+          .get()
+      : db
+          .insert(schema.boosters)
+          .values({
+            entryId: input.entryId,
+            matchday: input.matchday,
+            matchId: input.matchId,
+            createdAt: ts,
+            updatedAt: ts,
+          })
+          .returning()
+          .get();
+
+    if (recomputeMatch) {
+      for (const id of finishedMatchIds) recomputeMatch(db, id);
+    }
+    return row;
+  });
 }
 
 /** The entry's booster for a matchday, or null when none is set. */

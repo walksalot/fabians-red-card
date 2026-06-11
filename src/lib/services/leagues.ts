@@ -42,6 +42,7 @@ export interface LeagueSettingsPatch {
 
 const USERNAME_RE = /^[a-z0-9_-]{3,30}$/;
 const BCRYPT_ROUNDS = 10;
+const MIN_PASSWORD_LENGTH = 8;
 const SCORING_KEYS = ['exact', 'outcome', 'scorer', 'firstTeam', 'underdog'] as const;
 const STAGES: readonly Stage[] = ['group', 'r32', 'r16', 'qf', 'sf', 'third', 'final'];
 
@@ -59,7 +60,12 @@ export async function createUser(
   }
   const displayName = input.displayName.trim();
   if (!displayName) throw new AppError('display name is required', 400);
-  if (!input.password) throw new AppError('password is required', 400);
+  if (!input.password || input.password.length < MIN_PASSWORD_LENGTH) {
+    throw new AppError(
+      `password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+      400,
+    );
+  }
 
   const existing = db
     .select({ id: schema.users.id })
@@ -394,22 +400,31 @@ export async function updateLeagueSettings(
     updates.roundMultipliers = JSON.stringify(canonical);
   }
 
-  const updated =
-    Object.keys(updates).length > 0
-      ? db
-          .update(schema.leagues)
-          .set(updates)
-          .where(eq(schema.leagues.id, leagueId))
-          .returning()
-          .get()
-      : league;
+  // Lazy import avoids a hard module-load dependency cycle with the results
+  // service. Resolved BEFORE the transaction (sync better-sqlite3 callback).
+  const recomputeLeague = scoringChanged
+    ? (await import('@/lib/services/results')).recomputeLeague
+    : null;
 
-  if (scoringChanged) {
-    // Lazy import avoids a hard module-load dependency cycle with the results service.
-    const { recomputeLeague } = await import('@/lib/services/results');
-    await recomputeLeague(db, leagueId);
-  }
-  return updated;
+  // Settings write + recompute commit together: if the recompute throws, the
+  // settings write rolls back, so re-saving still detects the change instead
+  // of short-circuiting on `scoringChanged === false` with stale points.
+  // Statements via `db` inside the callback run on the same better-sqlite3
+  // connection, i.e. inside this transaction.
+  return db.transaction(() => {
+    const updated =
+      Object.keys(updates).length > 0
+        ? db
+            .update(schema.leagues)
+            .set(updates)
+            .where(eq(schema.leagues.id, leagueId))
+            .returning()
+            .get()
+        : league;
+
+    if (recomputeLeague) recomputeLeague(db, leagueId);
+    return updated;
+  });
 }
 
 // ---------------------------------------------------------------------------

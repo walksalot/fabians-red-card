@@ -95,7 +95,10 @@ export async function upsertPick(
 
   requireOwnedEntry(db, userId, input.entryId);
   const match = getMatchOr404(db, input.matchId);
-  if (hasKickedOff(match.kickoffUtc)) {
+  // Locked at kickoff — and also once a result exists. The admin may enter a
+  // result ahead of kickoff; from that moment the result is public, so an
+  // unkicked-but-finished match must never accept a "prediction".
+  if (match.status === 'finished' || hasKickedOff(match.kickoffUtc)) {
     throw new AppError('Picks are locked for this match', 409);
   }
 

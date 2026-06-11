@@ -1,10 +1,12 @@
 /**
  * Results service: admin result entry, knockout team assignment, underdog flags,
  * and the recompute pipeline that keeps matchPoints in sync with every league's
- * scoring settings. Results are global (one deployment per friend group), so any
- * user who is admin of at least one league may enter them.
+ * scoring settings. Results are global (one deployment per friend group), so they
+ * may only be written by admins of the PRIMARY league (the seeded/first-created
+ * one) — league creation is open to every user, so "admin of any league" would
+ * let any player mint a throwaway league and rewrite the whole tournament.
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
 import { AppError } from '@/lib/errors';
 import {
@@ -39,15 +41,32 @@ export interface SetUnderdogInput {
 
 const MAX_SCORE = 30;
 
-/** Throws 403 unless userId holds the admin role in at least one league. */
-export function requireLeagueAdmin(db: Db, userId: number): void {
-  const row = db
-    .select({ id: schema.memberships.id })
-    .from(schema.memberships)
-    .where(
-      and(eq(schema.memberships.userId, userId), eq(schema.memberships.role, 'admin')),
-    )
+/**
+ * Throws 403 unless userId holds the admin role in the PRIMARY league (lowest
+ * league id — the seeded/bootstrap league). Self-created leagues grant their
+ * creator an admin membership, so deriving global results authority from
+ * "admin of any league" would let every player corrupt the tournament data.
+ */
+export function requireResultsAdmin(db: Db, userId: number): void {
+  const primary = db
+    .select({ id: schema.leagues.id })
+    .from(schema.leagues)
+    .orderBy(asc(schema.leagues.id))
+    .limit(1)
     .get();
+  const row = primary
+    ? db
+        .select({ id: schema.memberships.id })
+        .from(schema.memberships)
+        .where(
+          and(
+            eq(schema.memberships.leagueId, primary.id),
+            eq(schema.memberships.userId, userId),
+            eq(schema.memberships.role, 'admin'),
+          ),
+        )
+        .get()
+    : undefined;
   if (!row) throw new AppError('admin access required', 403);
 }
 
@@ -69,7 +88,7 @@ function validateScore(label: string, value: number): void {
 
 /** Enter (or re-enter — results are editable) a final result, then recompute points. */
 export function enterResult(db: Db, adminUserId: number, input: EnterResultInput): MatchRow {
-  requireLeagueAdmin(db, adminUserId);
+  requireResultsAdmin(db, adminUserId);
   getMatchOrThrow(db, input.matchId);
   validateScore('homeScore', input.homeScore);
   validateScore('awayScore', input.awayScore);
@@ -86,21 +105,58 @@ export function enterResult(db: Db, adminUserId: number, input: EnterResultInput
     );
   }
 
-  const updated = db
-    .update(schema.matches)
-    .set({
-      status: 'finished',
-      homeScore: input.homeScore,
-      awayScore: input.awayScore,
-      firstScorer,
-      firstScoringTeam,
-    })
-    .where(eq(schema.matches.id, input.matchId))
-    .returning()
-    .get();
+  // Result write + recompute commit together: a recompute failure must never
+  // leave a stored result with some leagues' points recomputed and others
+  // stale. better-sqlite3 runs on a single connection, so statements issued
+  // via `db` inside the callback participate in this transaction.
+  return db.transaction(() => {
+    const updated = db
+      .update(schema.matches)
+      .set({
+        status: 'finished',
+        homeScore: input.homeScore,
+        awayScore: input.awayScore,
+        firstScorer,
+        firstScoringTeam,
+      })
+      .where(eq(schema.matches.id, input.matchId))
+      .returning()
+      .get();
 
-  recomputeMatch(db, input.matchId);
-  return updated;
+    recomputeMatch(db, input.matchId);
+    return updated;
+  });
+}
+
+/**
+ * Revert a (possibly mistaken) result: back to 'scheduled', score fields
+ * cleared, and every league's points for the match deleted via recomputeMatch.
+ * Without this, one wrong save against the 104-row admin form would mark an
+ * unplayed match finished forever and award phantom points.
+ */
+export function clearResult(db: Db, adminUserId: number, matchId: number): MatchRow {
+  requireResultsAdmin(db, adminUserId);
+  const match = getMatchOrThrow(db, matchId);
+  if (match.status !== 'finished') {
+    throw new AppError('match has no result to clear', 409);
+  }
+  return db.transaction(() => {
+    const updated = db
+      .update(schema.matches)
+      .set({
+        status: 'scheduled',
+        homeScore: null,
+        awayScore: null,
+        firstScorer: null,
+        firstScoringTeam: null,
+      })
+      .where(eq(schema.matches.id, matchId))
+      .returning()
+      .get();
+
+    recomputeMatch(db, matchId); // not finished → deletes the matchPoints rows
+    return updated;
+  });
 }
 
 /** Assign real teams to a knockout slot once the bracket resolves; clears placeholders. */
@@ -109,7 +165,7 @@ export function setMatchTeams(
   adminUserId: number,
   input: SetMatchTeamsInput,
 ): MatchRow {
-  requireLeagueAdmin(db, adminUserId);
+  requireResultsAdmin(db, adminUserId);
   const match = getMatchOrThrow(db, input.matchId);
   if (match.stage === 'group') {
     throw new AppError('teams can only be assigned on knockout matches', 400);
@@ -129,17 +185,33 @@ export function setMatchTeams(
     throw new AppError('home and away teams must differ', 400);
   }
 
-  return db
-    .update(schema.matches)
-    .set({
-      homeTeamId: input.homeTeamId,
-      awayTeamId: input.awayTeamId,
-      homePlaceholder: null,
-      awayPlaceholder: null,
-    })
-    .where(eq(schema.matches.id, input.matchId))
-    .returning()
-    .get();
+  // An underdog flag pointing at a team no longer in the match must not
+  // linger: on the next recompute a stale id can silently drop the bonus or
+  // flip it onto the wrong side.
+  const keepUnderdog =
+    match.underdogTeamId !== null &&
+    (match.underdogTeamId === input.homeTeamId ||
+      match.underdogTeamId === input.awayTeamId);
+
+  return db.transaction(() => {
+    const updated = db
+      .update(schema.matches)
+      .set({
+        homeTeamId: input.homeTeamId,
+        awayTeamId: input.awayTeamId,
+        homePlaceholder: null,
+        awayPlaceholder: null,
+        underdogTeamId: keepUnderdog ? match.underdogTeamId : null,
+      })
+      .where(eq(schema.matches.id, input.matchId))
+      .returning()
+      .get();
+
+    // Mirrors setUnderdog: a team correction on an already-finished match
+    // changes underdog sides, so the stored points must follow immediately.
+    if (match.status === 'finished') recomputeMatch(db, input.matchId);
+    return updated;
+  });
 }
 
 /** Flag (or clear) the underdog of a match; recomputes points if already finished. */
@@ -148,7 +220,7 @@ export function setUnderdog(
   adminUserId: number,
   input: SetUnderdogInput,
 ): MatchRow {
-  requireLeagueAdmin(db, adminUserId);
+  requireResultsAdmin(db, adminUserId);
   const match = getMatchOrThrow(db, input.matchId);
   if (
     input.underdogTeamId !== null &&
@@ -158,15 +230,17 @@ export function setUnderdog(
     throw new AppError("underdog must be one of the match's teams", 400);
   }
 
-  const updated = db
-    .update(schema.matches)
-    .set({ underdogTeamId: input.underdogTeamId })
-    .where(eq(schema.matches.id, input.matchId))
-    .returning()
-    .get();
+  return db.transaction(() => {
+    const updated = db
+      .update(schema.matches)
+      .set({ underdogTeamId: input.underdogTeamId })
+      .where(eq(schema.matches.id, input.matchId))
+      .returning()
+      .get();
 
-  if (match.status === 'finished') recomputeMatch(db, input.matchId);
-  return updated;
+    if (match.status === 'finished') recomputeMatch(db, input.matchId);
+    return updated;
+  });
 }
 
 function underdogSideOf(match: MatchRow): 'home' | 'away' | null {

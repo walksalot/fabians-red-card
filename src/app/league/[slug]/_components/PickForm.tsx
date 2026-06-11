@@ -30,6 +30,12 @@ export default function PickForm({
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
 
+  // Editing any field after a save invalidates the badge: 'Saved ✓' must only
+  // ever describe the values currently in the form (MatchCard's touch pattern).
+  function touch() {
+    if (status === 'saved') setStatus('idle');
+  }
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const predHome = Number(home);
@@ -95,7 +101,10 @@ export default function PickForm({
           max={20}
           required
           value={home}
-          onChange={(e) => setHome(e.target.value)}
+          onChange={(e) => {
+            setHome(e.target.value);
+            touch();
+          }}
           className={scoreInputClass}
         />
         <span className="text-zinc-500">–</span>
@@ -108,7 +117,10 @@ export default function PickForm({
           max={20}
           required
           value={away}
-          onChange={(e) => setAway(e.target.value)}
+          onChange={(e) => {
+            setAway(e.target.value);
+            touch();
+          }}
           className={scoreInputClass}
         />
       </div>
@@ -118,14 +130,20 @@ export default function PickForm({
         type="text"
         placeholder="First goalscorer (optional)"
         value={scorer}
-        onChange={(e) => setScorer(e.target.value)}
+        onChange={(e) => {
+          setScorer(e.target.value);
+          touch();
+        }}
         className={wideInputClass}
       />
       <select
         data-testid="pick-first-team"
         aria-label="First team to score"
         value={firstTeam}
-        onChange={(e) => setFirstTeam(e.target.value as '' | FirstTeam)}
+        onChange={(e) => {
+          setFirstTeam(e.target.value as '' | FirstTeam);
+          touch();
+        }}
         className={wideInputClass}
       >
         <option value="">First team to score (optional)</option>

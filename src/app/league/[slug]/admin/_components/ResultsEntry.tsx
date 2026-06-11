@@ -113,6 +113,25 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
     }
   }
 
+  // Undo path for a fat-fingered save on the wrong row: clears the result,
+  // reverts the match to 'scheduled' and removes its points everywhere.
+  async function onClear() {
+    if (!window.confirm('Clear this result? Points for this match will be removed.')) {
+      return;
+    }
+    setSaving(true);
+    setMsg(null);
+    const res = await apiSend('/api/results/clear', 'POST', { matchId: match.id });
+    setSaving(false);
+    if (res.ok) {
+      setFinished(false);
+      setMsg({ kind: 'ok', text: 'Result cleared' });
+      window.setTimeout(() => setMsg(null), 2500);
+    } else {
+      setMsg({ kind: 'err', text: res.error });
+    }
+  }
+
   const kickedOff = Date.parse(match.kickoffUtc) <= nowMs;
   const chip = finished
     ? { text: 'FT', cls: 'bg-emerald-500/15 text-emerald-400' }
@@ -198,6 +217,17 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
         >
           {saving ? 'Saving…' : finished ? 'Edit result' : 'Save result'}
         </button>
+        {finished && (
+          <button
+            type="button"
+            data-testid={`result-clear-${match.id}`}
+            onClick={onClear}
+            disabled={saving}
+            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 active:scale-95 disabled:opacity-60"
+          >
+            Clear
+          </button>
+        )}
         {msg && (
           <span
             className={`text-xs ${msg.kind === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}

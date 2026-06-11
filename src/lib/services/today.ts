@@ -1,8 +1,10 @@
 /**
- * Today service: the "current matchday" board (canonical: the earliest matchday
- * that still has any unfinished match) and the full schedule for History/admin.
+ * Today service: the "current matchday" board (canonical per CONTRACTS.md: the
+ * next matchday with any unkicked-off match, plus any in-progress — kicked off
+ * but unfinished — matches carried over from earlier matchdays) and the full
+ * schedule for History/admin.
  */
-import { and, asc, desc, eq, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
 import { nowMs } from '@/lib/clock';
 import { AppError } from '@/lib/errors';
@@ -45,9 +47,13 @@ function teamsOf(match: MatchRow, teamMap: Map<number, TeamRow>) {
 }
 
 /**
- * Board for the current matchday: the earliest matchday containing any unfinished
- * match (falls back to the last matchday once the tournament is fully finished).
- * Returns ALL matches of that matchday with the entry's picks/booster/lock state.
+ * Board for the current matchday: the earliest matchday that still has a match
+ * you could act on (unkicked-off AND unfinished), plus any in-progress matches
+ * (kicked off, unfinished) carried over from earlier matchdays. Pinning the
+ * board to a fully-kicked-off day awaiting results would hide the next day's
+ * pick forms until those picks were irreversibly locked.
+ * Falls back to the earliest matchday awaiting results, then the last matchday
+ * once the tournament is fully finished.
  */
 export function getTodayBoard(db: Db, leagueId: number, entryId: number): TodayBoard {
   const entry = db
@@ -60,31 +66,47 @@ export function getTodayBoard(db: Db, leagueId: number, entryId: number): TodayB
     throw new AppError('entry does not belong to this league', 403);
   }
 
-  const firstUnfinished = db
-    .select({ matchday: schema.matches.matchday })
-    .from(schema.matches)
-    .where(ne(schema.matches.status, 'finished'))
-    .orderBy(asc(schema.matches.matchday))
-    .limit(1)
-    .get();
-  let matchday = firstUnfinished?.matchday ?? null;
-  if (matchday === null) {
-    const lastDay = db
-      .select({ matchday: schema.matches.matchday })
-      .from(schema.matches)
-      .orderBy(desc(schema.matches.matchday))
-      .limit(1)
-      .get();
-    matchday = lastDay?.matchday ?? null;
-  }
-  if (matchday === null) return { matchday: null, matches: [] };
-
-  const dayMatches = db
+  const allMatches = db
     .select()
     .from(schema.matches)
-    .where(eq(schema.matches.matchday, matchday))
     .orderBy(asc(schema.matches.kickoffUtc), asc(schema.matches.id))
     .all();
+  if (allMatches.length === 0) return { matchday: null, matches: [] };
+
+  const nowEpochMs = nowMs();
+  const kickedOff = (m: MatchRow) => nowEpochMs >= Date.parse(m.kickoffUtc);
+
+  // Earliest matchday with an actionable (unkicked, unfinished) match …
+  let matchday: string | null = null;
+  for (const m of allMatches) {
+    if (m.status !== 'finished' && !kickedOff(m)) {
+      if (matchday === null || m.matchday < matchday) matchday = m.matchday;
+    }
+  }
+  // … else the earliest matchday still awaiting results …
+  if (matchday === null) {
+    for (const m of allMatches) {
+      if (m.status !== 'finished' && (matchday === null || m.matchday < matchday)) {
+        matchday = m.matchday;
+      }
+    }
+  }
+  // … else (everything finished) the final matchday.
+  if (matchday === null) {
+    matchday = allMatches.reduce(
+      (max, m) => (m.matchday > max ? m.matchday : max),
+      allMatches[0]!.matchday,
+    );
+  }
+
+  const selected = matchday;
+  // The whole selected day, plus in-progress carryover from earlier days
+  // (already in kickoff order thanks to the ordered scan).
+  const boardMatches = allMatches.filter(
+    (m) =>
+      m.matchday === selected ||
+      (m.matchday < selected && m.status !== 'finished' && kickedOff(m)),
+  );
 
   const teamMap = teamMapOf(db);
   const myPicks = new Map(
@@ -95,24 +117,29 @@ export function getTodayBoard(db: Db, leagueId: number, entryId: number): TodayB
       .all()
       .map((p) => [p.matchId, p]),
   );
-  const boosterRow = db
+  // The board can span more than one matchday — boosters are per matchday.
+  const boardDays = [...new Set(boardMatches.map((m) => m.matchday))];
+  const boosterRows = db
     .select()
     .from(schema.boosters)
     .where(
-      and(eq(schema.boosters.entryId, entryId), eq(schema.boosters.matchday, matchday)),
+      and(
+        eq(schema.boosters.entryId, entryId),
+        inArray(schema.boosters.matchday, boardDays),
+      ),
     )
-    .get();
-  const nowEpochMs = nowMs();
+    .all();
+  const boosterByDay = new Map(boosterRows.map((b) => [b.matchday, b]));
 
-  const items: TodayBoardItem[] = dayMatches.map((match) => ({
+  const items: TodayBoardItem[] = boardMatches.map((match) => ({
     match,
     teams: teamsOf(match, teamMap),
     myPick: myPicks.get(match.id) ?? null,
-    booster: boosterRow?.matchId === match.id,
+    booster: boosterByDay.get(match.matchday)?.matchId === match.id,
     locked: nowEpochMs >= Date.parse(match.kickoffUtc),
   }));
 
-  return { matchday, matches: items };
+  return { matchday: selected, matches: items };
 }
 
 /** Every match with team rows joined, ordered by official match number. */
