@@ -96,7 +96,8 @@ export default async function RulesPage({
           <strong>Picks lock at kickoff.</strong> You can change a pick as
           often as you like before the match starts, but the moment it kicks
           off the pick is frozen. No pick on a match means zero points for that
-          match — no exceptions, no late entries, no "my wifi died".
+          match — no exceptions, no late entries, no &ldquo;my wifi
+          died&rdquo;.
         </p>
       </Section>
 

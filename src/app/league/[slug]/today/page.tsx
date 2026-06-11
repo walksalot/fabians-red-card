@@ -8,19 +8,12 @@ import { formatMatchday } from '../_components/format';
 import {
   loadLeagueContext,
   pickSelectedEntry,
-  type MatchRow,
-  type PickRow,
 } from '../_components/league-data';
 import type {
   BreakdownView,
   FirstTeam,
   TodayMatchView,
 } from '../_components/types';
-
-interface BoardShape {
-  matchday: string;
-  matches: Array<{ match: MatchRow; myPick: PickRow | null; locked: boolean }>;
-}
 
 export default async function TodayPage({
   params,
@@ -42,10 +35,8 @@ export default async function TodayPage({
     );
   }
 
-  const board = (await getTodayBoard(db, league.id, entry.id)) as
-    | BoardShape
-    | null
-    | undefined;
+  const board = await getTodayBoard(db, league.id, entry.id);
+  const boardMatchday = board?.matchday ?? null;
   const rawItems = board?.matches ?? [];
 
   const teamRows = db.select().from(schema.teams).all();
@@ -147,7 +138,8 @@ export default async function TodayPage({
     };
   });
 
-  const headerBooster = board ? boosterByDay.get(board.matchday) : undefined;
+  const headerBooster =
+    boardMatchday !== null ? boosterByDay.get(boardMatchday) : undefined;
   const headerHolder = headerBooster
     ? items.find((i) => i.matchId === headerBooster.matchId)
     : undefined;
@@ -167,11 +159,11 @@ export default async function TodayPage({
           currentId={entry.id}
         />
       )}
-      {board && items.length > 0 ? (
+      {boardMatchday !== null && items.length > 0 ? (
         <>
           <div>
             <h2 className="text-base font-semibold">
-              {formatMatchday(board.matchday)}
+              {formatMatchday(boardMatchday)}
             </h2>
             <p className="text-sm text-zinc-400">Booster: {boosterLabel}</p>
           </div>

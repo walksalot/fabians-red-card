@@ -11,7 +11,7 @@ interface Props {
   initial: PickView | null;
 }
 
-type Status = 'idle' | 'saved' | 'error';
+type Status = 'idle' | 'saving' | 'saved' | 'error';
 
 /** Score + first goalscorer + first team to score inputs for one unlocked match. */
 export default function PickForm({
@@ -47,7 +47,9 @@ export default function PickForm({
       return;
     }
     setError(null);
-    setStatus('saved'); // optimistic — reverted to an error below if the save fails
+    // Never claim "Saved" before the server confirms — a killed request must not
+    // look like a stored pick (phones lose connections; picks decide bragging rights).
+    setStatus('saving');
     try {
       const res = await fetch('/api/picks', {
         method: 'POST',
@@ -67,6 +69,8 @@ export default function PickForm({
       if (!json || !json.ok) {
         setStatus('error');
         setError(json?.error ?? 'Could not save your pick.');
+      } else {
+        setStatus('saved');
       }
     } catch {
       setStatus('error');
@@ -133,9 +137,10 @@ export default function PickForm({
         <button
           data-testid="pick-save"
           type="submit"
-          className="rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-semibold text-zinc-950 hover:bg-emerald-400"
+          disabled={status === 'saving'}
+          className="rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60"
         >
-          Save pick
+          {status === 'saving' ? 'Saving…' : 'Save pick'}
         </button>
         {status === 'saved' && (
           <span className="text-sm font-medium text-emerald-400">Saved ✓</span>

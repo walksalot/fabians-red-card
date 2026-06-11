@@ -31,7 +31,11 @@ const roundMultipliersSchema = z.object({
 
 const bodySchema = z.object({
   name: z.string().trim().min(1).max(60).optional(),
-  isPrivate: z.boolean().optional(),
+  // JSON boundary takes a boolean; the service (and integer schema column) want 0 | 1.
+  isPrivate: z
+    .boolean()
+    .transform((v): 0 | 1 => (v ? 1 : 0))
+    .optional(),
   // string sets the join password, explicit null clears it
   joinPassword: z.string().min(1).max(200).nullable().optional(),
   entriesPerUser: z.number().int().min(1).max(10).optional(),

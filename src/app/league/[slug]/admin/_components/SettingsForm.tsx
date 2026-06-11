@@ -243,7 +243,7 @@ export default function SettingsForm({
           {payout.map((p, i) => (
             <div key={i} className="flex items-center gap-1">
               <input
-                data-testid={i === 0 ? 'admin-payout' : `admin-payout-${i + 1}`}
+                data-testid="admin-payout"
                 aria-label={`Place ${i + 1} percent`}
                 type="number"
                 inputMode="numeric"
