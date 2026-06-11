@@ -95,9 +95,10 @@ if (userCount === 0) {
   sqlite
     .prepare('INSERT INTO memberships (league_id, user_id, role, created_at) VALUES (?, ?, ?, ?)')
     .run(leagueId, adminId, 'admin', nowMs);
-  sqlite
-    .prepare('INSERT INTO entries (league_id, user_id, label, created_at) VALUES (?, ?, ?, ?)')
-    .run(leagueId, adminId, 'Pool Admin', nowMs);
+  // No player ENTRY for the admin account: it runs the league, it doesn't
+  // compete. A zero-pick "Pool Admin" row would clutter the table and inflate
+  // the displayed pot (buy-in × entries). Whoever admins should also join as a
+  // normal player via the invite link to actually play.
 
   console.log('--- FIRST RUN: save these somewhere safe! ---');
   console.log(`League:          ${leagueName}`);
