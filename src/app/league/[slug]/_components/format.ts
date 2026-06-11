@@ -27,14 +27,23 @@ export function formatMatchday(matchday: string): string {
   });
 }
 
-/** Kickoff wall-clock time in tournament-local (Eastern) time. */
-export function formatKickoffEt(kickoffUtc: string): string {
-  const t = new Date(kickoffUtc).toLocaleTimeString('en-US', {
+/**
+ * Wall-clock time in tournament-local (Eastern) time, labelled "ET".
+ * Fixed locale + zone: SSR-safe, and every timestamp on a card reads in the
+ * same timezone as its kickoff label.
+ */
+export function formatTimeEt(at: string | number | Date): string {
+  const t = new Date(at).toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     timeZone: 'America/New_York',
   });
   return `${t} ET`;
+}
+
+/** Kickoff wall-clock time in tournament-local (Eastern) time. */
+export function formatKickoffEt(kickoffUtc: string): string {
+  return formatTimeEt(kickoffUtc);
 }
 
 export function ordinal(n: number): string {

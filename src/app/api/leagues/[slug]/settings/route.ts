@@ -55,6 +55,11 @@ const bodySchema = z.object({
     .boolean()
     .transform((v): 0 | 1 => (v ? 1 : 0))
     .optional(),
+  // auto-flag clear underdogs (+5 bonus) from betting odds
+  autoUnderdogEnabled: z
+    .boolean()
+    .transform((v): 0 | 1 => (v ? 1 : 0))
+    .optional(),
 });
 
 type RouteCtx = { params: Promise<{ slug: string }> };

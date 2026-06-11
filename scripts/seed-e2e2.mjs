@@ -89,6 +89,24 @@ sqlite.prepare(`UPDATE matches SET live_home = 1, live_away = 0, live_status = '
   live_updated_at = ?, live_first_scorer = 'Raúl Jiménez', live_first_scoring_team = 'home'
   WHERE id = 1`).run(t('2026-06-11T23:59:00Z'));
 
+// Betting cheat sheet for the upcoming match 2 (KOR v CZE): odds snapshot
+// fresh relative to FAKE_NOW, plus first-goalscorer prices for the dropdown.
+const oddsSnapshot = {
+  provider: 'DraftKings',
+  homeML: '-140', drawML: '+260', awayML: '+400',
+  homeProb: 0.55, drawProb: 0.26, awayProb: 0.19,
+  overUnder: 2.5, overOdds: '+110', underOdds: '-130',
+  openHomeML: '-120', openDrawML: '+260', openAwayML: '+360',
+  updatedAtMs: t('2026-06-11T23:30:00Z'),
+};
+sqlite.prepare('UPDATE matches SET odds_json = ?, odds_updated_at = ? WHERE id = 2')
+  .run(JSON.stringify(oddsSnapshot), t('2026-06-11T23:30:00Z'));
+const insScorerOdds = sqlite.prepare(
+  'INSERT INTO scorer_odds (match_id, player_name, american, updated_at) VALUES (?, ?, ?, ?)');
+insScorerOdds.run(2, 'Son Heung-Min', '+450', t('2026-06-11T23:30:00Z'));
+insScorerOdds.run(2, 'Lee Kang-In', '+700', t('2026-06-11T23:30:00Z'));
+insScorerOdds.run(2, 'Adam Hlozek', '+550', t('2026-06-11T23:30:00Z'));
+
 const counts = sqlite
   .prepare(`SELECT (SELECT COUNT(*) FROM users) AS users, (SELECT COUNT(*) FROM picks) AS picks,
             (SELECT COUNT(*) FROM matches) AS matches`)

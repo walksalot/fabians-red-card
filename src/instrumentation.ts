@@ -17,10 +17,12 @@ export async function register() {
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
 
   const { getDb } = await import('@/db');
-  const { runSync } = await import('@/lib/sync/espn-sync');
+  const { runSync, autoSyncEnabled } = await import('@/lib/sync/espn-sync');
+  const { syncScorerOdds } = await import('@/lib/sync/espn-props');
   const { runBackupIfDue } = await import('@/lib/backup');
 
   const SYNC_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS ?? 60_000);
+  const PROPS_INTERVAL_MS = Number(process.env.PROPS_INTERVAL_MS ?? 600_000);
 
   const tick = async () => {
     try {
@@ -44,12 +46,33 @@ export async function register() {
     }
   };
 
+  // scorer-odds cheat sheet — heavyweight, so its own slow cadence; shares the
+  // master automation switch with the results sync
+  const propsTick = async () => {
+    try {
+      const db = getDb();
+      if (!autoSyncEnabled(db)) return;
+      const summary = await syncScorerOdds(db);
+      if (summary.matchesUpdated > 0) {
+        console.log(
+          `[scorer-odds] ${summary.pricesStored} prices across ${summary.matchesUpdated} match(es), ${summary.athletesResolved} new athletes`,
+        );
+      }
+    } catch (err) {
+      console.error('[scorer-odds] pass failed:', err);
+    }
+  };
+
   // a small delay so boot isn't blocked by a network call
   setTimeout(() => {
     void tick();
     void backupTick();
+    void propsTick();
   }, 5_000);
   setInterval(() => void tick(), SYNC_INTERVAL_MS);
+  setInterval(() => void propsTick(), PROPS_INTERVAL_MS);
   setInterval(() => void backupTick(), 3_600_000);
-  console.log(`[scheduler] started (sync every ${SYNC_INTERVAL_MS}ms, nightly backups on)`);
+  console.log(
+    `[scheduler] started (sync ${SYNC_INTERVAL_MS}ms, scorer-odds ${PROPS_INTERVAL_MS}ms, nightly backups on)`,
+  );
 }

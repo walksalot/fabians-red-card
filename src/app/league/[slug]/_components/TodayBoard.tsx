@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import BoosterButton from './BoosterButton';
 import HowItWorksSheet from './HowItWorksSheet';
+import OddsStrip from './OddsStrip';
 import PickForm from './PickForm';
 import { BreakdownChips, CHIP_TONES, NoPointsChip } from './breakdown-chips';
 import { codeToFlagEmoji, shortTeamName } from './flags';
@@ -665,7 +666,18 @@ export default function TodayBoard({
               </p>
             </div>
           ) : (
-            <PickForm
+            <>
+              {m.odds ? (
+                <OddsStrip
+                  matchId={m.matchId}
+                  odds={m.odds}
+                  homeCode={m.homeCode}
+                  awayCode={m.awayCode}
+                  homeName={m.homeName}
+                  awayName={m.awayName}
+                />
+              ) : null}
+              <PickForm
               entryId={entryId}
               matchId={m.matchId}
               homeName={m.homeName}
@@ -674,13 +686,15 @@ export default function TodayBoard({
               awayCode={m.awayCode}
               homeSquad={m.homeSquad}
               awaySquad={m.awaySquad}
+              scorerOdds={m.scorerOdds}
               initial={m.myPick}
               onSaved={() =>
                 setSavedClient((s) =>
                   s[m.matchId] ? s : { ...s, [m.matchId]: true },
                 )
               }
-            />
+              />
+            </>
           )}
         </div>
         );

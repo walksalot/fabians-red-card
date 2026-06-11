@@ -39,6 +39,7 @@ export interface LeagueSettingsPatch {
   boosterMultiplier?: number;
   roundMultipliers?: Record<Stage, number>;
   autoSyncEnabled?: 0 | 1;
+  autoUnderdogEnabled?: 0 | 1;
 }
 
 const USERNAME_RE = /^[a-z0-9_-]{3,30}$/;
@@ -405,6 +406,12 @@ export async function updateLeagueSettings(
       throw new AppError('autoSyncEnabled must be 0 or 1', 400);
     }
     updates.autoSyncEnabled = patch.autoSyncEnabled;
+  }
+  if (patch.autoUnderdogEnabled !== undefined) {
+    if (patch.autoUnderdogEnabled !== 0 && patch.autoUnderdogEnabled !== 1) {
+      throw new AppError('autoUnderdogEnabled must be 0 or 1', 400);
+    }
+    updates.autoUnderdogEnabled = patch.autoUnderdogEnabled;
   }
 
   // Lazy import avoids a hard module-load dependency cycle with the results

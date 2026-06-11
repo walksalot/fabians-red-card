@@ -23,6 +23,7 @@ export interface SyncSummary {
   results: number;
   liveUpdates: number;
   teamFills: number;
+  oddsUpdates: number;
   notes: string[];
   skipped?: string;
 }
@@ -132,7 +133,7 @@ export async function runSync(
   fetchScoreboard: ScoreboardFetcher = fetchScoreboardFromEspn,
 ): Promise<SyncSummary> {
   if (!autoSyncEnabled(db)) {
-    return { datesChecked: [], results: 0, liveUpdates: 0, teamFills: 0, notes: [], skipped: 'auto-sync disabled' };
+    return { datesChecked: [], results: 0, liveUpdates: 0, teamFills: 0, oddsUpdates: 0, notes: [], skipped: 'auto-sync disabled' };
   }
   const dates = datesNeedingSync(db);
   const events: EspnEvent[] = [];
@@ -145,12 +146,13 @@ export async function runSync(
     }
   }
 
-  const plan = planSync(events, snapshotMatches(db));
+  const plan = planSync(events, snapshotMatches(db), now().getTime());
   notes.push(...plan.notes);
   const nowMs = now().getTime();
   let results = 0;
   let liveUpdates = 0;
   let teamFills = 0;
+  let oddsUpdates = 0;
 
   const teamIdByCode = new Map(
     db.select({ id: schema.teams.id, code: schema.teams.code }).from(schema.teams).all().map((t) => [t.code, t.id]),
@@ -167,6 +169,9 @@ export async function runSync(
           firstScoringTeam: action.firstScoringTeam,
         });
         if (wrote) results++;
+      } else if (action.kind === 'odds') {
+        applyOdds(db, action.matchId, action.odds, nowMs);
+        oddsUpdates++;
       } else if (action.kind === 'live') {
         setLiveScore(db, {
           matchId: action.matchId,
@@ -202,9 +207,52 @@ export async function runSync(
   setAppState(
     db,
     'lastSyncSummary',
-    JSON.stringify({ datesChecked: dates, results, liveUpdates, teamFills, noteCount: notes.length }),
+    JSON.stringify({ datesChecked: dates, results, liveUpdates, teamFills, oddsUpdates, noteCount: notes.length }),
   );
-  return { datesChecked: dates, results, liveUpdates, teamFills, notes };
+  return { datesChecked: dates, results, liveUpdates, teamFills, oddsUpdates, notes };
+}
+
+/** Clear-underdog threshold: weaker side's de-vigged win prob at or below this. */
+const UNDERDOG_PROB_MAX = 0.25;
+
+/** True when the primary league wants underdogs auto-flagged from odds. */
+function autoUnderdogEnabled(db: Db): boolean {
+  const primary = db
+    .select({ enabled: schema.leagues.autoUnderdogEnabled })
+    .from(schema.leagues)
+    .orderBy(schema.leagues.id)
+    .limit(1)
+    .get();
+  return primary ? primary.enabled === 1 : false;
+}
+
+/**
+ * Store the odds snapshot; when auto-underdog is armed, (re)flag the match's
+ * underdog from de-vigged win probabilities — but never after kickoff: the
+ * flag freezes with the picks it applies to.
+ */
+function applyOdds(db: Db, matchId: number, odds: import('@/lib/odds').MatchOdds, nowMs: number): void {
+  const match = db.select().from(schema.matches).where(eq(schema.matches.id, matchId)).get();
+  if (!match || match.status === 'finished') return;
+
+  const updates: Partial<typeof schema.matches.$inferInsert> = {
+    oddsJson: JSON.stringify(odds),
+    oddsUpdatedAt: nowMs,
+  };
+
+  const beforeKickoff = nowMs < Date.parse(match.kickoffUtc);
+  if (autoUnderdogEnabled(db) && beforeKickoff && match.homeTeamId !== null && match.awayTeamId !== null) {
+    const weakerProb = Math.min(odds.homeProb, odds.awayProb);
+    const underdogTeamId =
+      weakerProb <= UNDERDOG_PROB_MAX
+        ? odds.homeProb < odds.awayProb
+          ? match.homeTeamId
+          : match.awayTeamId
+        : null;
+    if (underdogTeamId !== match.underdogTeamId) updates.underdogTeamId = underdogTeamId;
+  }
+
+  db.update(schema.matches).set(updates).where(eq(schema.matches.id, matchId)).run();
 }
 
 export function setAppState(db: Db, key: string, value: string): void {

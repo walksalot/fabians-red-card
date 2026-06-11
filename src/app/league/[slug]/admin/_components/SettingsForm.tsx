@@ -49,6 +49,7 @@ export default function SettingsForm({
     return split.map(String);
   });
   const [autoSync, setAutoSync] = useState(settings.autoSyncEnabled);
+  const [autoUnderdog, setAutoUnderdog] = useState(settings.autoUnderdogEnabled);
   const [booster, setBooster] = useState(String(settings.boosterMultiplier));
   const [rounds, setRounds] = useState<Record<StageKey, string>>(() => {
     const r = {} as Record<StageKey, string>;
@@ -123,6 +124,7 @@ export default function SettingsForm({
       roundMultipliers,
       scoringRules,
       autoSyncEnabled: autoSync,
+      autoUnderdogEnabled: autoUnderdog,
     };
     if (clearPassword) body.joinPassword = null;
     else if (joinPassword.trim() !== '') body.joinPassword = joinPassword;
@@ -302,6 +304,27 @@ export default function SettingsForm({
             <span className="mt-0.5 block text-xs font-normal text-zinc-500">
               Fill final scores &amp; first scorer from the live feed automatically.
               Anything you enter by hand always wins and is never overwritten.
+            </span>
+          </span>
+        </label>
+      </div>
+
+      {/* Auto-underdog */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+        <label className="flex items-start gap-3 text-sm text-zinc-200">
+          <input
+            data-testid="admin-autounderdog"
+            type="checkbox"
+            checked={autoUnderdog}
+            onChange={(e) => setAutoUnderdog(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-emerald-500"
+          />
+          <span>
+            Auto-flag underdogs from betting odds
+            <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+              Arms the +{settings.scoringRules.underdog} underdog bonus automatically
+              when the odds say one side is a clear underdog (win chance ≤ 25%).
+              Flags freeze at kickoff. Turn off to flag matches by hand below.
             </span>
           </span>
         </label>

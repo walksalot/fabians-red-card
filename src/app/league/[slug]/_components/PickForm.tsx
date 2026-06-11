@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent } from 'react';
 import { normalizeName } from '@/lib/scoring';
+import { americanToProb } from '@/lib/odds';
 import { codeToFlagEmoji } from './flags';
 import type { FirstTeam, PickView } from './types';
 
@@ -15,6 +16,8 @@ interface Props {
   /** Squad names for the scorer picker; empty arrays fall back to free text only. */
   homeSquad?: string[];
   awaySquad?: string[];
+  /** First-goalscorer odds by player name — sorts the picker by likelihood. */
+  scorerOdds?: Record<string, string>;
   initial: PickView | null;
   /** Notifies the board a pick now exists server-side (drives card status marks). */
   onSaved?: () => void;
@@ -132,6 +135,7 @@ export default function PickForm({
   awayName,
   homeSquad = [],
   awaySquad = [],
+  scorerOdds = {},
   homeCode,
   awayCode,
   initial,
@@ -389,9 +393,13 @@ export default function PickForm({
                   ] as const
                 ).map(([team, squad]) => {
                   const q = normalizeName(scorer);
-                  const options = squad.filter(
-                    (n) => q === '' || normalizeName(n).includes(q),
-                  );
+                  // Likelihood order when odds exist (shortest price first —
+                  // the question people Google answered in the list itself);
+                  // alphabetical tail for players without a posted price.
+                  const probOf = (n: string) => americanToProb(scorerOdds[n] ?? null) ?? -1;
+                  const options = squad
+                    .filter((n) => q === '' || normalizeName(n).includes(q))
+                    .sort((a, b) => probOf(b) - probOf(a) || a.localeCompare(b));
                   if (options.length === 0) return null;
                   return (
                     <div key={team}>
@@ -413,9 +421,14 @@ export default function PickForm({
                             setScorerOpen(false);
                             touch();
                           }}
-                          className="block w-full px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800 active:bg-zinc-800"
+                          className="flex w-full items-baseline justify-between gap-2 px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800 active:bg-zinc-800"
                         >
-                          {n}
+                          <span className="min-w-0 truncate">{n}</span>
+                          {scorerOdds[n] ? (
+                            <span className="shrink-0 text-[11px] font-semibold tabular-nums text-zinc-500">
+                              {scorerOdds[n]}
+                            </span>
+                          ) : null}
                         </button>
                       ))}
                     </div>

@@ -1,6 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { schema } from '@/db';
 import { nowMs } from '@/lib/clock';
+import { oddsForDisplay } from '@/lib/odds';
 import { getTodayBoard } from '@/lib/services/today';
 import { getLiveBoards } from '@/lib/services/live';
 import EmptyState from '@/components/EmptyState';
@@ -81,6 +82,32 @@ export default async function TodayPage({
   }
   const squadOf = (teamId: number | null) =>
     teamId !== null ? (squadByTeam.get(teamId) ?? []) : [];
+
+  // Betting cheat sheet: parsed odds (fresh within 6h) + first-goalscorer
+  // prices for the board's matches. Display-only; absent rows render nothing.
+  // Locked matches never render odds, so their lines are gated out here too —
+  // otherwise they'd ship unrendered inside the serialized RSC payload.
+  const ODDS_FRESH_MS = 6 * 3600_000;
+  const nowMsVal = nowMs();
+  const scorerOddsRows =
+    rawItems.length > 0
+      ? db
+          .select()
+          .from(schema.scorerOdds)
+          .where(inArray(schema.scorerOdds.matchId, rawItems.map((i) => i.match.id)))
+          .all()
+      : [];
+  const scorerOddsByMatch = new Map<number, Record<string, string>>();
+  for (const r of scorerOddsRows) {
+    const m = scorerOddsByMatch.get(r.matchId) ?? {};
+    m[r.playerName] = r.american;
+    scorerOddsByMatch.set(r.matchId, m);
+  }
+  const oddsOf = (
+    match: { oddsJson: string | null; oddsUpdatedAt: number | null },
+    locked: boolean,
+  ) =>
+    oddsForDisplay(match, { nowMs: nowMsVal, locked, freshMs: ODDS_FRESH_MS });
 
   // The booster row(s) for the matchday(s) on the board (board can span the
   // in-progress matchday plus the next one).
@@ -166,6 +193,8 @@ export default async function TodayPage({
       liveStatus: match.liveStatus,
       homeSquad: squadOf(match.homeTeamId),
       awaySquad: squadOf(match.awayTeamId),
+      odds: oddsOf(match, locked),
+      scorerOdds: locked ? {} : (scorerOddsByMatch.get(match.id) ?? {}),
       myPick: myPick
         ? {
             predHome: myPick.predHome,

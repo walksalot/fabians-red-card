@@ -57,12 +57,25 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     const open = page.getByTestId('pick-form-2');
     await open.getByTestId('pick-home').fill('1');
     await open.getByTestId('pick-away').fill('1');
-    // scorer dropdown: type a partial name, pick the roster entry from the list
+    // betting cheat sheet: probability bar visible, details expand with raw odds
+    const strip = open.getByTestId('odds-strip-2');
+    await expect(strip).toBeVisible();
+    await expect(strip).toContainText('KOR 55%');
+    await expect(strip).toContainText('DraftKings');
+    await strip.getByTestId('odds-expand').click();
+    await expect(open.getByTestId('odds-details')).toContainText('-140');
+    await expect(open.getByTestId('odds-details')).toContainText('over 2.5');
+
+    // scorer dropdown: odds-sorted (Son +450 leads) with prices shown
     await open.getByTestId('pick-scorer').click();
+    const firstOption = open.getByTestId('scorer-option').first();
+    await expect(firstOption).toContainText('Son Heung-Min');
+    await expect(firstOption).toContainText('+450');
     await open.getByTestId('pick-scorer').fill('son');
     const option = open.getByTestId('scorer-option').filter({ hasText: /son/i }).first();
     await expect(option).toBeVisible();
-    const optionName = (await option.textContent()) ?? '';
+    // first span = the player name; the second is the odds price tag
+    const optionName = (await option.locator('span').first().textContent()) ?? '';
     await option.click();
     await expect(open.getByTestId('pick-scorer')).toHaveValue(optionName);
     await open.getByTestId('pick-first-team').selectOption('away');

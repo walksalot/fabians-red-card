@@ -309,7 +309,9 @@ describe('planSync', () => {
       }),
     ];
     const plan = planSync(raw.events, matches);
-    expect(plan.actions).toEqual([]);
+    // pre-game events now legitimately yield odds snapshots — but never
+    // results, live scores, or team fills
+    expect(plan.actions.every((a) => a.kind === 'odds')).toBe(true);
     expect(plan.notes).toEqual([]);
   });
 });

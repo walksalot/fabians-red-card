@@ -270,6 +270,16 @@ export default async function RulesPage({
           </div>
           <div>
             <dt className="font-semibold text-zinc-100">
+              Who decides the underdog?
+            </dt>
+            <dd className="mt-0.5 text-zinc-400">
+              {league.autoUnderdogEnabled !== 0
+                ? 'The betting odds do — a side with a win chance of 25% or less is auto-flagged, and the flag freezes at kickoff.'
+                : 'The admin flags underdogs by hand (none are flagged automatically right now).'}
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-zinc-100">
               How do results get entered?
             </dt>
             <dd className="mt-0.5 text-zinc-400">

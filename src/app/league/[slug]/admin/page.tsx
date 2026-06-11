@@ -183,6 +183,7 @@ export default async function AdminPage({
       ...parseJson<Partial<Record<StageKey, number>>>(league.roundMultipliers, {}),
     },
     autoSyncEnabled: league.autoSyncEnabled !== 0,
+    autoUnderdogEnabled: league.autoUnderdogEnabled !== 0,
   };
 
   const now = nowMs();

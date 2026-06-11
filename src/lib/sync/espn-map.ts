@@ -12,6 +12,8 @@
  *  - events that can't be matched unambiguously to one fixture are skipped with a note
  */
 
+import { parseScoreboardOdds, type MatchOdds } from '@/lib/odds';
+
 export interface EspnTeamRef {
   id?: string;
   abbreviation?: string;
@@ -35,6 +37,7 @@ export interface EspnDetail {
 
 export interface EspnCompetition {
   status?: { type?: { completed?: boolean; state?: string } };
+  odds?: unknown;
   competitors?: EspnCompetitor[];
   details?: EspnDetail[];
   venue?: { fullName?: string };
@@ -62,6 +65,7 @@ export interface MatchSnapshot {
 
 export type SyncAction =
   | { kind: 'teams'; matchId: number; homeCode: string; awayCode: string }
+  | { kind: 'odds'; matchId: number; odds: MatchOdds }
   | {
       kind: 'live';
       matchId: number;
@@ -142,7 +146,11 @@ function firstGoal(details: EspnDetail[] | undefined): {
   };
 }
 
-export function planSync(events: EspnEvent[], matches: MatchSnapshot[]): SyncPlan {
+export function planSync(
+  events: EspnEvent[],
+  matches: MatchSnapshot[],
+  nowMs = 0,
+): SyncPlan {
   const actions: SyncAction[] = [];
   const notes: string[] = [];
   const byKickoff = new Map<string, MatchSnapshot[]>();
@@ -206,6 +214,13 @@ export function planSync(events: EspnEvent[], matches: MatchSnapshot[]): SyncPla
 
     const state = comp.status?.type?.state;
     const completed = comp.status?.type?.completed === true;
+
+    // Betting-odds snapshot (display-only cheat sheet) — for any match that
+    // hasn't banked a final result. Absent/incomplete markets parse to null.
+    if (!completed && match.status !== 'finished') {
+      const odds = parseScoreboardOdds(comp.odds, nowMs);
+      if (odds) actions.push({ kind: 'odds', matchId: match.id, odds });
+    }
     const homeScore = parseScore(sides.home.score);
     const awayScore = parseScore(sides.away.score);
     if (homeScore === null || awayScore === null) {

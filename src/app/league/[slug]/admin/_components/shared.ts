@@ -73,6 +73,7 @@ export interface LeagueSettings {
   boosterMultiplier: number;
   roundMultipliers: Record<StageKey, number>;
   autoSyncEnabled: boolean;
+  autoUnderdogEnabled: boolean;
 }
 
 export type ApiResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string };

@@ -50,6 +50,10 @@ export interface TodayMatchView {
   /** Squad names for the scorer picker (empty until teams are known). */
   homeSquad: string[];
   awaySquad: string[];
+  /** Betting cheat sheet (null when absent/stale); MatchOdds from '@/lib/odds'. */
+  odds: import('@/lib/odds').MatchOdds | null;
+  /** First-goalscorer odds by player name (american strings); empty when none. */
+  scorerOdds: Record<string, string>;
   myPick: PickView | null;
   boosted: boolean;
   /** True when the booster cannot be placed on / moved to this match right now. */

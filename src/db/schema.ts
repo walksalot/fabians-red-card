@@ -35,6 +35,9 @@ export const leagues = sqliteTable('leagues', {
   // Auto-results: when the primary league has this on, the server fills final
   // scores + first scorer from the free public feed. Read from the primary league.
   autoSyncEnabled: integer('auto_sync_enabled').notNull().default(1),
+  // Auto-flag clear underdogs (+5 bonus) from betting odds. Off by default —
+  // it changes scoring, so the admin arms it deliberately.
+  autoUnderdogEnabled: integer('auto_underdog_enabled').notNull().default(0),
   adminUserId: integer('admin_user_id')
     .notNull()
     .references(() => users.id),
@@ -91,6 +94,26 @@ export const players = sqliteTable(
   (t) => [uniqueIndex('players_team_name').on(t.teamId, t.name)],
 );
 
+// First-goalscorer odds per match (display-only cheat sheet), keyed by the
+// resolved player name; refreshed pre-match on its own gentle cadence.
+export const scorerOdds = sqliteTable(
+  'scorer_odds',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    matchId: integer('match_id').notNull(),
+    playerName: text('player_name').notNull(),
+    american: text('american').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('scorer_odds_match_player').on(t.matchId, t.playerName)],
+);
+
+// ESPN athlete id → name cache (immutable facts; saves a request per athlete).
+export const espnAthletes = sqliteTable('espn_athletes', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+});
+
 export const matches = sqliteTable('matches', {
   id: integer('id').primaryKey(), // official FIFA match number 1..104
   stage: text('stage').notNull(), // 'group'|'r32'|'r16'|'qf'|'sf'|'third'|'final'
@@ -121,6 +144,11 @@ export const matches = sqliteTable('matches', {
   // Live first-goal facts (drive the "if it ended now" provisional board).
   liveFirstScorer: text('live_first_scorer'),
   liveFirstScoringTeam: text('live_first_scoring_team'), // 'home'|'away'
+  // Betting-odds cheat sheet: parsed MatchOdds JSON (src/lib/odds.ts) from the
+  // same feed as results; display-only. Refreshed by the sync; null when the
+  // market is absent (TBD knockout slots).
+  oddsJson: text('odds_json'),
+  oddsUpdatedAt: integer('odds_updated_at'),
 });
 
 // Small key/value store for server housekeeping (last auto-sync time, last
