@@ -47,3 +47,9 @@ playwright-report/
 
 # UI review screenshots
 .ui-shots/
+
+# launch handoff (contains credentials)
+GROUP-CHAT-MESSAGE.txt
+FABIAN-ADMIN-PACKAGE.txt
+FABIAN-ADMIN-GUIDE.png
+FABIAN-ADMIN-GUIDE.pdf
