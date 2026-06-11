@@ -159,3 +159,21 @@ describe('syncScorerOdds', () => {
     expect(summary.matchesUpdated).toBe(0);
   });
 });
+
+describe('datesNeedingSync (via runSync fetch capture)', () => {
+  it('fetches the ET matchday date for late-night-ET kickoffs (the ESPN grouping)', async () => {
+    // KOR-CZE: kickoff 2026-06-12T02:00:00Z = 10 PM ET June 11 → ESPN lists it
+    // under 20260611. Fetching only UTC dates would miss its odds, live score,
+    // AND final result.
+    const db = seedWorld(freshDb());
+    const requested: string[] = [];
+    await withFakeNow(BEFORE, () =>
+      runSync(db, async (d) => {
+        requested.push(d);
+        return [];
+      }),
+    );
+    expect(requested).toContain('20260611'); // ET matchday — the page the event lives on
+    expect(requested).toContain('20260612'); // UTC date kept as belt-and-braces
+  });
+});

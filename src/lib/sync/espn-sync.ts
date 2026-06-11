@@ -48,7 +48,15 @@ function yyyymmdd(d: Date): string {
   ).padStart(2, '0')}`;
 }
 
-/** UTC dates (yyyymmdd) of every not-yet-final match within a window around now. */
+/**
+ * Scoreboard dates (yyyymmdd) of every not-yet-final match within a window
+ * around now. ESPN groups events by their US-EASTERN calendar date — exactly
+ * our precomputed `matchday` column — so that is the primary key here. A
+ * 10 PM ET kickoff lives on ESPN's "today" while its UTC date is tomorrow;
+ * fetching by UTC date alone silently misses every late-night-ET match (odds,
+ * live scores AND the final result). The UTC dates are kept as belt-and-braces
+ * for any grouping drift; unmatched events are skipped harmlessly.
+ */
 function datesNeedingSync(db: Db): string[] {
   const nowMs = now().getTime();
   // look back 1 day (late finishes / corrections) and forward 2 days (upcoming
@@ -56,7 +64,10 @@ function datesNeedingSync(db: Db): string[] {
   const fromIso = new Date(nowMs - 24 * 3600_000).toISOString();
   const toIso = new Date(nowMs + 48 * 3600_000).toISOString();
   const rows = db
-    .select({ kickoffUtc: schema.matches.kickoffUtc })
+    .select({
+      kickoffUtc: schema.matches.kickoffUtc,
+      matchday: schema.matches.matchday,
+    })
     .from(schema.matches)
     .where(
       and(
@@ -68,7 +79,7 @@ function datesNeedingSync(db: Db): string[] {
     .all();
   const dates = new Set<string>();
   for (const r of rows) {
-    // a kickoff and the ~3h after it can straddle a UTC date boundary; cover both
+    dates.add(r.matchday.replace(/-/g, '')); // ESPN's grouping (ET)
     const k = new Date(r.kickoffUtc);
     dates.add(yyyymmdd(k));
     dates.add(yyyymmdd(new Date(k.getTime() + 4 * 3600_000)));
