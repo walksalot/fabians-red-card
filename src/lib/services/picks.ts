@@ -1,0 +1,172 @@
+import { and, asc, eq } from 'drizzle-orm';
+import { schema, type Db } from '@/db';
+import { nowMs } from '@/lib/clock';
+import { AppError } from '@/lib/errors';
+
+export type Pick = typeof schema.picks.$inferSelect;
+
+const FIRST_TEAM_VALUES = ['home', 'away', 'none'] as const;
+export type FirstTeam = (typeof FIRST_TEAM_VALUES)[number];
+
+const MAX_GOALS = 20;
+const MAX_SCORER_LENGTH = 80;
+
+export interface UpsertPickInput {
+  entryId: number;
+  matchId: number;
+  predHome: number;
+  predAway: number;
+  predScorer?: string | null;
+  predFirstTeam?: FirstTeam | null;
+}
+
+export interface PublicMatchPick {
+  entryId: number;
+  label: string;
+  pick: Pick;
+}
+
+function requireOwnedEntry(db: Db, userId: number, entryId: number) {
+  const entry = db
+    .select()
+    .from(schema.entries)
+    .where(eq(schema.entries.id, entryId))
+    .get();
+  // Missing entry gets the same 403 as a foreign one — don't leak which entries exist.
+  if (!entry || entry.userId !== userId) {
+    throw new AppError('Entry does not belong to you', 403);
+  }
+  return entry;
+}
+
+function getMatchOr404(db: Db, matchId: number) {
+  const match = db
+    .select()
+    .from(schema.matches)
+    .where(eq(schema.matches.id, matchId))
+    .get();
+  if (!match) throw new AppError('Match not found', 404);
+  return match;
+}
+
+/** Locked from the kickoff instant onward (clock.now() >= kickoff). */
+function hasKickedOff(kickoffUtc: string): boolean {
+  return nowMs() >= Date.parse(kickoffUtc);
+}
+
+function validateScore(value: number, field: 'predHome' | 'predAway'): void {
+  if (!Number.isInteger(value) || value < 0 || value > MAX_GOALS) {
+    throw new AppError(
+      `${field} must be a whole number between 0 and ${MAX_GOALS}`,
+      400,
+    );
+  }
+}
+
+function normalizeScorer(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  if (trimmed.length > MAX_SCORER_LENGTH) {
+    throw new AppError(
+      `predScorer must be at most ${MAX_SCORER_LENGTH} characters`,
+      400,
+    );
+  }
+  return trimmed;
+}
+
+/**
+ * Create or update the pick of one of the user's entries for a match.
+ * Locked from kickoff (409). A 0-0 prediction coerces scorer to null and
+ * first team to 'none' (nobody scores in a goalless game).
+ */
+export async function upsertPick(
+  db: Db,
+  userId: number,
+  input: UpsertPickInput,
+): Promise<Pick> {
+  validateScore(input.predHome, 'predHome');
+  validateScore(input.predAway, 'predAway');
+  const rawFirstTeam = input.predFirstTeam ?? null;
+  if (rawFirstTeam !== null && !FIRST_TEAM_VALUES.includes(rawFirstTeam)) {
+    throw new AppError("predFirstTeam must be 'home', 'away' or 'none'", 400);
+  }
+
+  requireOwnedEntry(db, userId, input.entryId);
+  const match = getMatchOr404(db, input.matchId);
+  if (hasKickedOff(match.kickoffUtc)) {
+    throw new AppError('Picks are locked for this match', 409);
+  }
+
+  let predScorer = normalizeScorer(input.predScorer);
+  let predFirstTeam: FirstTeam | null = rawFirstTeam;
+  if (input.predHome === 0 && input.predAway === 0) {
+    predScorer = null;
+    predFirstTeam = 'none';
+  }
+
+  const ts = nowMs();
+  return db
+    .insert(schema.picks)
+    .values({
+      entryId: input.entryId,
+      matchId: input.matchId,
+      predHome: input.predHome,
+      predAway: input.predAway,
+      predScorer,
+      predFirstTeam,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+    .onConflictDoUpdate({
+      target: [schema.picks.entryId, schema.picks.matchId],
+      set: {
+        predHome: input.predHome,
+        predAway: input.predAway,
+        predScorer,
+        predFirstTeam,
+        updatedAt: ts, // createdAt deliberately preserved
+      },
+    })
+    .returning()
+    .get();
+}
+
+/** All picks for one entry, in match order. */
+export async function getEntryPicks(db: Db, entryId: number): Promise<Pick[]> {
+  return db
+    .select()
+    .from(schema.picks)
+    .where(eq(schema.picks.entryId, entryId))
+    .orderBy(asc(schema.picks.matchId))
+    .all();
+}
+
+/**
+ * Everyone's picks for a match within a league, labelled by entry.
+ * Hidden until the match kicks off so nobody can copy picks (403 before).
+ */
+export async function getMatchPicksPublic(
+  db: Db,
+  leagueId: number,
+  matchId: number,
+): Promise<PublicMatchPick[]> {
+  const match = getMatchOr404(db, matchId);
+  if (!hasKickedOff(match.kickoffUtc)) {
+    throw new AppError('Picks are hidden until kickoff', 403);
+  }
+  return db
+    .select({
+      entryId: schema.entries.id,
+      label: schema.entries.label,
+      pick: schema.picks,
+    })
+    .from(schema.picks)
+    .innerJoin(schema.entries, eq(schema.picks.entryId, schema.entries.id))
+    .where(
+      and(eq(schema.entries.leagueId, leagueId), eq(schema.picks.matchId, matchId)),
+    )
+    .orderBy(asc(schema.entries.id))
+    .all();
+}

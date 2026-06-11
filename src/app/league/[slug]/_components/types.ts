@@ -1,0 +1,103 @@
+/**
+ * Serializable view models passed from server pages to client components.
+ * These mirror (subsets of) the frozen shapes in CONTRACTS.md — pages map raw
+ * service/db rows into these so client components never touch db types.
+ */
+
+export type FirstTeam = 'home' | 'away' | 'none';
+
+export interface PickView {
+  predHome: number;
+  predAway: number;
+  predScorer: string | null;
+  predFirstTeam: FirstTeam | null;
+}
+
+/** Mirrors PointsBreakdown from @/lib/scoring (stored as JSON in matchPoints.breakdown). */
+export interface BreakdownView {
+  exact: number;
+  outcome: number;
+  scorer: number;
+  firstTeam: number;
+  underdog: number;
+  base: number;
+  roundMultiplier: number;
+  boosterMultiplier: number;
+  total: number;
+}
+
+export interface TodayMatchView {
+  matchId: number;
+  matchday: string;
+  kickoffUtc: string;
+  stage: string;
+  homeName: string;
+  awayName: string;
+  venue: string;
+  city: string;
+  status: 'scheduled' | 'finished';
+  locked: boolean;
+  homeScore: number | null;
+  awayScore: number | null;
+  firstScorer: string | null;
+  myPick: PickView | null;
+  boosted: boolean;
+  /** True when the booster cannot be placed on / moved to this match right now. */
+  boosterDisabled: boolean;
+  points: { total: number; breakdown: BreakdownView | null } | null;
+}
+
+export interface LeaderboardRowView {
+  rank: number;
+  entryId: number;
+  userId: number;
+  label: string;
+  displayName: string;
+  total: number;
+  exactCount: number;
+  scorerHits: number;
+  outcomeCount: number;
+}
+
+export interface PrizePoolView {
+  totalCents: number;
+  payouts: Array<{ place: number; percent: number; amountCents: number }>;
+}
+
+export interface EntryOption {
+  id: number;
+  label: string;
+}
+
+export interface EntryStatsView {
+  total: number;
+  exactCount: number;
+  scorerHits: number;
+  picksMade: number;
+  finishedPicked: number;
+  accuracyPct: number;
+  currentStreak: number;
+  bestStreak: number;
+  badges: string[];
+}
+
+export interface HistoryItemView {
+  matchId: number;
+  stage: string;
+  kickoffUtc: string;
+  homeName: string;
+  awayName: string;
+  homeScore: number;
+  awayScore: number;
+  firstScorer: string | null;
+  firstScoringTeam: FirstTeam | null;
+  myPick: PickView | null;
+  breakdown: BreakdownView | null;
+  total: number | null;
+}
+
+export interface HistoryDayView {
+  matchday: string;
+  subtotal: number;
+  items: HistoryItemView[];
+}

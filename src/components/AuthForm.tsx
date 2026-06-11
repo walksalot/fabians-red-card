@@ -1,0 +1,130 @@
+'use client';
+
+import { useState, type FormEvent } from 'react';
+import { errorMessage, postJson } from './client-api';
+
+export type AuthMode = 'login' | 'register';
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  displayName: string;
+}
+
+const inputClass =
+  'h-12 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-400 focus:outline-none';
+
+/**
+ * Shared login/register form. POSTs /api/auth/<mode>; the session cookie is set
+ * by the API — the parent decides where to navigate via onSuccess.
+ */
+export function AuthForm({
+  mode,
+  submitLabel,
+  onSuccess,
+}: {
+  mode: AuthMode;
+  submitLabel?: string;
+  onSuccess: (user: AuthUser) => void | Promise<void>;
+}) {
+  const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busy) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const body =
+        mode === 'register'
+          ? { username, displayName, password }
+          : { username, password };
+      const data = await postJson<{ user: AuthUser }>(
+        `/api/auth/${mode}`,
+        body,
+      );
+      await onSuccess(data.user);
+    } catch (err) {
+      setError(errorMessage(err));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-zinc-400">
+          Username
+        </span>
+        <input
+          data-testid="auth-username"
+          type="text"
+          required
+          autoComplete="username"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="yourname"
+          className={inputClass}
+        />
+      </label>
+
+      {mode === 'register' ? (
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-zinc-400">
+            Display name
+          </span>
+          <input
+            data-testid="auth-displayname"
+            type="text"
+            required
+            autoComplete="name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="How your friends know you"
+            className={inputClass}
+          />
+        </label>
+      ) : null}
+
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-zinc-400">
+          Password
+        </span>
+        <input
+          data-testid="auth-password"
+          type="password"
+          required
+          autoComplete={
+            mode === 'register' ? 'new-password' : 'current-password'
+          }
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="••••••••"
+          className={inputClass}
+        />
+      </label>
+
+      {error ? <p className="text-sm text-red-400">{error}</p> : null}
+
+      <button
+        type="submit"
+        data-testid="auth-submit"
+        disabled={busy}
+        className="h-12 w-full rounded-xl bg-emerald-400 font-semibold text-zinc-950 transition-transform active:scale-[.99] disabled:opacity-50"
+      >
+        {busy
+          ? 'One moment…'
+          : (submitLabel ?? (mode === 'register' ? 'Create account' : 'Sign in'))}
+      </button>
+    </form>
+  );
+}
+
+export default AuthForm;

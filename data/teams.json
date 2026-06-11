@@ -1,0 +1,242 @@
+[
+ {
+  "name": "Mexico",
+  "code": "MEX",
+  "group": "A"
+ },
+ {
+  "name": "South Africa",
+  "code": "RSA",
+  "group": "A"
+ },
+ {
+  "name": "Korea Republic",
+  "code": "KOR",
+  "group": "A"
+ },
+ {
+  "name": "Czechia",
+  "code": "CZE",
+  "group": "A"
+ },
+ {
+  "name": "Canada",
+  "code": "CAN",
+  "group": "B"
+ },
+ {
+  "name": "Bosnia and Herzegovina",
+  "code": "BIH",
+  "group": "B"
+ },
+ {
+  "name": "Qatar",
+  "code": "QAT",
+  "group": "B"
+ },
+ {
+  "name": "Switzerland",
+  "code": "SUI",
+  "group": "B"
+ },
+ {
+  "name": "Brazil",
+  "code": "BRA",
+  "group": "C"
+ },
+ {
+  "name": "Morocco",
+  "code": "MAR",
+  "group": "C"
+ },
+ {
+  "name": "Haiti",
+  "code": "HAI",
+  "group": "C"
+ },
+ {
+  "name": "Scotland",
+  "code": "SCO",
+  "group": "C"
+ },
+ {
+  "name": "United States",
+  "code": "USA",
+  "group": "D"
+ },
+ {
+  "name": "Paraguay",
+  "code": "PAR",
+  "group": "D"
+ },
+ {
+  "name": "Australia",
+  "code": "AUS",
+  "group": "D"
+ },
+ {
+  "name": "Türkiye",
+  "code": "TUR",
+  "group": "D"
+ },
+ {
+  "name": "Germany",
+  "code": "GER",
+  "group": "E"
+ },
+ {
+  "name": "Curaçao",
+  "code": "CUW",
+  "group": "E"
+ },
+ {
+  "name": "Côte d'Ivoire",
+  "code": "CIV",
+  "group": "E"
+ },
+ {
+  "name": "Ecuador",
+  "code": "ECU",
+  "group": "E"
+ },
+ {
+  "name": "Netherlands",
+  "code": "NED",
+  "group": "F"
+ },
+ {
+  "name": "Japan",
+  "code": "JPN",
+  "group": "F"
+ },
+ {
+  "name": "Sweden",
+  "code": "SWE",
+  "group": "F"
+ },
+ {
+  "name": "Tunisia",
+  "code": "TUN",
+  "group": "F"
+ },
+ {
+  "name": "Belgium",
+  "code": "BEL",
+  "group": "G"
+ },
+ {
+  "name": "Egypt",
+  "code": "EGY",
+  "group": "G"
+ },
+ {
+  "name": "IR Iran",
+  "code": "IRN",
+  "group": "G"
+ },
+ {
+  "name": "New Zealand",
+  "code": "NZL",
+  "group": "G"
+ },
+ {
+  "name": "Spain",
+  "code": "ESP",
+  "group": "H"
+ },
+ {
+  "name": "Cabo Verde",
+  "code": "CPV",
+  "group": "H"
+ },
+ {
+  "name": "Saudi Arabia",
+  "code": "KSA",
+  "group": "H"
+ },
+ {
+  "name": "Uruguay",
+  "code": "URU",
+  "group": "H"
+ },
+ {
+  "name": "France",
+  "code": "FRA",
+  "group": "I"
+ },
+ {
+  "name": "Senegal",
+  "code": "SEN",
+  "group": "I"
+ },
+ {
+  "name": "Iraq",
+  "code": "IRQ",
+  "group": "I"
+ },
+ {
+  "name": "Norway",
+  "code": "NOR",
+  "group": "I"
+ },
+ {
+  "name": "Argentina",
+  "code": "ARG",
+  "group": "J"
+ },
+ {
+  "name": "Algeria",
+  "code": "ALG",
+  "group": "J"
+ },
+ {
+  "name": "Austria",
+  "code": "AUT",
+  "group": "J"
+ },
+ {
+  "name": "Jordan",
+  "code": "JOR",
+  "group": "J"
+ },
+ {
+  "name": "Portugal",
+  "code": "POR",
+  "group": "K"
+ },
+ {
+  "name": "Congo DR",
+  "code": "COD",
+  "group": "K"
+ },
+ {
+  "name": "Uzbekistan",
+  "code": "UZB",
+  "group": "K"
+ },
+ {
+  "name": "Colombia",
+  "code": "COL",
+  "group": "K"
+ },
+ {
+  "name": "England",
+  "code": "ENG",
+  "group": "L"
+ },
+ {
+  "name": "Croatia",
+  "code": "CRO",
+  "group": "L"
+ },
+ {
+  "name": "Ghana",
+  "code": "GHA",
+  "group": "L"
+ },
+ {
+  "name": "Panama",
+  "code": "PAN",
+  "group": "L"
+ }
+]
