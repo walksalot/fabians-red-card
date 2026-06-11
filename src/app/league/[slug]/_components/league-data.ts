@@ -24,6 +24,8 @@ export interface LeagueContext {
   user: SessionUser;
   league: LeagueRow;
   isMember: boolean;
+  /** League admin (role or league.adminUserId) — drives the header Admin button. */
+  isAdmin: boolean;
   /** The signed-in user's entries in this league, oldest first. Empty if not a member. */
   entries: EntryRow[];
 }
@@ -57,7 +59,7 @@ export async function loadLeagueContext(slug: string): Promise<LeagueContext> {
     // Private + has a join password → let them reach the password door.
     // Private + invite-only (no password) → nothing to show, send home.
     if (league.isPrivate && league.joinPasswordHash === null) redirect('/');
-    return { db, user, league, isMember: false, entries: [] };
+    return { db, user, league, isMember: false, isAdmin: false, entries: [] };
   }
 
   const entries = db
@@ -72,7 +74,9 @@ export async function loadLeagueContext(slug: string): Promise<LeagueContext> {
     .orderBy(asc(schema.entries.id))
     .all();
 
-  return { db, user, league, isMember: true, entries };
+  const isAdmin =
+    membership.role === 'admin' || league.adminUserId === user.id;
+  return { db, user, league, isMember: true, isAdmin, entries };
 }
 
 /**

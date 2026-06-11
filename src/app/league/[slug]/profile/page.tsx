@@ -12,6 +12,7 @@ import {
   loadLeagueContext,
   pickSelectedEntry,
 } from '../_components/league-data';
+import CommissionerCard from '../_components/CommissionerCard';
 import type {
   EntryStatsView,
   LeaderboardRowView,
@@ -145,7 +146,7 @@ export default async function ProfilePage({
   const entry = pickSelectedEntry(entries, sp.entry);
   if (!entry) {
     return (
-      <p className="text-zinc-400">No entry found for you in this league.</p>
+      <CommissionerCard slug={slug} isAdmin={ctx.isAdmin} />
     );
   }
 
