@@ -144,3 +144,46 @@ export async function getBooster(
     .get();
   return row ?? null;
 }
+
+export interface ClearBoosterInput {
+  entryId: number;
+  matchday: string;
+}
+
+/**
+ * Remove the entry's booster for a matchday — the toggle-off. Allowed in the
+ * same window in which the booster could be moved: until its current match
+ * kicks off. If that match was finished early (admin can enter results ahead
+ * of kickoff), its points are recomputed without the multiplier atomically.
+ */
+export async function clearBooster(
+  db: Db,
+  userId: number,
+  input: ClearBoosterInput,
+): Promise<void> {
+  requireOwnedEntry(db, userId, input.entryId);
+  const existing = db
+    .select()
+    .from(schema.boosters)
+    .where(
+      and(
+        eq(schema.boosters.entryId, input.entryId),
+        eq(schema.boosters.matchday, input.matchday),
+      ),
+    )
+    .get();
+  if (!existing) throw new AppError('No booster set for this matchday', 404);
+
+  const match = getMatchOr404(db, existing.matchId);
+  if (hasKickedOff(match.kickoffUtc)) {
+    throw new AppError('Booster already locked for this matchday', 409);
+  }
+
+  const recomputeMatch =
+    match.status === 'finished' ? (await import('./results')).recomputeMatch : null;
+
+  db.transaction(() => {
+    db.delete(schema.boosters).where(eq(schema.boosters.id, existing.id)).run();
+    if (recomputeMatch) recomputeMatch(db, match.id);
+  });
+}

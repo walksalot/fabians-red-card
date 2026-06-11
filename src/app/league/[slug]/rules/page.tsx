@@ -226,6 +226,60 @@ export default async function RulesPage({
           hands in person, not through this app.
         </p>
       </Section>
+
+      <Section title="Quick answers">
+        <dl className="space-y-3">
+          <div>
+            <dt className="font-semibold text-zinc-100">
+              Can I move or remove my booster?
+            </dt>
+            <dd className="mt-0.5 text-zinc-400">
+              Yes — tap the armed booster to remove it, or tap another match
+              that day to move it. Once your boosted match kicks off, it&apos;s
+              locked in. A booster only multiplies points you earn — it can
+              never cost you anything.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-zinc-100">
+              Is there a penalty for wrong guesses?
+            </dt>
+            <dd className="mt-0.5 text-zinc-400">
+              Never. Wrong scores, scorers, or first-team picks just earn zero
+              for that part — points are never taken away.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-zinc-100">
+              What if I skip the scorer or first-team pick?
+            </dt>
+            <dd className="mt-0.5 text-zinc-400">
+              They&apos;re optional. Leaving them blank only skips those bonus
+              points for that match.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-zinc-100">
+              Do scorer names need exact spelling?
+            </dt>
+            <dd className="mt-0.5 text-zinc-400">
+              No — pick from the squad list, or type it: capitals and accents
+              don&apos;t matter, and last names count (&quot;Jimenez&quot; ={' '}
+              &quot;Raúl Jiménez&quot;).
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-zinc-100">
+              How do results get entered?
+            </dt>
+            <dd className="mt-0.5 text-zinc-400">
+              Automatically, as matches finish. The admin can correct anything
+              by hand, and corrections recalculate everyone&apos;s points
+              instantly.
+            </dd>
+          </div>
+        </dl>
+      </Section>
     </div>
   );
 }

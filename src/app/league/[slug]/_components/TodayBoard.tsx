@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import BoosterButton from './BoosterButton';
+import HowItWorksSheet from './HowItWorksSheet';
 import PickForm from './PickForm';
 import { BreakdownChips, CHIP_TONES, NoPointsChip } from './breakdown-chips';
 import { codeToFlagEmoji, shortTeamName } from './flags';
@@ -41,6 +42,8 @@ interface Props {
   boosterLabel: string;
   /** True when the matchday booster is armed on some match. */
   boosterArmed: boolean;
+  /** League scoring values for the in-context "How scoring works" sheet. */
+  points: { exact: number; outcome: number; scorer: number; firstTeam: number; underdog: number };
 }
 
 function formatRemaining(ms: number): string {
@@ -380,6 +383,7 @@ export default function TodayBoard({
   matchday,
   boosterLabel,
   boosterArmed,
+  points,
 }: Props) {
   const router = useRouter();
   // Picks saved this session (server data only updates on refresh) — merged
@@ -513,6 +517,9 @@ export default function TodayBoard({
             </button>
           );
         })()}
+      </div>
+      <div className="-mt-1 flex justify-start">
+        <HowItWorksSheet points={points} boosterMultiplier={boosterMultiplier} />
       </div>
       {items.map((m, i) => {
         const isLive =

@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import { schema, type Db } from '@/db';
-import { getBooster, setBooster } from '@/lib/services/boosters';
+import { clearBooster, getBooster, setBooster } from '@/lib/services/boosters';
 // Deliberately unmocked: the recompute-on-move contract is exercised end to end.
 import { enterResult } from '@/lib/services/results';
 import { freshDb, withFakeNow } from '../helpers/db';
@@ -342,6 +342,59 @@ describe('setBooster / getBooster', () => {
         matchId: EARLY_ID,
       });
       expect(totalFor(db, entry.id, EARLY_ID)).toBe(20); // boost applied on move
+    });
+  });
+});
+
+describe('clearBooster', () => {
+  it('booster can be removed before its match kicks off', async () => {
+    const { db, user, entry } = setup();
+    await withFakeNow(MORNING, async () => {
+      await setBooster(db, user.id, { entryId: entry.id, matchday: MATCHDAY, matchId: EARLY_ID });
+      await clearBooster(db, user.id, { entryId: entry.id, matchday: MATCHDAY });
+    });
+    expect(boosterRows(db, entry.id)).toHaveLength(0);
+    expect(await getBooster(db, entry.id, MATCHDAY)).toBeNull();
+  });
+
+  it('booster cannot be removed after its match kicks off', async () => {
+    const { db, user, entry } = setup();
+    await withFakeNow(MORNING, () =>
+      setBooster(db, user.id, { entryId: entry.id, matchday: MATCHDAY, matchId: EARLY_ID }),
+    );
+    await withFakeNow(BETWEEN, async () => {
+      await expect(
+        clearBooster(db, user.id, { entryId: entry.id, matchday: MATCHDAY }),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+    expect(boosterRows(db, entry.id)).toHaveLength(1);
+  });
+
+  it('clearing when no booster is set is a 404', async () => {
+    const { db, user, entry } = setup();
+    await withFakeNow(MORNING, async () => {
+      await expect(
+        clearBooster(db, user.id, { entryId: entry.id, matchday: MATCHDAY }),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  it('removing a booster from a finished-early match recomputes its points', async () => {
+    const { db, user, league, entry } = setup();
+    seedAdminMembership(db, league.id, user.id);
+    seedPick(db, entry.id, EARLY_ID);
+    await withFakeNow(MORNING, async () => {
+      await setBooster(db, user.id, { entryId: entry.id, matchday: MATCHDAY, matchId: EARLY_ID });
+      enterResult(db, user.id, {
+        matchId: EARLY_ID,
+        homeScore: 1,
+        awayScore: 0,
+        firstScorer: null,
+        firstScoringTeam: 'home',
+      });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(20); // exact 10 x2 boosted
+      await clearBooster(db, user.id, { entryId: entry.id, matchday: MATCHDAY });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(10); // multiplier gone
     });
   });
 });

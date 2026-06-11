@@ -36,6 +36,14 @@ export default async function TodayPage({
     );
   }
 
+  // Live scoring values for the in-context explainer (never hardcoded).
+  let scoringPoints = { exact: 10, outcome: 2, scorer: 8, firstTeam: 2, underdog: 5 };
+  try {
+    scoringPoints = { ...scoringPoints, ...JSON.parse(league.scoringRules) };
+  } catch {
+    // defaults stand if the JSON is ever malformed
+  }
+
   const board = await getTodayBoard(db, league.id, entry.id);
   const boardMatchday = board?.matchday ?? null;
   const rawItems = board?.matches ?? [];
@@ -211,6 +219,7 @@ export default async function TodayPage({
           matchday={boardMatchday}
           boosterLabel={boosterLabel}
           boosterArmed={headerBooster !== undefined}
+          points={scoringPoints}
         />
       ) : (
         <EmptyState

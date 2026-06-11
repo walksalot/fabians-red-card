@@ -421,6 +421,9 @@ export default function PickForm({
               </div>
             ) : null}
           </div>
+          <p className="mt-1 text-[10px] font-medium text-zinc-500">
+            Optional — a wrong guess never costs points.
+          </p>
         </div>
         <div>
           <span className="mb-1 flex items-center justify-between gap-2">

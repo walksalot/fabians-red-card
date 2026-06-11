@@ -34,15 +34,18 @@ export default function BoosterButton({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function activate() {
-    if (boosted || disabled || busy) return;
+  /** Arm when unarmed, remove when armed — a real toggle. */
+  async function toggle() {
+    if (disabled || busy) return;
     setBusy(true);
     setError(null);
+    const url = boosted ? '/api/boosters/clear' : '/api/boosters';
+    const body = boosted ? { entryId, matchday } : { entryId, matchday, matchId };
     try {
-      const res = await fetch('/api/boosters', {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entryId, matchday, matchId }),
+        body: JSON.stringify(body),
       });
       const json: { ok: boolean; error?: string } | null = await res
         .json()
@@ -50,10 +53,10 @@ export default function BoosterButton({
       if (json?.ok) {
         router.refresh();
       } else {
-        setError(json?.error ?? 'Could not set the booster.');
+        setError(json?.error ?? 'Could not update the booster.');
       }
     } catch {
-      setError('Network error — booster not set.');
+      setError('Network error — booster unchanged.');
     } finally {
       setBusy(false);
     }
@@ -81,9 +84,9 @@ export default function BoosterButton({
         data-testid="booster-toggle"
         type="button"
         aria-pressed={boosted}
-        aria-label={boosted ? undefined : `Arm booster ×${multiplier}`}
+        aria-label={boosted ? 'Remove booster' : `Arm booster ×${multiplier}`}
         disabled={disabled || busy}
-        onClick={activate}
+        onClick={toggle}
         // Invisible hit-area expansion: the pill stays ~26px tall but the
         // tappable surface clears the 44px floor — this is the most
         // consequential single tap on the board (×2 your day).
@@ -107,10 +110,15 @@ export default function BoosterButton({
           {boosted
             ? `Booster ×${multiplier} active`
             : busy
-              ? 'Arming…'
+              ? 'Working…'
               : `Boost ×${multiplier}`}
         </span>
       </button>
+      {boosted && !disabled ? (
+        <p className="mt-1 text-[10px] font-medium text-zinc-500">
+          doubles this match · tap to remove
+        </p>
+      ) : null}
       {error && <p className="mt-1 text-xs text-brand-bright">{error}</p>}
     </div>
   );

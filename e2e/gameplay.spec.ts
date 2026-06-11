@@ -75,6 +75,12 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     await expect(open.getByTestId('booster-toggle')).toHaveAttribute('aria-pressed', 'true');
     await expect(open.getByTestId('booster-toggle')).toContainText(/booster ×\d+ active/i);
 
+    // a second tap removes it (true toggle); a third re-arms it for later tests
+    await open.getByTestId('booster-toggle').click();
+    await expect(open.getByTestId('booster-toggle')).toHaveAttribute('aria-pressed', 'false');
+    await open.getByTestId('booster-toggle').click();
+    await expect(open.getByTestId('booster-toggle')).toHaveAttribute('aria-pressed', 'true');
+
     // the kicked-off match can never take the booster
     await expect(page.getByTestId('pick-form-1').getByTestId('booster-toggle')).toBeDisabled();
   });
