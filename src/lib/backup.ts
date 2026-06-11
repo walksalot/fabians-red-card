@@ -25,7 +25,10 @@ export function runBackup(): string | null {
   fs.mkdirSync(dir, { recursive: true });
 
   const stamp = now().toISOString().replace(/[:.]/g, '-');
-  const dest = path.join(dir, `app-${stamp}.db`);
+  // Named after the source file (league-2026-…), so backups of different
+  // database files are never mistaken for one another.
+  const base = path.basename(src, '.db');
+  const dest = path.join(dir, `${base}-${stamp}.db`);
 
   // online backup: consistent snapshot without locking out the running app
   const handle = new Database(src, { readonly: true });
@@ -38,7 +41,7 @@ export function runBackup(): string | null {
   // prune oldest beyond KEEP
   const backups = fs
     .readdirSync(dir)
-    .filter((f) => f.startsWith('app-') && f.endsWith('.db'))
+    .filter((f) => f.endsWith('.db'))
     .sort();
   for (const old of backups.slice(0, Math.max(0, backups.length - KEEP))) {
     fs.rmSync(path.join(dir, old), { force: true });

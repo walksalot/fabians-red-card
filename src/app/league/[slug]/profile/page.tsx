@@ -306,7 +306,9 @@ export default async function ProfilePage({
             },
             {
               label: 'Matches covered',
-              value: `${stats.finishedPicked}/${finishedTotal}`,
+              // "0/0" before the first final whistle reads like a bug — until a
+              // match has actually finished there is nothing to cover yet.
+              value: finishedTotal === 0 ? '—' : `${stats.finishedPicked}/${finishedTotal}`,
               icon: 'calendar',
               accent: 'text-emerald-400',
             },

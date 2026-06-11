@@ -360,6 +360,9 @@ export default function PickForm({
               aria-expanded={scorerOpen}
               aria-controls={`scorer-options-${matchId}`}
               onFocus={() => setScorerOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setScorerOpen(false);
+              }}
               onBlur={() => {
                 // let an option tap land before the panel closes
                 scorerBlurTimer.current = window.setTimeout(

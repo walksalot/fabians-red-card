@@ -13,13 +13,16 @@ export function formatPoints(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
-/** matchday is a precomputed YYYY-MM-DD (America/New_York calendar date). */
+/**
+ * matchday is a precomputed YYYY-MM-DD (America/New_York calendar date).
+ * No year: the whole tournament is one summer, and the year was what pushed
+ * the Today headline past 390px ("Thursday, June 11, 20…").
+ */
 export function formatMatchday(matchday: string): string {
   return new Date(`${matchday}T12:00:00Z`).toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
-    year: 'numeric',
     timeZone: 'UTC',
   });
 }

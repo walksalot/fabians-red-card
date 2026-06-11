@@ -97,8 +97,8 @@ export default function HowItWorksSheet({
                 The daily booster — pure upside
               </p>
               <p className="mt-1 text-[13px] leading-relaxed text-zinc-300">
-                Once per match day, tap <b>Boost ×{boosterMultiplier}</b> on one
-                match to multiply whatever points you earn there. It can never
+                Once per match day, tap <b>Boost ×{boosterMultiplier}</b>
+                {' '}on one match to multiply whatever points you earn there. It can never
                 cost you anything. Tap it again to remove it, or tap another
                 match to move it — until your boosted match kicks off, then
                 it&apos;s locked in for the day.

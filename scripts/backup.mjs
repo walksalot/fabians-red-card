@@ -16,7 +16,9 @@ if (!fs.existsSync(src)) {
 const dir = path.join(path.dirname(src), 'backups');
 fs.mkdirSync(dir, { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const dest = path.join(dir, `app-${stamp}.db`);
+// named after the source file so league.db backups read as league-2026-…
+const base = path.basename(src, '.db');
+const dest = path.join(dir, `${base}-${stamp}.db`);
 
 const handle = new Database(src, { readonly: true });
 try {
@@ -27,7 +29,7 @@ try {
 
 const backups = fs
   .readdirSync(dir)
-  .filter((f) => f.startsWith('app-') && f.endsWith('.db'))
+  .filter((f) => f.endsWith('.db'))
   .sort();
 for (const old of backups.slice(0, Math.max(0, backups.length - KEEP))) {
   fs.rmSync(path.join(dir, old), { force: true });
