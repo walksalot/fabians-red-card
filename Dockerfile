@@ -18,9 +18,9 @@ COPY . .
 RUN npm run build
 
 ENV NODE_ENV=production
-# the host should mount a persistent volume here and set DB_PATH=/data/app.db
+# the host should mount a persistent volume at /data and set DB_PATH=/data/app.db
+# (no Docker VOLUME directive — Railway manages volumes and rejects it)
 ENV DB_PATH=/data/app.db
-VOLUME ["/data"]
 EXPOSE 3000
 
 # self-seeds, persists a session secret on the volume, then starts the server
