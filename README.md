@@ -1,5 +1,8 @@
 # Fabian's Red Card — World Cup 2026 Prediction Pool
 
+**👀 Click around the demo:** https://walksalot.github.io/fabians-red-card/
+*(read-only preview with sample data — the real app is fully interactive; see `DEPLOY.md` to put the real league online in ~5 minutes)*
+
 A private prediction pool website for your friend group. Everyone joins your league with
 one link, predicts the **exact score** and **first goalscorer** for every World Cup match
 (all 104 of them, group stage included), and battles on a live leaderboard. You enter the
