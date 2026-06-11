@@ -46,6 +46,18 @@ const insTeam = sqlite.prepare('INSERT INTO teams (id, code, name, group_letter)
 sortedTeams.forEach((t, i) => insTeam.run(i + 1, t.code, t.name, t.group));
 const teamIdByCode = new Map(sqlite.prepare('SELECT id, code FROM teams').all().map((r) => [r.code, r.id]));
 
+// squads for the scorer dropdown (same data the live app seeds)
+const rostersPath = path.join(root, 'data/rosters.json');
+if (fs.existsSync(rostersPath)) {
+  const rosters = JSON.parse(fs.readFileSync(rostersPath, 'utf8'));
+  const insPlayer = sqlite.prepare('INSERT INTO players (team_id, name, position) VALUES (?, ?, ?)');
+  for (const [code, players] of Object.entries(rosters)) {
+    const teamId = teamIdByCode.get(code);
+    if (!teamId) continue;
+    for (const pl of players) insPlayer.run(teamId, pl.name, pl.position ?? null);
+  }
+}
+
 const insMatch = sqlite.prepare(`INSERT INTO matches
   (id, stage, group_letter, home_team_id, away_team_id, home_placeholder, away_placeholder,
    kickoff_utc, matchday, venue, city, status)
