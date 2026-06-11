@@ -1,12 +1,19 @@
 import { defineConfig } from '@playwright/test';
 
 /**
- * E2E suite: single mobile-dark project (390x844, dark scheme) against a dev
- * server on port 3100 with a deterministic clock (FAKE_NOW) and a dedicated
- * seeded SQLite database (.data/e2e.db, built by e2e/global-setup.ts).
+ * Journey e2e suite (pre-tournament). Mobile-dark (390x844) against a dev server
+ * on port 3100, deterministic clock (FAKE_NOW 2026-06-10), dedicated SQLite db
+ * (.data/e2e.db), live-feed scheduler disabled (hermetic, no real network).
+ *
+ * The mid-tournament gameplay suite runs separately
+ * (playwright.gameplay.config.ts) so the two dev servers never run at once — two
+ * `next dev` instances sharing one .next dir is unstable.
  */
+const mobileDark = { viewport: { width: 390, height: 844 }, colorScheme: 'dark' as const };
+
 export default defineConfig({
   testDir: 'e2e',
+  testMatch: /journey\.spec\.ts$/,
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -14,12 +21,8 @@ export default defineConfig({
   globalSetup: './e2e/global-setup.ts',
   projects: [
     {
-      name: 'mobile-dark',
-      use: {
-        viewport: { width: 390, height: 844 },
-        colorScheme: 'dark',
-        baseURL: 'http://localhost:3100',
-      },
+      name: 'journey',
+      use: { ...mobileDark, baseURL: 'http://localhost:3100' },
     },
   ],
   webServer: {
@@ -32,6 +35,7 @@ export default defineConfig({
       FAKE_NOW: '2026-06-10T12:00:00Z',
       SESSION_SECRET: 'e2e-secret',
       SEED_LEAGUE_NAME: "Fabian's Red Card",
+      SCHEDULER_DISABLED: '1',
     },
   },
 });

@@ -40,6 +40,10 @@ export interface TodayMatchView {
   homeScore: number | null;
   awayScore: number | null;
   firstScorer: string | null;
+  /** Live in-progress score from the feed (display only); liveStatus 'in' while playing. */
+  liveHome: number | null;
+  liveAway: number | null;
+  liveStatus: string | null;
   myPick: PickView | null;
   boosted: boolean;
   /** True when the booster cannot be placed on / moved to this match right now. */

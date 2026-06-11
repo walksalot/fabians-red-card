@@ -50,6 +50,11 @@ const bodySchema = z.object({
   scoringRules: scoringRulesSchema.optional(),
   boosterMultiplier: z.number().positive().max(100).optional(),
   roundMultipliers: roundMultipliersSchema.optional(),
+  // automatic results from the public feed (boolean at the JSON edge → 0|1)
+  autoSyncEnabled: z
+    .boolean()
+    .transform((v): 0 | 1 => (v ? 1 : 0))
+    .optional(),
 });
 
 type RouteCtx = { params: Promise<{ slug: string }> };

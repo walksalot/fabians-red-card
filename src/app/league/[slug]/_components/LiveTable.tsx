@@ -134,11 +134,15 @@ export default function LiveTable({
             >
               <span className="font-semibold text-zinc-400">{r.rank}</span>
               <span className="truncate font-medium">{r.label}</span>
-              <span className="text-right font-bold text-emerald-400">
+              <span data-testid="row-total" className="text-right font-bold text-emerald-400">
                 {formatPoints(r.total)}
               </span>
-              <span className="text-right text-zinc-300">{r.exactCount}</span>
-              <span className="text-right text-zinc-300">{r.scorerHits}</span>
+              <span data-testid="row-exact" className="text-right text-zinc-300">
+                {r.exactCount}
+              </span>
+              <span data-testid="row-scorer" className="text-right text-zinc-300">
+                {r.scorerHits}
+              </span>
             </div>
           ))
         )}

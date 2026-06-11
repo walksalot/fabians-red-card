@@ -90,9 +90,9 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     await page.goto('/league/fabians-red-card/table');
     const rows = page.getByTestId('leaderboard-row');
     await expect(rows.first()).toContainText('Paula');
-    await expect(rows.first()).toContainText('20');
+    await expect(rows.first().getByTestId('row-total')).toHaveText('20');
     await expect(rows.nth(1)).toContainText('Victor');
-    await expect(rows.nth(1)).toContainText('4');
+    await expect(rows.nth(1).getByTestId('row-total')).toHaveText('4');
 
     // history shows the result and the points paula earned
     await page.getByTestId('tab-history').click();

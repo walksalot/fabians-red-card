@@ -107,6 +107,14 @@ export default function TodayBoard({
             </div>
             {m.status === 'finished' ? (
               <span className="shrink-0 text-xs text-zinc-400">Full time</span>
+            ) : m.liveStatus === 'in' ? (
+              <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-red-400">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                </span>
+                {m.liveHome ?? 0}–{m.liveAway ?? 0} LIVE
+              </span>
             ) : m.locked ? (
               <span className="shrink-0 text-xs font-medium text-amber-400">
                 In progress

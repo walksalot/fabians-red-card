@@ -191,8 +191,8 @@ test.describe('world cup pool journey (mobile dark)', () => {
       .getByTestId('leaderboard-row')
       .filter({ hasText: 'Daisy' });
     await expect(daisyRow).toBeVisible();
-    await expect(daisyRow).toContainText('20');
-    await expect(daisyRow).toContainText('1 exact');
+    await expect(daisyRow.getByTestId('row-total')).toHaveText('20');
+    await expect(daisyRow.getByTestId('row-exact')).toHaveText('1'); // one exact score
 
     // History, as daisy, shows the result and the full points breakdown.
     await context.clearCookies();

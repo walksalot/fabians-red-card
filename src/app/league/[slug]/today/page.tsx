@@ -121,6 +121,9 @@ export default async function TodayPage({
       homeScore: match.homeScore,
       awayScore: match.awayScore,
       firstScorer: match.firstScorer,
+      liveHome: match.liveHome,
+      liveAway: match.liveAway,
+      liveStatus: match.liveStatus,
       myPick: myPick
         ? {
             predHome: myPick.predHome,

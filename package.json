@@ -12,7 +12,10 @@
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
     "seed": "node scripts/seed.mjs",
-    "setup": "node scripts/setup.mjs"
+    "setup": "node scripts/setup.mjs",
+    "backup": "node scripts/backup.mjs",
+    "test:e2e:gameplay": "playwright test -c playwright.gameplay.config.ts",
+    "test:e2e:all": "playwright test && playwright test -c playwright.gameplay.config.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

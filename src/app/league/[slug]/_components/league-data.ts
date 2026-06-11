@@ -54,7 +54,9 @@ export async function loadLeagueContext(slug: string): Promise<LeagueContext> {
     .get();
 
   if (!membership) {
-    if (league.isPrivate) redirect('/');
+    // Private + has a join password → let them reach the password door.
+    // Private + invite-only (no password) → nothing to show, send home.
+    if (league.isPrivate && league.joinPasswordHash === null) redirect('/');
     return { db, user, league, isMember: false, entries: [] };
   }
 

@@ -32,6 +32,9 @@ export const leagues = sqliteTable('leagues', {
   roundMultipliers: text('round_multipliers')
     .notNull()
     .default('{"group":1,"r32":1,"r16":1,"qf":1,"sf":1,"third":1,"final":1}'),
+  // Auto-results: when the primary league has this on, the server fills final
+  // scores + first scorer from the free public feed. Read from the primary league.
+  autoSyncEnabled: integer('auto_sync_enabled').notNull().default(1),
   adminUserId: integer('admin_user_id')
     .notNull()
     .references(() => users.id),
@@ -91,6 +94,23 @@ export const matches = sqliteTable('matches', {
   firstScorer: text('first_scorer'),
   firstScoringTeam: text('first_scoring_team'), // 'home'|'away'|'none'
   underdogTeamId: integer('underdog_team_id').references(() => teams.id),
+  // How a finished result was recorded: 'manual' (admin typed it — never
+  // overwritten by auto-sync) or 'auto' (filled from the public feed). Null
+  // while scheduled.
+  resultSource: text('result_source'),
+  // Live in-progress score from the feed (display only; points settle on final).
+  liveHome: integer('live_home'),
+  liveAway: integer('live_away'),
+  liveStatus: text('live_status'), // 'in' while playing, cleared otherwise
+  liveUpdatedAt: integer('live_updated_at'),
+});
+
+// Small key/value store for server housekeeping (last auto-sync time, last
+// backup time, last sync error). One row per key.
+export const appState = sqliteTable('app_state', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: integer('updated_at').notNull(),
 });
 
 export const picks = sqliteTable(

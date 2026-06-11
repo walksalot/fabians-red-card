@@ -38,6 +38,7 @@ export interface LeagueSettingsPatch {
   scoringRules?: ScoringRules;
   boosterMultiplier?: number;
   roundMultipliers?: Record<Stage, number>;
+  autoSyncEnabled?: 0 | 1;
 }
 
 const USERNAME_RE = /^[a-z0-9_-]{3,30}$/;
@@ -398,6 +399,12 @@ export async function updateLeagueSettings(
     ) as Record<Stage, number>;
     if (!parsedNumbersEqual(league.roundMultipliers, canonical, STAGES)) scoringChanged = true;
     updates.roundMultipliers = JSON.stringify(canonical);
+  }
+  if (patch.autoSyncEnabled !== undefined) {
+    if (patch.autoSyncEnabled !== 0 && patch.autoSyncEnabled !== 1) {
+      throw new AppError('autoSyncEnabled must be 0 or 1', 400);
+    }
+    updates.autoSyncEnabled = patch.autoSyncEnabled;
   }
 
   // Lazy import avoids a hard module-load dependency cycle with the results

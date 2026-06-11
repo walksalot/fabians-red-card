@@ -69,6 +69,7 @@ export interface LeagueSettings {
   scoringRules: ScoringRulesShape;
   boosterMultiplier: number;
   roundMultipliers: Record<StageKey, number>;
+  autoSyncEnabled: boolean;
 }
 
 export type ApiResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string };

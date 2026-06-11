@@ -174,6 +174,7 @@ export default async function AdminPage({
       ...DEFAULT_ROUNDS,
       ...parseJson<Partial<Record<StageKey, number>>>(league.roundMultipliers, {}),
     },
+    autoSyncEnabled: league.autoSyncEnabled !== 0,
   };
 
   const now = nowMs();

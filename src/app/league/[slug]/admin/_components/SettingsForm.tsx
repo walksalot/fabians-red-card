@@ -48,6 +48,7 @@ export default function SettingsForm({
     while (split.length < 3) split.push(0);
     return split.map(String);
   });
+  const [autoSync, setAutoSync] = useState(settings.autoSyncEnabled);
   const [booster, setBooster] = useState(String(settings.boosterMultiplier));
   const [rounds, setRounds] = useState<Record<StageKey, string>>(() => {
     const r = {} as Record<StageKey, string>;
@@ -121,6 +122,7 @@ export default function SettingsForm({
       boosterMultiplier: boosterNum,
       roundMultipliers,
       scoringRules,
+      autoSyncEnabled: autoSync,
     };
     if (clearPassword) body.joinPassword = null;
     else if (joinPassword.trim() !== '') body.joinPassword = joinPassword;
@@ -283,6 +285,26 @@ export default function SettingsForm({
               : `Total: ${splitSum}% — must sum to 100`
             : 'Enter whole percents in every field'}
         </p>
+      </div>
+
+      {/* Automatic results */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3">
+        <label className="flex items-start gap-3 text-sm text-zinc-200">
+          <input
+            data-testid="admin-autosync"
+            type="checkbox"
+            checked={autoSync}
+            onChange={(e) => setAutoSync(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-emerald-500"
+          />
+          <span>
+            Automatic results
+            <span className="mt-0.5 block text-xs font-normal text-zinc-500">
+              Fill final scores &amp; first scorer from the live feed automatically.
+              Anything you enter by hand always wins and is never overwritten.
+            </span>
+          </span>
+        </label>
       </div>
 
       {/* Multipliers */}

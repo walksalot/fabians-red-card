@@ -8,6 +8,13 @@
       "when": 1781145096107,
       "tag": "0000_fat_stone_men",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1781150101906,
+      "tag": "0001_sloppy_garia",
+      "breakpoints": true
     }
   ]
 }

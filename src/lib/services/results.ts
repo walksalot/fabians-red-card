@@ -86,10 +86,8 @@ function validateScore(label: string, value: number): void {
   }
 }
 
-/** Enter (or re-enter — results are editable) a final result, then recompute points. */
-export function enterResult(db: Db, adminUserId: number, input: EnterResultInput): MatchRow {
-  requireResultsAdmin(db, adminUserId);
-  getMatchOrThrow(db, input.matchId);
+/** Shared write+recompute for a final result. `source` records who entered it. */
+function writeResult(db: Db, input: EnterResultInput, source: 'manual' | 'auto'): MatchRow {
   validateScore('homeScore', input.homeScore);
   validateScore('awayScore', input.awayScore);
 
@@ -118,6 +116,11 @@ export function enterResult(db: Db, adminUserId: number, input: EnterResultInput
         awayScore: input.awayScore,
         firstScorer,
         firstScoringTeam,
+        resultSource: source,
+        // a final result clears any lingering live score
+        liveHome: null,
+        liveAway: null,
+        liveStatus: null,
       })
       .where(eq(schema.matches.id, input.matchId))
       .returning()
@@ -126,6 +129,42 @@ export function enterResult(db: Db, adminUserId: number, input: EnterResultInput
     recomputeMatch(db, input.matchId);
     return updated;
   });
+}
+
+/** Enter (or re-enter — results are editable) a final result, then recompute points. */
+export function enterResult(db: Db, adminUserId: number, input: EnterResultInput): MatchRow {
+  requireResultsAdmin(db, adminUserId);
+  getMatchOrThrow(db, input.matchId);
+  return writeResult(db, input, 'manual');
+}
+
+/**
+ * Auto-sync entry point (no user — called by the server's feed poller). Trusted
+ * caller, so no admin check. NEVER overwrites a result an admin typed by hand:
+ * a 'manual' result is the admin's final word.
+ */
+export function enterResultAuto(db: Db, input: EnterResultInput): MatchRow | null {
+  const match = getMatchOrThrow(db, input.matchId);
+  if (match.resultSource === 'manual') return null;
+  return writeResult(db, input, 'auto');
+}
+
+/** Record an in-progress live score from the feed (display only; never scores points). */
+export function setLiveScore(
+  db: Db,
+  input: { matchId: number; liveHome: number; liveAway: number; updatedAtMs: number },
+): void {
+  const match = getMatchOrThrow(db, input.matchId);
+  if (match.resultSource === 'manual' || match.status === 'finished') return;
+  db.update(schema.matches)
+    .set({
+      liveHome: input.liveHome,
+      liveAway: input.liveAway,
+      liveStatus: 'in',
+      liveUpdatedAt: input.updatedAtMs,
+    })
+    .where(eq(schema.matches.id, input.matchId))
+    .run();
 }
 
 /**
@@ -149,6 +188,7 @@ export function clearResult(db: Db, adminUserId: number, matchId: number): Match
         awayScore: null,
         firstScorer: null,
         firstScoringTeam: null,
+        resultSource: null,
       })
       .where(eq(schema.matches.id, matchId))
       .returning()
