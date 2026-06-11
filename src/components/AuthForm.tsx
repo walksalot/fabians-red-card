@@ -11,8 +11,11 @@ export interface AuthUser {
   displayName: string;
 }
 
+// No placeholder override — the global ::placeholder rule (zinc-500) keeps AA
+// contrast. Same field recipe as PickForm's wideInputClass (zinc-950/60 well,
+// zinc-700 border, emerald focus ring) — one input language app-wide.
 const inputClass =
-  'h-12 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-400 focus:outline-none';
+  'h-12 w-full rounded-xl border border-zinc-700 bg-zinc-950/60 px-4 text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30';
 
 /**
  * Shared login/register form. POSTs /api/auth/<mode>; the session cookie is set
@@ -111,13 +114,13 @@ export function AuthForm({
         />
       </label>
 
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
+      {error ? <p className="text-sm text-brand-bright">{error}</p> : null}
 
       <button
         type="submit"
         data-testid="auth-submit"
         disabled={busy}
-        className="h-12 w-full rounded-xl bg-emerald-400 font-semibold text-zinc-950 transition-transform active:scale-[.99] disabled:opacity-50"
+        className="h-12 w-full rounded-xl bg-emerald-400 font-semibold text-zinc-950 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 active:scale-[.99] disabled:opacity-50"
       >
         {busy
           ? 'One moment…'

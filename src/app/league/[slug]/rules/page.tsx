@@ -25,8 +25,10 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-      <h2 className="text-base font-semibold text-emerald-400">{title}</h2>
+    <section className="card p-4">
+      <h2 className="text-base font-bold tracking-tight text-zinc-50">
+        {title}
+      </h2>
       <div className="mt-2 space-y-2 text-sm leading-relaxed text-zinc-300">
         {children}
       </div>
@@ -84,6 +86,16 @@ export default async function RulesPage({
 
   return (
     <div className="space-y-4 pb-4">
+      {/* Same screen-header recipe as Today/History day headers — every league
+          tab opens with an eyebrow over a bold title. */}
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+          How scoring works
+        </p>
+        <h2 className="text-lg font-extrabold tracking-tight text-zinc-50">
+          Rules
+        </h2>
+      </div>
       <Section title="Making picks">
         <p>
           For every match you predict three things: the <strong>exact final
@@ -93,7 +105,8 @@ export default async function RulesPage({
           <strong>first team to score</strong>.
         </p>
         <p>
-          <strong>Picks lock at kickoff.</strong> You can change a pick as
+          <strong>Picks lock at kickoff.</strong>{' '}
+          You can change a pick as
           often as you like before the match starts, but the moment it kicks
           off the pick is frozen. No pick on a match means zero points for that
           match — no exceptions, no late entries, no &ldquo;my wifi
@@ -111,13 +124,17 @@ export default async function RulesPage({
           </thead>
           <tbody>
             {scoringRows.map((row) => (
-              <tr key={row.name} className="border-t border-zinc-800 align-top">
-                <td className="py-2 pr-2">
-                  <p className="font-medium text-zinc-100">{row.name}</p>
-                  <p className="mt-0.5 text-xs text-zinc-400">{row.how}</p>
+              <tr key={row.name} className="border-t border-white/5 align-top">
+                <td className="py-2.5 pr-3">
+                  <p className="font-semibold text-zinc-100">{row.name}</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-zinc-400">
+                    {row.how}
+                  </p>
                 </td>
-                <td className="py-2 text-right font-bold text-emerald-400">
-                  {row.points}
+                <td className="py-2.5 text-right">
+                  <span className="inline-flex min-w-9 items-center justify-center rounded-lg bg-emerald-400/10 px-2 py-1 text-sm font-bold tabular-nums text-emerald-300 ring-1 ring-inset ring-emerald-400/25">
+                    {row.points}
+                  </span>
                 </td>
               </tr>
             ))}
@@ -144,24 +161,37 @@ export default async function RulesPage({
       </Section>
 
       <Section title="Round multipliers">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="text-xs uppercase tracking-wide text-zinc-500">
-              <th className="py-1 pr-2 font-semibold">Round</th>
-              <th className="py-1 text-right font-semibold">Multiplier</th>
-            </tr>
-          </thead>
-          <tbody>
-            {STAGE_ORDER.map((stage) => (
-              <tr key={stage} className="border-t border-zinc-800">
-                <td className="py-1.5 pr-2">{STAGE_LABELS[stage]}</td>
-                <td className="py-1.5 text-right font-semibold text-zinc-100">
-                  ×{roundMultipliers[stage] ?? 1}
-                </td>
+        {STAGE_ORDER.every((stage) => (roundMultipliers[stage] ?? 1) === 1) ? (
+          <p>
+            Every round counts the same in this league — no stage multipliers
+            (×1 across the board).
+          </p>
+        ) : (
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="text-xs uppercase tracking-wide text-zinc-400">
+                <th className="py-1 pr-2 font-semibold">Round</th>
+                <th className="py-1 text-right font-semibold">Multiplier</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {STAGE_ORDER.map((stage) => (
+                <tr key={stage} className="border-t border-white/5">
+                  <td className="py-1.5 pr-2">{STAGE_LABELS[stage]}</td>
+                  <td
+                    className={`py-1.5 text-right font-semibold tabular-nums ${
+                      (roundMultipliers[stage] ?? 1) !== 1
+                        ? 'text-amber-300'
+                        : 'text-zinc-400'
+                    }`}
+                  >
+                    ×{roundMultipliers[stage] ?? 1}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </Section>
 
       <Section title="Tiebreakers">

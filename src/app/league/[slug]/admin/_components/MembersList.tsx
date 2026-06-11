@@ -35,7 +35,7 @@ export default function MembersList({ slug, members: initialMembers, currentUser
 
   return (
     <div className="space-y-2">
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-brand-bright">{error}</p>}
       <ul className="divide-y divide-zinc-800">
         {members.map((m) => {
           const isYou = m.userId === currentUserId;
@@ -73,10 +73,12 @@ export default function MembersList({ slug, members: initialMembers, currentUser
                     data-testid={`member-remove-${m.username}`}
                     disabled={busyId === m.userId}
                     onClick={() => onRemoveClick(m)}
-                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold active:scale-95 disabled:opacity-60 ${
+                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-60 ${
                       confirming
-                        ? 'bg-red-500 text-white'
-                        : 'border border-red-500/40 text-red-400'
+                        ? 'bg-brand text-white'
+                        : // Quiet at rest — destructive red only appears on
+                          // intent (hover/confirm), not eleven times down a list.
+                          'text-zinc-500 hover:bg-brand/10 hover:text-brand-bright'
                     }`}
                   >
                     {busyId === m.userId

@@ -54,7 +54,7 @@ export default function JoinPrompt({
       >
         {busy ? 'Joining…' : 'Join league'}
       </button>
-      {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+      {error && <p className="mt-2 text-sm text-brand-bright">{error}</p>}
     </div>
   );
 }

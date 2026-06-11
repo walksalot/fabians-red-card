@@ -13,14 +13,16 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]['key'];
 
-function TabIcon({ tab }: { tab: TabKey }) {
+function TabIcon({ tab, active }: { tab: TabKey; active: boolean }) {
+  // Active glyphs render heavier (2.5 vs 1.8 stroke) so the selected tab
+  // reads at a glance, the way native tab bars switch to filled variants.
   const common = {
     width: 22,
     height: 22,
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
-    strokeWidth: 1.8,
+    strokeWidth: active ? 2.5 : 1.8,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     'aria-hidden': true,
@@ -78,7 +80,7 @@ export function TabBar({ slug: slugProp }: { slug?: string } = {}) {
   if (!slug) return null;
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-zinc-800 bg-zinc-950/90 backdrop-blur"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-white/5 bg-zinc-950/80 backdrop-blur-xl"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <div className="mx-auto flex w-full max-w-md">
@@ -91,12 +93,21 @@ export function TabBar({ slug: slugProp }: { slug?: string } = {}) {
               href={href}
               data-testid={`tab-${tab.key}`}
               aria-current={active ? 'page' : undefined}
-              className={`flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+              className={`group relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[11px] font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400/60 ${
                 active ? 'text-emerald-400' : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              <TabIcon tab={tab.key} />
-              {tab.label}
+              {/* active indicator: 2px rounded bar along the top edge */}
+              <span
+                aria-hidden="true"
+                className={`absolute inset-x-4 top-0 h-0.5 rounded-full bg-emerald-400 transition-opacity duration-200 ${
+                  active ? 'opacity-100' : 'opacity-0'
+                }`}
+              />
+              <span className="transition-transform duration-150 group-active:scale-90">
+                <TabIcon tab={tab.key} active={active} />
+              </span>
+              <span className={active ? 'font-semibold' : ''}>{tab.label}</span>
             </Link>
           );
         })}

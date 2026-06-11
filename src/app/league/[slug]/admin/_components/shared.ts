@@ -43,6 +43,9 @@ export interface AdminMatch {
   awayTeamId: number | null;
   homeName: string; // team name or knockout placeholder label
   awayName: string;
+  /** FIFA 3-letter codes (null for TBD/placeholder teams) — drive flag + code labels. */
+  homeCode: string | null;
+  awayCode: string | null;
   homeScore: number | null;
   awayScore: number | null;
   firstScorer: string | null;
@@ -117,6 +120,16 @@ export function formatMatchday(matchday: string): string {
     day: 'numeric',
     timeZone: 'UTC',
   }).format(new Date(`${matchday}T12:00:00Z`));
+}
+
+/** YYYY-MM-DD matchday (America/New_York) for a timestamp — for "today" checks. */
+export function matchdayOf(ms: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: 'America/New_York',
+  }).format(new Date(ms));
 }
 
 /** Kickoff time in America/New_York (matchdays are NY dates). Fixed locale: SSR-safe. */

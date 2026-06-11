@@ -2,9 +2,9 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { schema } from '@/db';
 import { nowMs } from '@/lib/clock';
 import { getTodayBoard } from '@/lib/services/today';
+import EmptyState from '@/components/EmptyState';
 import EntrySwitcher from '../_components/EntrySwitcher';
 import TodayBoard from '../_components/TodayBoard';
-import { formatMatchday } from '../_components/format';
 import {
   loadLeagueContext,
   pickSelectedEntry,
@@ -40,9 +40,13 @@ export default async function TodayPage({
   const rawItems = board?.matches ?? [];
 
   const teamRows = db.select().from(schema.teams).all();
-  const teamMap = new Map(teamRows.map((t) => [t.id, t.name]));
+  const teamMap = new Map(teamRows.map((t) => [t.id, t]));
   const nameOf = (teamId: number | null, placeholder: string | null) =>
-    teamId !== null ? (teamMap.get(teamId) ?? 'TBD') : (placeholder ?? 'TBD');
+    teamId !== null
+      ? (teamMap.get(teamId)?.name ?? 'TBD')
+      : (placeholder ?? 'TBD');
+  const codeOf = (teamId: number | null) =>
+    teamId !== null ? (teamMap.get(teamId)?.code ?? null) : null;
 
   // The booster row(s) for the matchday(s) on the board (board can span the
   // in-progress matchday plus the next one).
@@ -114,6 +118,8 @@ export default async function TodayPage({
       stage: match.stage,
       homeName: nameOf(match.homeTeamId, match.homePlaceholder),
       awayName: nameOf(match.awayTeamId, match.awayPlaceholder),
+      homeCode: codeOf(match.homeTeamId),
+      awayCode: codeOf(match.awayTeamId),
       venue: match.venue,
       city: match.city,
       status: match.status === 'finished' ? 'finished' : 'scheduled',
@@ -147,12 +153,19 @@ export default async function TodayPage({
     ? items.find((i) => i.matchId === headerBooster.matchId)
     : undefined;
   const boosterLabel = headerBooster
-    ? `used on ${
+    ? `On ${
         headerHolder
           ? `${headerHolder.homeName} vs ${headerHolder.awayName}`
           : `match #${headerBooster.matchId}`
       }`
-    : 'available';
+    : 'Booster available';
+
+  // One shared stage eyebrow when every fixture is the same stage — cards then
+  // drop their per-card stage caption (pure repetition on single-stage days).
+  // The day header itself renders inside TodayBoard so its pick-progress count
+  // updates live as picks save.
+  const stages = [...new Set(items.map((i) => i.stage))];
+  const commonStage = stages.length === 1 ? stages[0] : null;
 
   return (
     <div className="space-y-4">
@@ -163,24 +176,21 @@ export default async function TodayPage({
         />
       )}
       {boardMatchday !== null && items.length > 0 ? (
-        <>
-          <div>
-            <h2 className="text-base font-semibold">
-              {formatMatchday(boardMatchday)}
-            </h2>
-            <p className="text-sm text-zinc-400">Booster: {boosterLabel}</p>
-          </div>
-          <TodayBoard
-            entryId={entry.id}
-            serverNowMs={nowMs()}
-            boosterMultiplier={league.boosterMultiplier}
-            items={items}
-          />
-        </>
+        <TodayBoard
+          entryId={entry.id}
+          serverNowMs={nowMs()}
+          boosterMultiplier={league.boosterMultiplier}
+          items={items}
+          commonStage={commonStage}
+          matchday={boardMatchday}
+          boosterLabel={boosterLabel}
+          boosterArmed={headerBooster !== undefined}
+        />
       ) : (
-        <p className="text-zinc-400">
-          No matches on the board — the tournament schedule is clear for now.
-        </p>
+        <EmptyState
+          title="No matches on the board"
+          sub="The tournament schedule is clear for now — picks open when the next matchday lands."
+        />
       )}
     </div>
   );

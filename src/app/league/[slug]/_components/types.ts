@@ -33,6 +33,9 @@ export interface TodayMatchView {
   stage: string;
   homeName: string;
   awayName: string;
+  /** FIFA 3-letter codes (null for TBD/placeholder teams) — drive flag emoji. */
+  homeCode: string | null;
+  awayCode: string | null;
   venue: string;
   city: string;
   status: 'scheduled' | 'finished';
@@ -51,6 +54,27 @@ export interface TodayMatchView {
   points: { total: number; breakdown: BreakdownView | null } | null;
 }
 
+/**
+ * One LOCKED or FINISHED match on the current matchday with an entry's pick —
+ * the leaderboard's "what did they put on it" reveal. Open (unkicked) picks
+ * are never serialized into this shape; the server helper filters them out.
+ */
+export interface LockedPickView {
+  matchId: number;
+  homeName: string;
+  awayName: string;
+  homeCode: string | null;
+  awayCode: string | null;
+  status: 'scheduled' | 'finished';
+  homeScore: number | null;
+  awayScore: number | null;
+  liveHome: number | null;
+  liveAway: number | null;
+  liveStatus: string | null;
+  pick: PickView | null;
+  points: { total: number; breakdown: BreakdownView | null } | null;
+}
+
 export interface LeaderboardRowView {
   rank: number;
   entryId: number;
@@ -61,6 +85,10 @@ export interface LeaderboardRowView {
   exactCount: number;
   scorerHits: number;
   outcomeCount: number;
+  /** Points banked on the current matchday — the table's "+N today" delta. */
+  todayPoints?: number;
+  /** This entry's picks on locked/finished matches today (expandable rows). */
+  lockedPicks?: LockedPickView[];
 }
 
 export interface PrizePoolView {
@@ -91,6 +119,9 @@ export interface HistoryItemView {
   kickoffUtc: string;
   homeName: string;
   awayName: string;
+  /** FIFA 3-letter codes (null for TBD/placeholder teams) — drive flag emoji. */
+  homeCode: string | null;
+  awayCode: string | null;
   homeScore: number;
   awayScore: number;
   firstScorer: string | null;

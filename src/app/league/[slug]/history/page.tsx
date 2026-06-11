@@ -52,9 +52,13 @@ export default async function HistoryPage({
 
   const pickByMatch = new Map(myPicks.map((p) => [p.matchId, p]));
   const pointByMatch = new Map(myPoints.map((p) => [p.matchId, p]));
-  const teamMap = new Map(teamRows.map((t) => [t.id, t.name]));
+  const teamMap = new Map(teamRows.map((t) => [t.id, t]));
   const nameOf = (teamId: number | null, placeholder: string | null) =>
-    teamId !== null ? (teamMap.get(teamId) ?? 'TBD') : (placeholder ?? 'TBD');
+    teamId !== null
+      ? (teamMap.get(teamId)?.name ?? 'TBD')
+      : (placeholder ?? 'TBD');
+  const codeOf = (teamId: number | null) =>
+    teamId !== null ? (teamMap.get(teamId)?.code ?? null) : null;
 
   // Group by matchday, newest day first; kickoff order within a day.
   const byDay = new Map<string, MatchRow[]>();
@@ -95,6 +99,8 @@ export default async function HistoryPage({
         kickoffUtc: m.kickoffUtc,
         homeName: nameOf(m.homeTeamId, m.homePlaceholder),
         awayName: nameOf(m.awayTeamId, m.awayPlaceholder),
+        homeCode: codeOf(m.homeTeamId),
+        awayCode: codeOf(m.awayTeamId),
         homeScore: m.homeScore ?? 0,
         awayScore: m.awayScore ?? 0,
         firstScorer: m.firstScorer,

@@ -24,9 +24,9 @@ interface Toast {
 }
 
 const inputCls =
-  'w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-emerald-400 focus:outline-none';
+  'w-full rounded-xl border border-zinc-700 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30';
 const numCls =
-  'w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-center text-sm text-zinc-100 focus:border-emerald-400 focus:outline-none';
+  'w-full rounded-xl border border-zinc-700 bg-zinc-950/60 px-2 py-1.5 text-center text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30';
 const labelCls = 'block text-xs font-medium uppercase tracking-wide text-zinc-400';
 
 export default function SettingsForm({
@@ -193,7 +193,7 @@ export default function SettingsForm({
                 type="checkbox"
                 checked={clearPassword}
                 onChange={(e) => setClearPassword(e.target.checked)}
-                className="h-3.5 w-3.5 accent-red-500"
+                className="h-3.5 w-3.5 accent-brand"
               />
               Clear password
             </label>
@@ -256,14 +256,14 @@ export default function SettingsForm({
                 onChange={(e) =>
                   setPayout(payout.map((x, j) => (j === i ? e.target.value : x)))
                 }
-                className="w-16 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-center text-sm text-zinc-100 focus:border-emerald-400 focus:outline-none"
+                className="w-16 rounded-xl border border-zinc-700 bg-zinc-950/60 px-2 py-1.5 text-center text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
               />
               {payout.length > 3 && (
                 <button
                   type="button"
                   aria-label={`Remove place ${i + 1}`}
                   onClick={() => setPayout(payout.filter((_, j) => j !== i))}
-                  className="rounded px-1 text-zinc-500 hover:text-red-400"
+                  className="rounded px-1 text-zinc-500 hover:text-brand-bright"
                 >
                   ×
                 </button>
@@ -273,12 +273,12 @@ export default function SettingsForm({
           <button
             type="button"
             onClick={() => setPayout([...payout, '0'])}
-            className="rounded-lg border border-zinc-700 px-2 py-1.5 text-xs text-zinc-300"
+            className="rounded-xl border border-zinc-700 px-2 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-zinc-800/60"
           >
             + place
           </button>
         </div>
-        <p className={`text-xs ${splitOk ? 'text-emerald-400' : 'text-red-400'}`}>
+        <p className={`text-xs ${splitOk ? 'text-emerald-400' : 'text-brand-bright'}`}>
           {splitValid
             ? splitOk
               ? 'Total: 100% ✓'
@@ -319,7 +319,7 @@ export default function SettingsForm({
           step="any"
           value={booster}
           onChange={(e) => setBooster(e.target.value)}
-          className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-center text-sm text-zinc-100 focus:border-emerald-400 focus:outline-none"
+          className="w-24 rounded-xl border border-zinc-700 bg-zinc-950/60 px-2 py-1.5 text-center text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
         />
       </div>
 
@@ -328,7 +328,7 @@ export default function SettingsForm({
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
           {STAGES.map((s) => (
             <label key={s} className="space-y-1 text-center">
-              <span className="block text-[11px] text-zinc-500">{STAGE_LABELS[s]}</span>
+              <span className="block text-[11px] text-zinc-400">{STAGE_LABELS[s]}</span>
               <input
                 data-testid={`admin-round-${s}`}
                 aria-label={`${STAGE_LABELS[s]} multiplier`}
@@ -351,7 +351,7 @@ export default function SettingsForm({
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {SCORING_FIELDS.map((f) => (
             <label key={f.key} className="space-y-1 text-center">
-              <span className="block text-[11px] text-zinc-500">{f.label}</span>
+              <span className="block text-[11px] text-zinc-400">{f.label}</span>
               <input
                 data-testid={`admin-points-${f.key}`}
                 aria-label={`${f.label} points`}
@@ -375,7 +375,7 @@ export default function SettingsForm({
         type="submit"
         data-testid="admin-save"
         disabled={saving}
-        className="w-full rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 active:scale-[0.99] disabled:opacity-60"
+        className="w-full rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 active:scale-[0.99] disabled:opacity-60"
       >
         {saving ? 'Saving…' : 'Save settings'}
       </button>
@@ -384,7 +384,7 @@ export default function SettingsForm({
         <div
           role="status"
           className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-medium shadow-lg ${
-            toast.kind === 'ok' ? 'bg-emerald-500 text-zinc-950' : 'bg-red-500 text-white'
+            toast.kind === 'ok' ? 'bg-emerald-500 text-zinc-950' : 'bg-brand text-white'
           }`}
         >
           {toast.text}

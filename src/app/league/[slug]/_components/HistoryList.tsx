@@ -1,22 +1,14 @@
+import EmptyState from '@/components/EmptyState';
+import { BreakdownChips, breakdownChips } from './breakdown-chips';
+import { codeToFlagEmoji, shortTeamName } from './flags';
 import { STAGE_LABELS, formatMatchday, formatPoints } from './format';
-import type { BreakdownView, HistoryDayView, HistoryItemView } from './types';
+import type { HistoryDayView, HistoryItemView } from './types';
 
 /**
  * Presentational history list (no client interactivity — rendered on the server).
- * Finished matches grouped by matchday (newest day first) with points chips.
+ * Finished matches grouped by matchday (newest day first) with points chips
+ * (shared with Today's finished cards via ./breakdown-chips).
  */
-
-function breakdownChips(b: BreakdownView): string[] {
-  const chips: string[] = [];
-  if (b.exact > 0) chips.push(`Exact +${formatPoints(b.exact)}`);
-  if (b.outcome > 0) chips.push(`Outcome +${formatPoints(b.outcome)}`);
-  if (b.scorer > 0) chips.push(`Scorer +${formatPoints(b.scorer)}`);
-  if (b.firstTeam > 0) chips.push(`First team +${formatPoints(b.firstTeam)}`);
-  if (b.underdog > 0) chips.push(`Underdog +${formatPoints(b.underdog)}`);
-  if (b.roundMultiplier !== 1) chips.push(`×${b.roundMultiplier} round`);
-  if (b.boosterMultiplier !== 1) chips.push(`×${b.boosterMultiplier} booster`);
-  return chips;
-}
 
 function firstTeamLabel(item: HistoryItemView): string | null {
   const ft = item.myPick?.predFirstTeam ?? null;
@@ -25,58 +17,119 @@ function firstTeamLabel(item: HistoryItemView): string | null {
   return ft === 'home' ? item.homeName : item.awayName;
 }
 
+/**
+ * Flag + name fixture label — one texture for every history card. Long FIFA
+ * names render their short display form (never a mid-word ellipsis stranding
+ * the flag); title keeps the full name reachable on press-and-hold.
+ */
+function HistoryTeam({
+  name,
+  code,
+  align,
+}: {
+  name: string;
+  code: string | null;
+  align: 'left' | 'right';
+}) {
+  const flag = codeToFlagEmoji(code);
+  const flagSpan = flag ? (
+    <span aria-hidden="true" className="shrink-0 text-base leading-none">
+      {flag}
+    </span>
+  ) : null;
+  return (
+    <span
+      className={`flex min-w-0 items-center gap-1.5 ${
+        align === 'right' ? 'justify-end' : ''
+      }`}
+    >
+      {align === 'left' ? flagSpan : null}
+      <span
+        title={name}
+        className={`truncate text-sm font-semibold text-zinc-100 ${
+          align === 'right' ? 'text-right' : ''
+        }`}
+      >
+        {shortTeamName(name)}
+      </span>
+      {align === 'right' ? flagSpan : null}
+    </span>
+  );
+}
+
 function HistoryItem({ item }: { item: HistoryItemView }) {
   const chips = item.breakdown ? breakdownChips(item.breakdown) : null;
   const first = firstTeamLabel(item);
+  const scored = item.total !== null && item.total > 0;
+  // The "No points this match" chip already says it — skip the grey "0 pts".
+  const showZeroChip = chips !== null && chips.length === 0;
+  // Scannable W/L texture: tint the pick scoreline by result quality —
+  // emerald exact hit, amber outcome-only, muted miss.
+  const pickTone = item.breakdown
+    ? item.breakdown.exact > 0
+      ? 'text-emerald-400'
+      : item.breakdown.outcome > 0
+        ? 'text-amber-300'
+        : 'text-zinc-400'
+    : 'text-zinc-100';
   return (
-    <div
-      data-testid={`history-match-${item.matchId}`}
-      className="rounded-xl border border-zinc-800 bg-zinc-900 p-4"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-sm font-semibold">
-            {item.homeName} {item.homeScore}–{item.awayScore} {item.awayName}
-          </p>
-          <p className="text-xs text-zinc-500">
-            {STAGE_LABELS[item.stage] ?? item.stage}
-            {item.firstScorer ? ` · First scorer: ${item.firstScorer}` : ''}
-          </p>
-        </div>
-        <p className="shrink-0 text-sm font-semibold text-emerald-400">
-          {item.total !== null ? `+${formatPoints(item.total)}` : '0'} pts
+    <div data-testid={`history-match-${item.matchId}`} className="card p-4">
+      {/* Fixture row: team | score | team — same grid language as Today. */}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+        <HistoryTeam name={item.homeName} code={item.homeCode} align="left" />
+        <span className="text-base font-extrabold tabular-nums tracking-tight text-zinc-50">
+          {item.homeScore}–{item.awayScore}
+        </span>
+        <HistoryTeam name={item.awayName} code={item.awayCode} align="right" />
+      </div>
+
+      {/* Meta row: stage + first scorer on the left, points on the right. */}
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-xs text-zinc-400">
+          {STAGE_LABELS[item.stage] ?? item.stage}
+          {item.firstScorer ? ` · First scorer: ${item.firstScorer}` : ''}
         </p>
+        {scored || !showZeroChip ? (
+          <p
+            className={`shrink-0 text-sm font-bold tabular-nums ${
+              scored ? 'text-emerald-400' : 'text-zinc-400'
+            }`}
+          >
+            {scored ? `+${formatPoints(item.total ?? 0)}` : '0'} pts
+          </p>
+        ) : null}
       </div>
 
       {item.myPick ? (
-        <p className="mt-2 text-sm text-zinc-300">
-          My pick:{' '}
-          <span className="font-medium">
-            {item.myPick.predHome}–{item.myPick.predAway}
-          </span>
-          {item.myPick.predScorer ? ` · ${item.myPick.predScorer}` : ''}
-          {first ? ` · first: ${first}` : ''}
-        </p>
+        // Same ticket-stub recipe as Today's locked/finished cards: eyebrow +
+        // bold score chip (result-quality tint kept on the score text) with
+        // scorer/first-team as the muted trailing segment.
+        <div className="mt-2.5">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+            Your pick
+          </p>
+          <div className="mt-1 flex min-w-0 items-center gap-2">
+            <span
+              className={`shrink-0 rounded-lg bg-zinc-950/60 px-2.5 py-1 text-base font-extrabold tabular-nums tracking-tight ring-1 ring-inset ring-white/10 ${pickTone}`}
+            >
+              {item.myPick.predHome}–{item.myPick.predAway}
+            </span>
+            {item.myPick.predScorer || first ? (
+              <span className="min-w-0 truncate text-xs text-zinc-400">
+                {item.myPick.predScorer ?? ''}
+                {item.myPick.predScorer && first ? ' · ' : ''}
+                {first ? `First: ${first}` : ''}
+              </span>
+            ) : null}
+          </div>
+        </div>
       ) : (
-        <p className="mt-2 text-sm text-zinc-500">No pick — 0 points.</p>
+        <p className="mt-2 text-sm text-zinc-400">No pick — 0 points.</p>
       )}
 
-      {chips && (
+      {item.breakdown && (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {chips.length > 0 ? (
-            chips.map((chip) => (
-              <span
-                key={chip}
-                className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300"
-              >
-                {chip}
-              </span>
-            ))
-          ) : (
-            <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">
-              No points this match
-            </span>
-          )}
+          <BreakdownChips breakdown={item.breakdown} />
         </div>
       )}
     </div>
@@ -86,30 +139,53 @@ function HistoryItem({ item }: { item: HistoryItemView }) {
 export default function HistoryList({ groups }: { groups: HistoryDayView[] }) {
   if (groups.length === 0) {
     return (
-      <p className="text-zinc-400">
-        No finished matches yet — history starts after the first final whistle.
-      </p>
+      <EmptyState
+        title="No finished matches yet"
+        sub="History starts after the first final whistle."
+      />
     );
   }
   return (
     <div className="space-y-6">
-      {groups.map((group) => (
-        <section key={group.matchday}>
-          <div className="mb-2 flex items-baseline justify-between gap-2">
-            <h2 className="text-sm font-semibold text-zinc-300">
-              {formatMatchday(group.matchday)}
-            </h2>
-            <p className="shrink-0 text-sm font-semibold text-emerald-400">
-              +{formatPoints(group.subtotal)} pts
-            </p>
-          </div>
-          <div className="space-y-3">
-            {group.items.map((item) => (
-              <HistoryItem key={item.matchId} item={item} />
-            ))}
-          </div>
-        </section>
-      ))}
+      {groups.map((group) => {
+        // Same day-header recipe as Today: tiny uppercase eyebrow over a bold
+        // date, subtotal chip right-aligned at the baseline — one typographic
+        // system for the "matchday" object across both timeline screens.
+        const stages = [...new Set(group.items.map((i) => i.stage))];
+        const stageLabel =
+          stages.length === 1 ? (STAGE_LABELS[stages[0]] ?? stages[0]) : 'Matchday';
+        const count = group.items.length;
+        return (
+          <section key={group.matchday}>
+            <div className="mb-2 flex items-end justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+                  {stageLabel} · {count} {count === 1 ? 'match' : 'matches'}
+                </p>
+                <h2 className="truncate font-display text-lg font-bold tracking-tight text-zinc-50">
+                  {formatMatchday(group.matchday)}
+                </h2>
+              </div>
+              <span
+                className={`chip mb-0.5 shrink-0 ring-1 ring-inset ${
+                  group.subtotal > 0
+                    ? 'bg-emerald-400/10 text-emerald-300 ring-emerald-400/25'
+                    : 'bg-zinc-800/80 text-zinc-400 ring-white/10'
+                }`}
+              >
+                {group.subtotal > 0
+                  ? `+${formatPoints(group.subtotal)} pts`
+                  : '0 pts'}
+              </span>
+            </div>
+            <div className="space-y-3">
+              {group.items.map((item) => (
+                <HistoryItem key={item.matchId} item={item} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }

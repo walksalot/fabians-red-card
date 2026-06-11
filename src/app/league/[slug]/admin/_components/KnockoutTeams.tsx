@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { apiSend, STAGE_LABELS, type AdminMatch, type AdminTeam } from './shared';
+import { adminSelectCls, Chevron } from './ui';
 
 interface Props {
   matches: AdminMatch[]; // r32+ matches that still have a placeholder side
@@ -28,8 +29,7 @@ export default function KnockoutTeams({ matches, teams }: Props) {
   );
 }
 
-const selectCls =
-  'min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 focus:border-emerald-400 focus:outline-none';
+const selectCls = `w-full ${adminSelectCls}`;
 
 function KnockoutRow({ match, teams }: { match: AdminMatch; teams: AdminTeam[] }) {
   const [homeId, setHomeId] = useState(
@@ -63,40 +63,46 @@ function KnockoutRow({ match, teams }: { match: AdminMatch; teams: AdminTeam[] }
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900 p-3">
-      <p className="text-[11px] text-zinc-500">
-        M{match.id} · {STAGE_LABELS[match.stage]} · {match.matchday}
+    <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+      <p className="text-[11px] text-zinc-400">
+        Match {match.id} · {STAGE_LABELS[match.stage]} · {match.matchday}
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          data-testid={`ko-home-${match.id}`}
-          aria-label={`Home team for match ${match.id}`}
-          value={homeId}
-          onChange={(e) => setHomeId(e.target.value)}
-          className={selectCls}
-        >
-          <option value="">{match.homeName}</option>
-          {teams.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name} ({t.code})
-            </option>
-          ))}
-        </select>
-        <span className="text-xs text-zinc-600">vs</span>
-        <select
-          data-testid={`ko-away-${match.id}`}
-          aria-label={`Away team for match ${match.id}`}
-          value={awayId}
-          onChange={(e) => setAwayId(e.target.value)}
-          className={selectCls}
-        >
-          <option value="">{match.awayName}</option>
-          {teams.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name} ({t.code})
-            </option>
-          ))}
-        </select>
+        <span className="relative min-w-0 flex-1">
+          <select
+            data-testid={`ko-home-${match.id}`}
+            aria-label={`Home team for match ${match.id}`}
+            value={homeId}
+            onChange={(e) => setHomeId(e.target.value)}
+            className={selectCls}
+          >
+            <option value="">{match.homeName}</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} ({t.code})
+              </option>
+            ))}
+          </select>
+          <Chevron className="pointer-events-none absolute right-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-zinc-500" />
+        </span>
+        <span className="text-xs text-zinc-400">vs</span>
+        <span className="relative min-w-0 flex-1">
+          <select
+            data-testid={`ko-away-${match.id}`}
+            aria-label={`Away team for match ${match.id}`}
+            value={awayId}
+            onChange={(e) => setAwayId(e.target.value)}
+            className={selectCls}
+          >
+            <option value="">{match.awayName}</option>
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} ({t.code})
+              </option>
+            ))}
+          </select>
+          <Chevron className="pointer-events-none absolute right-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-zinc-500" />
+        </span>
       </div>
       <div className="flex items-center gap-2">
         <button
@@ -104,14 +110,17 @@ function KnockoutRow({ match, teams }: { match: AdminMatch; teams: AdminTeam[] }
           data-testid={`ko-save-${match.id}`}
           disabled={saving}
           onClick={save}
-          className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-zinc-950 active:scale-95 disabled:opacity-60"
+          // Quiet-secondary recipe (same as PickForm's "Update pick"): 20+ of
+          // these stack vertically, so solid emerald stays reserved for the
+          // page's real primaries (Save settings / Save result).
+          className="rounded-xl bg-emerald-400/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-400/30 transition-colors hover:bg-emerald-400/20 active:scale-95 disabled:opacity-60"
         >
           {saving ? 'Saving…' : 'Assign teams'}
         </button>
         {msg && (
           <span
             role="status"
-            className={`text-xs ${msg.kind === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}
+            className={`text-xs ${msg.kind === 'ok' ? 'text-emerald-400' : 'text-brand-bright'}`}
           >
             {msg.text}
           </span>

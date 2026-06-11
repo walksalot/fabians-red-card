@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.data
+.ui-shots
+test-results
+playwright-report
+demo/node_modules
+demo/dist
+*.log
+.env*

@@ -45,12 +45,14 @@ export default function PasswordJoinForm({
   }
 
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-center">
+    <div className="card p-6 text-center">
       <h2 className="text-lg font-semibold">Join {leagueName}</h2>
       <p className="mt-1 text-sm text-zinc-400">
         This is a private league. Enter the join password your friend shared.
       </p>
       <form onSubmit={onSubmit} className="mt-4 space-y-3">
+        {/* Same field recipe as PickForm's wideInputClass — one input
+            language app-wide. */}
         <input
           data-testid="join-password"
           type="password"
@@ -58,7 +60,7 @@ export default function PasswordJoinForm({
           placeholder="League password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-center text-zinc-100"
+          className="h-12 w-full rounded-xl border border-zinc-700 bg-zinc-950/60 px-4 text-center text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
         />
         <button
           data-testid="join-submit"
@@ -69,7 +71,7 @@ export default function PasswordJoinForm({
           {busy ? 'Joining…' : 'Join league'}
         </button>
         {error && (
-          <p className="text-sm text-red-400" role="alert">
+          <p className="text-sm text-brand-bright" role="alert">
             {error}
           </p>
         )}

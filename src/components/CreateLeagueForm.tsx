@@ -4,8 +4,10 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { errorMessage, postJson } from './client-api';
 
+// Same field recipe as PickForm's wideInputClass — one input language
+// app-wide. No placeholder override (global ::placeholder keeps AA contrast).
 const inputClass =
-  'h-12 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-400 focus:outline-none';
+  'h-12 w-full rounded-xl border border-zinc-700 bg-zinc-950/60 px-4 text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30';
 
 /** Creates a league via POST /api/leagues, then navigates to its Today screen. */
 export function CreateLeagueForm() {
@@ -106,7 +108,7 @@ export function CreateLeagueForm() {
         />
       </label>
 
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
+      {error ? <p className="text-sm text-brand-bright">{error}</p> : null}
 
       <button
         type="submit"

@@ -49,6 +49,30 @@ export function ordinal(n: number): string {
   }
 }
 
+/**
+ * Gold / silver / bronze chip tones for podium places — one palette shared by
+ * the leaderboard rank badges, payout chips, profile rank chip and header chip.
+ */
+export const MEDAL_TONES: Record<number, string> = {
+  1: 'bg-amber-300/15 text-amber-300 ring-amber-300/40',
+  // Silver gets a cool slate cast + brighter fill — plain zinc-300 was
+  // indistinguishable from the default zinc-200 body text beside it.
+  2: 'bg-slate-300/15 text-slate-200 ring-slate-300/40',
+  3: 'bg-orange-400/10 text-orange-400 ring-orange-400/35',
+};
+
+/**
+ * Text-only medal tints for rank ORDINALS (e.g. the header rank chip) — never
+ * for metrics: the leaderboard PTS column stays neutral so one number column
+ * reads in one color.
+ */
+export const MEDAL_TEXT_TONES: Record<number, string> = {
+  1: 'text-amber-300',
+  // Brighter + cooler than the zinc-200 default so 2nd reads as a metal.
+  2: 'text-slate-100',
+  3: 'text-orange-400',
+};
+
 export const STAGE_LABELS: Record<string, string> = {
   group: 'Group stage',
   r32: 'Round of 32',

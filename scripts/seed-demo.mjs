@@ -8,7 +8,6 @@
 //
 // Pair with FAKE_NOW=2026-06-15T15:00:00Z: matches 1–11 are full-time, June 15
 // fixtures are upcoming on the Today board.
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';

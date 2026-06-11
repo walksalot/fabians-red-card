@@ -33,7 +33,7 @@ export function AuthPageClient({
         {mode === 'login' ? 'New here?' : 'Already have an account?'}{' '}
         <Link
           href={otherHref}
-          className="font-semibold text-emerald-400 hover:underline"
+          className="rounded font-semibold text-emerald-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
         >
           {mode === 'login' ? 'Create an account' : 'Sign in'}
         </Link>

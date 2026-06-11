@@ -51,11 +51,11 @@ export function JoinLeagueClient({
           data-testid="join-league"
           onClick={joinAsSignedInUser}
           disabled={busy}
-          className="h-12 w-full rounded-xl bg-emerald-400 font-semibold text-zinc-950 transition-transform active:scale-[.99] disabled:opacity-50"
+          className="h-12 w-full rounded-xl bg-emerald-400 font-semibold text-zinc-950 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 active:scale-[.99] disabled:opacity-50"
         >
           {busy ? 'Joining…' : `Join ${leagueName}`}
         </button>
-        {error ? <p className="text-sm text-red-400">{error}</p> : null}
+        {error ? <p className="text-sm text-brand-bright">{error}</p> : null}
       </div>
     );
   }
@@ -77,7 +77,7 @@ export function JoinLeagueClient({
             setMode(mode === 'register' ? 'login' : 'register');
             setError(null);
           }}
-          className="font-semibold text-emerald-400 hover:underline"
+          className="rounded font-semibold text-emerald-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
         >
           {mode === 'register' ? 'Sign in' : 'Create an account'}
         </button>

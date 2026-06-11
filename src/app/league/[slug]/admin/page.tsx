@@ -10,6 +10,7 @@ import MembersList from './_components/MembersList';
 import ResultsEntry from './_components/ResultsEntry';
 import KnockoutTeams from './_components/KnockoutTeams';
 import UnderdogPicker from './_components/UnderdogPicker';
+import { matchdayOf } from './_components/shared';
 import type {
   AdminMatch,
   AdminMember,
@@ -18,6 +19,9 @@ import type {
   ScoringRulesShape,
   StageKey,
 } from './_components/shared';
+
+/** Shared section-card recipe; scroll-mt clears the app header + sticky nav. */
+const sectionCls = 'scroll-mt-28 rounded-2xl bg-zinc-900 p-4';
 
 export const dynamic = 'force-dynamic';
 
@@ -142,6 +146,10 @@ export default async function AdminPage({
       m.awayTeamId !== null
         ? (teamById.get(m.awayTeamId)?.name ?? 'TBD')
         : (m.awayPlaceholder ?? 'TBD'),
+    homeCode:
+      m.homeTeamId !== null ? (teamById.get(m.homeTeamId)?.code ?? null) : null,
+    awayCode:
+      m.awayTeamId !== null ? (teamById.get(m.awayTeamId)?.code ?? null) : null,
     homeScore: m.homeScore,
     awayScore: m.awayScore,
     firstScorer: m.firstScorer,
@@ -179,6 +187,19 @@ export default async function AdminPage({
 
   const now = nowMs();
 
+  // "Results" jumps straight to today's (or the next) matchday accordion when
+  // the tournament still has days ahead; otherwise it lands on the section.
+  const todayNY = matchdayOf(now);
+  const hasResultsFocus = adminMatches.some((m) => m.matchday >= todayNY);
+  const sectionLinks = [
+    { href: '#invite', label: 'Invite' },
+    { href: '#settings', label: 'Settings' },
+    { href: '#members', label: 'Members' },
+    { href: hasResultsFocus ? '#results-today' : '#results', label: 'Results' },
+    { href: '#fixtures', label: 'Fixtures' },
+    { href: '#underdog', label: 'Underdog' },
+  ];
+
   return (
     <main className="min-h-dvh bg-zinc-950 pb-24 text-zinc-100">
       <div className="mx-auto max-w-xl space-y-5 px-4 py-6">
@@ -189,38 +210,78 @@ export default async function AdminPage({
           <h1 className="text-2xl font-bold">{league.name}</h1>
           <Link
             href={`/league/${slug}/today`}
-            className="inline-block text-sm text-zinc-400 underline underline-offset-2 hover:text-zinc-200"
+            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-zinc-800/60 px-3.5 text-xs font-semibold text-zinc-300 ring-1 ring-inset ring-white/10 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
           >
-            ← Back to Today
+            <svg
+              viewBox="0 0 24 24"
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M19 12H5m6-7-7 7 7 7" />
+            </svg>
+            Back to Today
           </Link>
         </header>
 
-        <section className="rounded-2xl bg-zinc-900 p-4">
+        {/* Sticky section nav: the admin page is one long scroll — these chips
+            anchor-jump to each block, sitting just below the app header. */}
+        <nav
+          aria-label="Admin sections"
+          className="sticky top-[52px] z-10 -mx-4 border-b border-white/5 bg-zinc-950/85 px-4 py-2 backdrop-blur-xl"
+        >
+          {/* The scrollbar is hidden, so the right-edge fade is the affordance
+              that more sections exist off-screen; pr-8 lets the last pill
+              scroll clear of the mask. */}
+          <div className="relative">
+            <div className="flex gap-1.5 overflow-x-auto pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {sectionLinks.map((l) => (
+                <a
+                  key={l.href}
+                  href={l.href}
+                  className="shrink-0 whitespace-nowrap rounded-full bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 ring-1 ring-inset ring-white/10 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+                >
+                  {l.label}
+                </a>
+              ))}
+            </div>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-zinc-950"
+            />
+          </div>
+        </nav>
+
+        <section id="invite" className={sectionCls}>
           <h2 className="mb-3 text-base font-semibold text-zinc-100">Invite</h2>
           <InviteBox inviteToken={league.inviteToken} memberCount={members.length} />
         </section>
 
-        <section className="rounded-2xl bg-zinc-900 p-4">
+        <section id="settings" className={sectionCls}>
           <h2 className="mb-3 text-base font-semibold text-zinc-100">Settings</h2>
           <SettingsForm slug={slug} settings={settings} />
         </section>
 
-        <section className="rounded-2xl bg-zinc-900 p-4">
+        <section id="members" className={sectionCls}>
           <h2 className="mb-3 text-base font-semibold text-zinc-100">Members</h2>
           <MembersList slug={slug} members={members} currentUserId={user.id} />
         </section>
 
-        <section className="rounded-2xl bg-zinc-900 p-4">
+        <section id="results" className={sectionCls}>
           <h2 className="mb-3 text-base font-semibold text-zinc-100">Results</h2>
           <ResultsEntry matches={adminMatches} nowMs={now} />
         </section>
 
-        <section className="rounded-2xl bg-zinc-900 p-4">
+        <section id="fixtures" className={sectionCls}>
           <h2 className="mb-3 text-base font-semibold text-zinc-100">Knockout teams</h2>
           <KnockoutTeams matches={knockoutMatches} teams={teamsList} />
         </section>
 
-        <section className="rounded-2xl bg-zinc-900 p-4">
+        <section id="underdog" className={sectionCls}>
           <h2 className="mb-3 text-base font-semibold text-zinc-100">Underdog</h2>
           <UnderdogPicker
             matches={underdogMatches}
