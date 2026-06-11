@@ -94,6 +94,15 @@ Playwright. Architecture contract in `CONTRACTS.md`. The official 104-match sche
 lives in `data/fixtures.json` / `data/teams.json` (kickoffs in UTC, verified against
 official sources); `scripts/validate-fixtures.mjs` re-checks its structure any time.
 
-Not included by design: payment processing, automated live-score feeds (results are
-manual; an optional feed could be added later without changing the data model), and
-push-notification kickoff reminders (the Today screen shows countdowns instead).
+Also in the box (all optional, all free, no API keys):
+
+- **Automatic results** — during match windows the server fills in final scores, first
+  goalscorers, live in-progress scores, and knockout bracket teams from ESPN's free
+  public feed. Manual entry always works and always wins: anything you type is marked
+  yours and the robot never touches it. Toggle in Admin → Settings ("Automatic results").
+- **Calendar reminders** — friends subscribe to `/api/calendar` once and their own phone
+  reminds them before each kickoff (the Today screen shows countdowns too).
+- **Daily backups** — the server snapshots the database to `.data/backups` once a day;
+  `npm run backup` does it on demand.
+
+Not included by design: payment processing (the pot is display-only).
