@@ -36,6 +36,27 @@ const teamIdByCode = new Map(
   sqlite.prepare('SELECT id, code FROM teams').all().map((r) => [r.code, r.id]),
 );
 
+// --- players (squads for the scorer dropdown) ----------------------------
+// Optional file: older checkouts without it still seed fine.
+const rostersPath = path.join(root, 'data/rosters.json');
+if (fs.existsSync(rostersPath)) {
+  const rosters = JSON.parse(fs.readFileSync(rostersPath, 'utf8'));
+  const insertPlayer = sqlite.prepare(`
+    INSERT INTO players (team_id, name, position) VALUES (?, ?, ?)
+    ON CONFLICT(team_id, name) DO UPDATE SET position = excluded.position
+  `);
+  let playerCount = 0;
+  for (const [code, players] of Object.entries(rosters)) {
+    const teamId = teamIdByCode.get(code);
+    if (!teamId) continue;
+    for (const p of players) {
+      insertPlayer.run(teamId, p.name, p.position ?? null);
+      playerCount++;
+    }
+  }
+  console.log(`Squads: ${playerCount} players across ${Object.keys(rosters).length} teams.`);
+}
+
 // --- matches -------------------------------------------------------------
 // matchday = calendar date of kickoff in America/New_York (tournament reference tz)
 const dayFmt = new Intl.DateTimeFormat('en-CA', {

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
+import { normalizeName } from '@/lib/scoring';
 import { codeToFlagEmoji } from './flags';
 import type { FirstTeam, PickView } from './types';
 
@@ -11,6 +12,9 @@ interface Props {
   awayName: string;
   homeCode?: string | null;
   awayCode?: string | null;
+  /** Squad names for the scorer picker; empty arrays fall back to free text only. */
+  homeSquad?: string[];
+  awaySquad?: string[];
   initial: PickView | null;
   /** Notifies the board a pick now exists server-side (drives card status marks). */
   onSaved?: () => void;
@@ -126,6 +130,8 @@ export default function PickForm({
   matchId,
   homeName,
   awayName,
+  homeSquad = [],
+  awaySquad = [],
   homeCode,
   awayCode,
   initial,
@@ -134,6 +140,8 @@ export default function PickForm({
   const [home, setHome] = useState(initial ? String(initial.predHome) : '');
   const [away, setAway] = useState(initial ? String(initial.predAway) : '');
   const [scorer, setScorer] = useState(initial?.predScorer ?? '');
+  const [scorerOpen, setScorerOpen] = useState(false);
+  const scorerBlurTimer = useRef<number | null>(null);
   const [firstTeam, setFirstTeam] = useState<'' | FirstTeam>(
     initial?.predFirstTeam ?? '',
   );
@@ -340,18 +348,79 @@ export default function PickForm({
           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
             First goalscorer <span className="text-emerald-400">+8</span>
           </span>
-          <input
-            data-testid="pick-scorer"
-            aria-label="First goalscorer"
-            type="text"
-            placeholder="e.g. Mbappé (optional)"
-            value={scorer}
-            onChange={(e) => {
-              setScorer(e.target.value);
-              touch();
-            }}
-            className={wideInputClass}
-          />
+          <div className="relative">
+            <input
+              data-testid="pick-scorer"
+              aria-label="First goalscorer"
+              type="text"
+              autoComplete="off"
+              placeholder="Tap to pick a player (optional)"
+              value={scorer}
+              role="combobox"
+              aria-expanded={scorerOpen}
+              aria-controls={`scorer-options-${matchId}`}
+              onFocus={() => setScorerOpen(true)}
+              onBlur={() => {
+                // let an option tap land before the panel closes
+                scorerBlurTimer.current = window.setTimeout(
+                  () => setScorerOpen(false),
+                  150,
+                );
+              }}
+              onChange={(e) => {
+                setScorer(e.target.value);
+                setScorerOpen(true);
+                touch();
+              }}
+              className={wideInputClass}
+            />
+            {scorerOpen && (homeSquad.length > 0 || awaySquad.length > 0) ? (
+              <div
+                id={`scorer-options-${matchId}`}
+                className="absolute inset-x-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60"
+              >
+                {(
+                  [
+                    [homeName, homeSquad],
+                    [awayName, awaySquad],
+                  ] as const
+                ).map(([team, squad]) => {
+                  const q = normalizeName(scorer);
+                  const options = squad.filter(
+                    (n) => q === '' || normalizeName(n).includes(q),
+                  );
+                  if (options.length === 0) return null;
+                  return (
+                    <div key={team}>
+                      <p className="sticky top-0 bg-zinc-900/95 px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500 backdrop-blur">
+                        {team}
+                      </p>
+                      {options.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          data-testid="scorer-option"
+                          // mousedown beats the input blur, so the tap registers
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            if (scorerBlurTimer.current !== null) {
+                              window.clearTimeout(scorerBlurTimer.current);
+                            }
+                            setScorer(n);
+                            setScorerOpen(false);
+                            touch();
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800 active:bg-zinc-800"
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
         </div>
         <div>
           <span className="mb-1 flex items-center justify-between gap-2">

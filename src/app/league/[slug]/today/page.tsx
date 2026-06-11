@@ -49,6 +49,29 @@ export default async function TodayPage({
   const codeOf = (teamId: number | null) =>
     teamId !== null ? (teamMap.get(teamId)?.code ?? null) : null;
 
+  // Squads for the scorer picker — only for teams actually on the board.
+  const boardTeamIds = [
+    ...new Set(
+      rawItems
+        .flatMap((i) => [i.match.homeTeamId, i.match.awayTeamId])
+        .filter((id): id is number => id !== null),
+    ),
+  ];
+  const squadByTeam = new Map<number, string[]>();
+  if (boardTeamIds.length > 0) {
+    for (const p of db
+      .select({ teamId: schema.players.teamId, name: schema.players.name })
+      .from(schema.players)
+      .where(inArray(schema.players.teamId, boardTeamIds))
+      .all()) {
+      const list = squadByTeam.get(p.teamId) ?? [];
+      list.push(p.name);
+      squadByTeam.set(p.teamId, list);
+    }
+  }
+  const squadOf = (teamId: number | null) =>
+    teamId !== null ? (squadByTeam.get(teamId) ?? []) : [];
+
   // The booster row(s) for the matchday(s) on the board (board can span the
   // in-progress matchday plus the next one).
   const days = [...new Set(rawItems.map((i) => i.match.matchday))];
@@ -131,6 +154,8 @@ export default async function TodayPage({
       liveHome: match.liveHome,
       liveAway: match.liveAway,
       liveStatus: match.liveStatus,
+      homeSquad: squadOf(match.homeTeamId),
+      awaySquad: squadOf(match.awayTeamId),
       myPick: myPick
         ? {
             predHome: myPick.predHome,

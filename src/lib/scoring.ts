@@ -85,6 +85,24 @@ function sign(d: number): -1 | 0 | 1 {
   return d > 0 ? 1 : d < 0 ? -1 : 0;
 }
 
+/**
+ * Forgiving scorer comparison ("the 90% match" the pool asked for, kept safe):
+ * after normalization, a pick matches the actual scorer when it is the full
+ * name OR a whole-token suffix of it — so "mbappe", "jiménez", and "van Dijk"
+ * all count for "Kylian Mbappé", "Raúl Jiménez", "Virgil van Dijk". Suffix-only
+ * (surnames identify players; first names alone — "kylian" — do not count).
+ */
+export function scorerMatches(pick: string, actual: string): boolean {
+  const p = normalizeName(pick);
+  const a = normalizeName(actual);
+  if (p === '' || a === '') return false;
+  if (p === a) return true;
+  const pT = p.split(' ');
+  const aT = a.split(' ');
+  if (pT.length >= aT.length) return false;
+  return aT.slice(aT.length - pT.length).join(' ') === p;
+}
+
 export function scorePick(
   pick: PickInput,
   result: ResultInput,
@@ -104,8 +122,7 @@ export function scorePick(
   const scorer =
     pick.predScorer !== null &&
     result.firstScorer !== null &&
-    normalizeName(pick.predScorer) !== '' &&
-    normalizeName(pick.predScorer) === normalizeName(result.firstScorer)
+    scorerMatches(pick.predScorer, result.firstScorer)
       ? rules.scorer
       : 0;
 

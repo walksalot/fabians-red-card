@@ -56,7 +56,14 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     const open = page.getByTestId('pick-form-2');
     await open.getByTestId('pick-home').fill('1');
     await open.getByTestId('pick-away').fill('1');
-    await open.getByTestId('pick-scorer').fill('Heung-min Son');
+    // scorer dropdown: type a partial name, pick the roster entry from the list
+    await open.getByTestId('pick-scorer').click();
+    await open.getByTestId('pick-scorer').fill('son');
+    const option = open.getByTestId('scorer-option').filter({ hasText: /son/i }).first();
+    await expect(option).toBeVisible();
+    const optionName = (await option.textContent()) ?? '';
+    await option.click();
+    await expect(open.getByTestId('pick-scorer')).toHaveValue(optionName);
     await open.getByTestId('pick-first-team').selectOption('away');
     await open.getByTestId('pick-save').click();
     await expect(open.getByText(/saved/i).first()).toBeVisible();

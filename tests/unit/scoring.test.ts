@@ -3,6 +3,7 @@ import {
   DEFAULT_SCORING_RULES,
   normalizeName,
   scorePick,
+  scorerMatches,
   type PickInput,
   type ResultInput,
 } from '@/lib/scoring';
@@ -230,5 +231,30 @@ describe('normalizeName', () => {
     expect(normalizeName('  Kylian  MBAPPÉ. ')).toBe(normalizeName('kylian mbappe'));
     expect(normalizeName('Müller')).toBe(normalizeName('muller'));
     expect(normalizeName('St. Juste')).toBe(normalizeName('st juste'));
+  });
+});
+
+describe('scorerMatches (forgiving scorer comparison)', () => {
+  it('full name matches with accents/case ignored', () => {
+    expect(scorerMatches('raul jimenez', 'Raúl Jiménez')).toBe(true);
+  });
+  it('surname alone counts', () => {
+    expect(scorerMatches('Mbappé', 'Kylian Mbappé')).toBe(true);
+    expect(scorerMatches('jimenez', 'Raúl Jiménez')).toBe(true);
+  });
+  it('multi-word surnames count as a token suffix', () => {
+    expect(scorerMatches('van Dijk', 'Virgil van Dijk')).toBe(true);
+  });
+  it('first name alone does NOT count', () => {
+    expect(scorerMatches('Kylian', 'Kylian Mbappé')).toBe(false);
+    expect(scorerMatches('Raúl', 'Raúl Jiménez')).toBe(false);
+  });
+  it('different players never match', () => {
+    expect(scorerMatches('Messi', 'Cristiano Ronaldo')).toBe(false);
+    expect(scorerMatches('Jiménez González', 'Raúl Jiménez')).toBe(false);
+  });
+  it('empty strings never match', () => {
+    expect(scorerMatches('', 'Anyone')).toBe(false);
+    expect(scorerMatches('  ', 'Anyone')).toBe(false);
   });
 });

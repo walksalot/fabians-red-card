@@ -76,6 +76,21 @@ export const teams = sqliteTable('teams', {
   groupLetter: text('group_letter').notNull(), // 'A'..'L'
 });
 
+// Squad lists (from the same free feed as auto-results, so scorer names in
+// picks and in results share one spelling). Refreshable; names are the contract.
+export const players = sqliteTable(
+  'players',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    teamId: integer('team_id')
+      .notNull()
+      .references(() => teams.id),
+    name: text('name').notNull(),
+    position: text('position'),
+  },
+  (t) => [uniqueIndex('players_team_name').on(t.teamId, t.name)],
+);
+
 export const matches = sqliteTable('matches', {
   id: integer('id').primaryKey(), // official FIFA match number 1..104
   stage: text('stage').notNull(), // 'group'|'r32'|'r16'|'qf'|'sf'|'third'|'final'

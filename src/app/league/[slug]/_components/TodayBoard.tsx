@@ -665,6 +665,8 @@ export default function TodayBoard({
               awayName={m.awayName}
               homeCode={m.homeCode}
               awayCode={m.awayCode}
+              homeSquad={m.homeSquad}
+              awaySquad={m.awaySquad}
               initial={m.myPick}
               onSaved={() =>
                 setSavedClient((s) =>

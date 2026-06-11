@@ -47,6 +47,9 @@ export interface TodayMatchView {
   liveHome: number | null;
   liveAway: number | null;
   liveStatus: string | null;
+  /** Squad names for the scorer picker (empty until teams are known). */
+  homeSquad: string[];
+  awaySquad: string[];
   myPick: PickView | null;
   boosted: boolean;
   /** True when the booster cannot be placed on / moved to this match right now. */

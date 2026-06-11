@@ -15,6 +15,13 @@
       "when": 1781150101906,
       "tag": "0001_sloppy_garia",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1781197837381,
+      "tag": "0002_open_ogun",
+      "breakpoints": true
     }
   ]
 }
