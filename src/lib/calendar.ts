@@ -52,7 +52,6 @@ export function buildCalendar(db: Db, leagueName: string): string {
       city: schema.matches.city,
       homePlaceholder: schema.matches.homePlaceholder,
       awayPlaceholder: schema.matches.awayPlaceholder,
-      homeName: schema.teams.name,
     })
     .from(schema.matches)
     .orderBy(asc(schema.matches.id))
