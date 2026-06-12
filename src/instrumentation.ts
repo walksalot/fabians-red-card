@@ -30,6 +30,21 @@ export async function register() {
     console.error('[data-fix] failed:', err);
   }
 
+  // Boot scrub: NULL any invalid scorer on a future (unkicked, unfinished)
+  // match — closes stale grandfathered picks without touching locked ones.
+  try {
+    const { getDb } = await import('@/db');
+    const { scrubInvalidFutureScorers } = await import('@/lib/data-fixes');
+    const scrubbed = scrubInvalidFutureScorers(getDb());
+    if (scrubbed.scorersCleared) {
+      console.log(
+        `[data-fix] cleared ${scrubbed.scorersCleared} invalid scorer pick(s) on future matches`,
+      );
+    }
+  } catch (err) {
+    console.error('[data-fix] scorer scrub failed:', err);
+  }
+
   if (process.env.SCHEDULER_DISABLED === '1') return;
 
   const { getDb } = await import('@/db');

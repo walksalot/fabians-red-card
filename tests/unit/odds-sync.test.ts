@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
-import { runSync, syncOddsHorizon } from '@/lib/sync/espn-sync';
+import { runSync, syncOddsHorizon, UNDERDOG_PROB_MAX } from '@/lib/sync/espn-sync';
 import { syncScorerOdds, type JsonFetcher } from '@/lib/sync/espn-props';
 import type { EspnEvent } from '@/lib/sync/espn-map';
 import { freshDb, withFakeNow } from '../helpers/db';
@@ -87,6 +87,24 @@ describe('odds via runSync', () => {
     await withFakeNow(BEFORE, () => runSync(db, async () => [preEventWithOdds('+110', '+120')]));
     m = db.select().from(schema.matches).where(eq(schema.matches.id, 2)).get()!;
     expect(m.underdogTeamId).toBeNull();
+  });
+
+  it('auto-underdog ON: a near-miss dog just over the threshold is NOT flagged', async () => {
+    const db = seedWorld(freshDb(), { autoUnderdog: 1 });
+    // home -350 / draw +475 / away +400 de-vigs the away side to ~0.174 —
+    // inside (0.15, 0.25], so the threshold itself must reject it.
+    await withFakeNow(BEFORE, () => runSync(db, async () => [preEventWithOdds('-350', '+400', '+475')]));
+    const m = db.select().from(schema.matches).where(eq(schema.matches.id, 2)).get()!;
+    const odds = JSON.parse(m.oddsJson!);
+    const weakerProb = Math.min(odds.homeProb, odds.awayProb);
+    // Guard the fixture: the dog must genuinely sit just above the line.
+    expect(weakerProb).toBeGreaterThan(UNDERDOG_PROB_MAX);
+    expect(weakerProb).toBeLessThanOrEqual(0.25);
+    expect(m.underdogTeamId).toBeNull();
+  });
+
+  it('pins the league-voted threshold value', () => {
+    expect(UNDERDOG_PROB_MAX).toBe(0.15);
   });
 
   it('auto-underdog flag freezes at kickoff (odds still stored)', async () => {

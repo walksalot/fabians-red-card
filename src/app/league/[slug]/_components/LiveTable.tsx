@@ -13,6 +13,7 @@ import {
   formatPoints,
   ordinal,
 } from './format';
+import { lastPlaceRank } from './standings-display';
 import type {
   LeaderboardRowView,
   LockedPickView,
@@ -133,6 +134,13 @@ function RaceSummary({
             <>
               You lead by{' '}
               <span className="tabular-nums">{formatPoints(gap)}</span> {unit}
+            </>
+          ) : mine.rank === rival.rank ? (
+            // Same rank = dead level on EVERY tiebreaker — nothing left to
+            // separate you, so an end like this splits the prize.
+            <>
+              Dead level with {rival.label} on every tiebreaker — end like
+              this and you split the prize
             </>
           ) : (
             <>Tied at the top with {rival.label} — tiebreakers decide</>
@@ -456,7 +464,11 @@ export default function LiveTable({
     };
   }, [slug]);
 
-  const lastRank = rows.length > 1 ? rows[rows.length - 1].rank : null;
+  // Red card only when a genuine bottom group exists — a full tie has no last
+  // place (and no card). Duplicate ranks elsewhere are fine: RankBadge and
+  // PODIUM_ROW_TONES are plain rank lookups, so a 1-1-3 tie renders two gold
+  // rows by design.
+  const lastRank = lastPlaceRank(rows);
 
   return (
     <div className="space-y-4">

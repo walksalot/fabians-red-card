@@ -49,9 +49,13 @@ export interface TodayMatchView {
   liveStatus: string | null;
   /** Feed's match clock ("55'", "HT") — minutes accrued, soccer counts up. */
   liveClock: string | null;
-  /** Squad names for the scorer picker (empty until teams are known). */
-  homeSquad: string[];
-  awaySquad: string[];
+  /**
+   * Squad names for the scorer picker. `null` = team unknown (knockout TBD —
+   * the server rejects picks on such matches outright with a 409);
+   * an empty array = team known but no squad data (validation fails open).
+   */
+  homeSquad: string[] | null;
+  awaySquad: string[] | null;
   /** Both team slots known? Knockout placeholders render a pending note. */
   teamsTbd: boolean;
   /** Betting cheat sheet (null when absent/stale); MatchOdds from '@/lib/odds'. */

@@ -256,16 +256,39 @@ describe('upsertPick', () => {
 
   it('rejects a predicted scorer longer than 80 characters', async () => {
     const { db, user, entry } = setup();
+    // Length is checked before squad rules; pin the at-the-limit acceptance on
+    // a match whose squads resolve empty (validation fails open there).
+    db.insert(schema.teams)
+      .values([
+        { id: 80, code: 'ZZ1', name: 'Nowhere FC', groupLetter: 'Z' },
+        { id: 81, code: 'ZZ2', name: 'Nullsville', groupLetter: 'Z' },
+      ])
+      .run();
+    const matchId = 45;
+    db.insert(schema.matches)
+      .values({
+        id: matchId,
+        stage: 'group',
+        kickoffUtc: KICKOFF_UTC,
+        matchday: MATCHDAY,
+        venue: 'Test Stadium',
+        city: 'Test City',
+        homeTeamId: 80,
+        awayTeamId: 81,
+      })
+      .run();
     await withFakeNow(BEFORE_KICKOFF, async () => {
       await expect(
         upsertPick(db, user.id, {
           ...basePick(entry.id),
+          matchId,
           predScorer: 'a'.repeat(81),
         }),
       ).rejects.toMatchObject({ status: 400 });
 
       const maxed = await upsertPick(db, user.id, {
         ...basePick(entry.id),
+        matchId,
         predScorer: 'a'.repeat(80),
       });
       expect(maxed.predScorer).toBe('a'.repeat(80));
@@ -469,6 +492,80 @@ describe('scorer roster validation', () => {
     );
     expect(resaved.updatedAt).toBe(Date.parse(t1));
     expect(resaved).toEqual(created);
+  });
+
+  it('fails OPEN when both squads resolve empty (teams unknown to rosters.json, no players rows)', async () => {
+    const { db, user, entry } = setup();
+    // Codes that exist in neither the players table nor data/rosters.json —
+    // missing squad data must never lock players out of the scorer component.
+    db.insert(schema.teams)
+      .values([
+        { id: 90, code: 'XX1', name: 'Mystery FC', groupLetter: 'Z' },
+        { id: 91, code: 'XX2', name: 'Unknown United', groupLetter: 'Z' },
+      ])
+      .run();
+    const matchId = 44;
+    db.insert(schema.matches)
+      .values({
+        id: matchId,
+        stage: 'group',
+        kickoffUtc: KICKOFF_UTC,
+        matchday: MATCHDAY,
+        venue: 'Test Stadium',
+        city: 'Test City',
+        homeTeamId: 90,
+        awayTeamId: 91,
+      })
+      .run();
+    await withFakeNow(BEFORE_KICKOFF, async () => {
+      const saved = await upsertPick(db, user.id, {
+        ...basePick(entry.id),
+        matchId,
+        predScorer: 'Anyone At All',
+      });
+      expect(saved.predScorer).toBe('Anyone At All');
+    });
+  });
+
+  it('grandfathers an identical re-save of a stored off-squad scorer, but re-validates on any change', async () => {
+    const { db, user, entry, matchId } = setupWithSquads();
+    // A pre-rule pick stored before validation existed (inserted directly).
+    db.insert(schema.picks)
+      .values({
+        entryId: entry.id,
+        matchId,
+        predHome: 2,
+        predAway: 1,
+        predScorer: 'Martinez', // bare surname — would fail validation today
+        predFirstTeam: 'home',
+        createdAt: 5,
+        updatedAt: 7,
+      })
+      .run();
+    await withFakeNow(BEFORE_KICKOFF, async () => {
+      // Byte-identical re-save: the no-op short-circuit runs BEFORE validation.
+      const resaved = await upsertPick(db, user.id, {
+        entryId: entry.id,
+        matchId,
+        predHome: 2,
+        predAway: 1,
+        predScorer: 'Martinez',
+        predFirstTeam: 'home',
+      });
+      expect(resaved.predScorer).toBe('Martinez');
+      expect(resaved.updatedAt).toBe(7); // untouched — nothing was written
+      // Changing anything (here: the scoreline) re-runs validation → 400.
+      await expect(
+        upsertPick(db, user.id, {
+          entryId: entry.id,
+          matchId,
+          predHome: 3,
+          predAway: 1,
+          predScorer: 'Martinez',
+          predFirstTeam: 'home',
+        }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
   });
 });
 

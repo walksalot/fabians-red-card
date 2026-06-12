@@ -5,16 +5,21 @@ import { normalizeName } from '@/lib/scoring';
  * a non-empty scorer pick must normalize-match the FULL name of a player on
  * one of the match's two squads. Accents, capitalization, periods and extra
  * whitespace are forgiven (same normalizeName as the server) — bare last
- * names are not. When both squad lists are empty (knockout TBD), free text
- * passes: there is no squad to validate against yet, and the server skips
- * validation then too.
+ * names are not.
+ *
+ * A squad of `null` means that side's team is unknown (knockout TBD). The
+ * client allows and lets the server be authoritative (it rejects picks on
+ * TBD matches outright with a 409; the all-squads union rule survives only
+ * in the boot scrub for legacy TBD picks). Both squads non-null but EMPTY
+ * (no squad data at all) also passes: the server fails open there too.
  */
 export function scorerOnSquads(
   scorer: string,
-  homeSquad: string[],
-  awaySquad: string[],
+  homeSquad: string[] | null,
+  awaySquad: string[] | null,
 ): boolean {
   if (scorer.trim() === '') return true;
+  if (homeSquad === null || awaySquad === null) return true;
   if (homeSquad.length === 0 && awaySquad.length === 0) return true;
   const key = normalizeName(scorer);
   return (

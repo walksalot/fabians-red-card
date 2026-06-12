@@ -32,11 +32,19 @@ describe('scorerOnSquads (client mirror of the server squad rule)', () => {
     expect(scorerOnSquads('   ', MEX, RSA)).toBe(true);
   });
 
-  it('allows free text while both squads are unknown (knockout TBD)', () => {
+  it('allows anything while EITHER side is null (TBD — the server checks the all-squads union)', () => {
+    expect(scorerOnSquads('Anyone At All', null, null)).toBe(true);
+    // Exactly one side known: the client cannot replicate the server's union
+    // rule cheaply, so it never blocks — the server stays authoritative.
+    expect(scorerOnSquads('Anyone At All', MEX, null)).toBe(true);
+    expect(scorerOnSquads('Anyone At All', null, RSA)).toBe(true);
+  });
+
+  it('allows free text when both squads are known but EMPTY (no squad data — fail open)', () => {
     expect(scorerOnSquads('Anyone At All', [], [])).toBe(true);
   });
 
-  it('validates when only one squad list is known', () => {
+  it('still validates when one known squad is empty and the other has names', () => {
     expect(scorerOnSquads('Percy Tau', [], RSA)).toBe(true);
     expect(scorerOnSquads('Raúl Jiménez', [], RSA)).toBe(false);
   });

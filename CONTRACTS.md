@@ -144,14 +144,25 @@ upsertPick(db, userId, { entryId, matchId, predHome, predAway, predScorer, predF
   // 409 'Teams for this match are not set yet' while either teamId is NULL — knockout
   // TBD slots take no picks at all.
   // 0<=scores<=20; if predHome===0&&predAway===0 coerce predScorer=null, predFirstTeam='none'.
-  // predScorer (non-null) is canonicalized to the squad spelling when it unambiguously
-  // matches one squad player (canonicalScorer), then must be the FULL name of a player
-  // on one of the match's two squads, compared via normalizeName (players table;
-  // data/rosters.json fallback when a team has no player rows) → else 400 'Scorer must
-  // be a player from one of the two squads — pick a name from the list'. Bare surnames
-  // are NOT accepted at save time.
-  // Identical re-save (compared after canonicalization) is a NO-OP: nothing is written
-  // and updatedAt is untouched.
+  // predScorer (non-null) is first canonicalized to the squad spelling when it
+  // unambiguously matches one squad player (canonicalScorer), then must be the FULL
+  // name of a player, compared via normalizeName. Squad resolution is shared
+  // (squads.ts: players table first, data/rosters.json fallback when a team has no
+  // player rows; squadDisplayNames feeds the UI dropdown and canonicalScorer):
+  //   both teams are always known here (TBD matches 409 above) → name must be on
+  //   either squad, else 400 'Scorer must be a player from one of the two squads —
+  //   pick a name from the list'. EXCEPTION: when BOTH squads resolve empty (no
+  //   table rows, no rosters.json entries), validation is SKIPPED — missing squad
+  //   data never blocks picks (fail-open).
+  //   The all-squads UNION rule (allSquadNameKeys: every players-table +
+  //   rosters.json name) now applies ONLY to the boot scrub's handling of legacy
+  //   TBD picks (data-fixes.ts) — upsertPick never reaches it.
+  // Bare surnames are NOT accepted at save time.
+  // Identical re-save (compared after canonicalization) is a NO-OP, short-circuited
+  // BEFORE validation: a stored off-squad scorer is grandfathered on an identical
+  // re-save (the boot scrub below clears invalid scorers on future matches anyway);
+  // changing ANY field re-runs validation. Nothing is written and updatedAt is
+  // untouched on a no-op.
 getEntryPicks(db, entryId): Pick[]
 getMatchPicksPublic(db, leagueId, matchId): { entryId, label, pick }[]
   // ONLY when clock.now() >= kickoff (else throws 403 'picks hidden until kickoff')
@@ -214,6 +225,35 @@ getTodayBoard(db, leagueId, entryId): { matchday, matches: Array<{ match, myPick
   locked, teams }> }   // matches of the next matchday with any unkicked-off match (or today's),
                        // plus any in-progress (kicked off, unfinished) from current matchday
 getSchedule(db): all matches with teams joined (for History/admin)
+```
+
+### squads.ts
+```ts
+squadDisplayNames(db, teamId): string[]   // raw names: players table first,
+  // data/rosters.json fallback by team code (file cached per process; a read
+  // FAILURE is never cached — retried next call). Feeds the UI dropdown.
+squadNameKeys(db, teamId): Set<string>    // normalizeName'd squadDisplayNames
+allSquadNameKeys(db): Set<string>         // normalized UNION of every players-table
+  // name AND every rosters.json name — the TBD-match scorer vocabulary
+```
+
+### data-fixes.ts (boot repairs — run from instrumentation.ts on every boot)
+```ts
+fixNullSurnameArtifacts(db): { playersFixed, picksFixed }
+  // strips the ESPN '<Name> null' artifact. Players repair (own transaction):
+  // when the cleaned name ALREADY exists for the same teamId the artifact row
+  // is DELETED (the prod seed inserts clean names first), else renamed.
+  // Picks repair (separate transaction — a players-side failure can never roll
+  // it back): ONLY picks whose match is status==='scheduled' AND unkicked
+  // (kickoffUtc > clock.now()); picks on finished/kicked-off matches stay
+  // byte-identical so no recompute can ever shift banked match_points.
+  // updatedAt is never touched. Idempotent.
+scrubInvalidFutureScorers(db): { scorersCleared }
+  // for every pick on a status==='scheduled', kickoff-in-the-future match with
+  // a non-null predScorer: validate with upsertPick's rules (both teams known →
+  // either squad; both squads empty → skip; TBD → allSquadNameKeys union).
+  // On failure predScorer = NULL — predFirstTeam, scoreline and updatedAt stay
+  // untouched. Never reads finished/kicked-off matches. Idempotent.
 ```
 
 ## API routes (`src/app/api/...`) — all zod-validated, envelope shape above

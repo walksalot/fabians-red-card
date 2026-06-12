@@ -1,10 +1,13 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
 import { nowMs } from '@/lib/clock';
 import { AppError } from '@/lib/errors';
 import { canonicalScorer, normalizeName } from '@/lib/scoring';
+import {
+  allSquadNameKeys,
+  squadDisplayNames,
+  squadNameKeys,
+} from '@/lib/services/squads';
 
 export type Pick = typeof schema.picks.$inferSelect;
 
@@ -79,58 +82,35 @@ function normalizeScorer(raw: string | null | undefined): string | null {
   return trimmed;
 }
 
-/** Bundled squad lists — fallback when the players table has no rows for a team. */
-let rostersFile: Record<string, { name: string }[]> | null = null;
-function rostersFromFile(code: string): string[] {
-  if (rostersFile === null) {
-    try {
-      rostersFile = JSON.parse(
-        fs.readFileSync(path.join(process.cwd(), 'data', 'rosters.json'), 'utf8'),
-      );
-    } catch {
-      rostersFile = {};
-    }
-  }
-  return (rostersFile?.[code] ?? []).map((p) => p.name);
-}
-
-/** Normalized names of a team's squad: players table first, data file fallback. */
-function squadNameKeys(db: Db, teamId: number): Set<string> {
-  const rows = db
-    .select({ name: schema.players.name })
-    .from(schema.players)
-    .where(eq(schema.players.teamId, teamId))
-    .all();
-  let names = rows.map((r) => r.name);
-  if (names.length === 0) {
-    const team = db
-      .select({ code: schema.teams.code })
-      .from(schema.teams)
-      .where(eq(schema.teams.id, teamId))
-      .get();
-    if (team) names = rostersFromFile(team.code);
-  }
-  return new Set(names.map(normalizeName));
-}
-
 /**
  * League rule (announced 2026-06-12): a scorer pick must be a real player from
  * one of the match's two squads — full name, matched accent/case-insensitively.
  * Closes the bare-surname loophole ("martinez" covering three Martínezes).
- * Skipped while either team is unknown (knockout placeholders): there is no
- * squad to validate against yet.
+ *
+ * - Both teams known: scorer must be on either squad. If BOTH squads resolve
+ *   EMPTY (no players rows, no rosters.json entries) validation is SKIPPED —
+ *   missing squad data must never lock players out of a pick component.
+ * - Either team NULL (knockout TBD): the scorer must be a real player's full
+ *   name from ANY World Cup squad — you can predict the probable opponent's
+ *   striker, but bare surnames stay closed.
  */
 function requireScorerOnSquads(
   db: Db,
   match: { homeTeamId: number | null; awayTeamId: number | null },
   predScorer: string,
 ): void {
-  if (match.homeTeamId === null || match.awayTeamId === null) return;
   const key = normalizeName(predScorer);
+  if (match.homeTeamId === null || match.awayTeamId === null) {
+    const all = allSquadNameKeys(db);
+    if (all.size === 0 || all.has(key)) return;
+    throw new AppError(
+      'Scorer must be a real player’s full name — pick from the squad list',
+      400,
+    );
+  }
   const home = squadNameKeys(db, match.homeTeamId);
   const away = squadNameKeys(db, match.awayTeamId);
-  // Fail-open when no squad data exists at all — missing squad data must
-  // never lock players out of a pick component.
+  // Fail-open when no squad data exists at all (same spirit as the TBD case).
   if (home.size === 0 && away.size === 0) return;
   if (home.has(key) || away.has(key)) return;
   throw new AppError(
@@ -174,18 +154,13 @@ export async function upsertPick(
   // display (reveals, history, live board) then shows the same spelling the
   // squad list and results use. Ambiguous or unknown names stay as typed so
   // the forgiving suffix matching at scoring time keeps its semantics.
+  // Squads resolve via squads.ts (players table, data/rosters.json fallback)
+  // — the same vocabulary the validator and the boot scrub use.
   if (predScorer !== null) {
-    const squad = db
-      .select({ name: schema.players.name })
-      .from(schema.players)
-      .where(
-        inArray(schema.players.teamId, [match.homeTeamId, match.awayTeamId]),
-      )
-      .all();
-    predScorer = canonicalScorer(
-      predScorer,
-      squad.map((p) => p.name),
-    );
+    predScorer = canonicalScorer(predScorer, [
+      ...squadDisplayNames(db, match.homeTeamId),
+      ...squadDisplayNames(db, match.awayTeamId),
+    ]);
   }
   let predFirstTeam: FirstTeam | null = rawFirstTeam;
   if (input.predHome === 0 && input.predAway === 0) {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { schema, type Db } from '@/db';
 import { AppError } from '@/lib/errors';
-import { requireOwnedEntry, sanitizeLeague } from '@/lib/api-helpers';
+import { requireMember, requireOwnedEntry, sanitizeLeague } from '@/lib/api-helpers';
 import { freshDb } from '../helpers/db';
 
 // ---------------------------------------------------------------------------
@@ -94,6 +94,31 @@ describe('requireOwnedEntry', () => {
   it('throws 404 for a missing entry id', () => {
     const { db, owner, league } = setup();
     expectAppError(() => requireOwnedEntry(db, owner.id, league.id, 99_999), 404);
+  });
+});
+
+describe('requireMember', () => {
+  function setup() {
+    const db = freshDb();
+    const member = makeUser(db);
+    const outsider = makeUser(db);
+    const league = makeLeague(db, member.id);
+    db.insert(schema.memberships)
+      .values({ leagueId: league.id, userId: member.id, role: 'member', createdAt: 1 })
+      .run();
+    return { db, member, outsider, league };
+  }
+
+  it('passes silently for a member of the league', () => {
+    const { db, member, league } = setup();
+    expect(() => requireMember(db, league.id, member.id)).not.toThrow();
+  });
+
+  it('throws AppError 403 for a logged-in non-member', () => {
+    const { db, outsider, league } = setup();
+    // This is the only gate on member-scoped API routes (leaderboard, live) —
+    // a regression here leaks league data to any logged-in account.
+    expectAppError(() => requireMember(db, league.id, outsider.id), 403);
   });
 });
 

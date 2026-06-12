@@ -59,9 +59,10 @@ export async function setBooster(
   }
   // Same lock rule as picks (picks.ts): kicked off OR finished = locked. The
   // finished check closes the "park ×2 on a known result" hole when an admin
-  // enters a result ahead of kickoff.
+  // enters a result ahead of kickoff — so the message says "locked", not
+  // "kicked off" (a finished-early match never kicked off).
   if (match.status === 'finished' || hasKickedOff(match.kickoffUtc)) {
-    throw new AppError('Match has already kicked off', 409);
+    throw new AppError('Booster is locked for this match', 409);
   }
   // Mirrors the upsertPick guard: the daily booster must not be spendable on
   // a knockout slot whose teams are still unknown ("Bracket pending").

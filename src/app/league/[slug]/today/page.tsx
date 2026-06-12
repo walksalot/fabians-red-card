@@ -5,6 +5,7 @@ import { oddsForDisplay } from '@/lib/odds';
 import { canonicalScorer } from '@/lib/scoring';
 import { getMatchdayOverview, getTodayBoard } from '@/lib/services/today';
 import { getLiveBoards } from '@/lib/services/live';
+import { squadDisplayNames } from '@/lib/services/squads';
 import { UNDERDOG_PROB_MAX } from '@/lib/sync/espn-sync';
 import { shortTeamName } from '../_components/flags';
 import EmptyState from '@/components/EmptyState';
@@ -69,6 +70,10 @@ export default async function TodayPage({
     teamId !== null ? (teamMap.get(teamId)?.code ?? null) : null;
 
   // Squads for the scorer picker — only for teams actually on the board.
+  // squadDisplayNames shares the server validator's fallback chain (players
+  // table → data/rosters.json), so the dropdown offers exactly the names the
+  // save will accept. `null` marks an unknown (TBD) side — the client then
+  // defers scorer validation to the server's all-squads rule.
   const boardTeamIds = [
     ...new Set(
       rawItems
@@ -76,20 +81,11 @@ export default async function TodayPage({
         .filter((id): id is number => id !== null),
     ),
   ];
-  const squadByTeam = new Map<number, string[]>();
-  if (boardTeamIds.length > 0) {
-    for (const p of db
-      .select({ teamId: schema.players.teamId, name: schema.players.name })
-      .from(schema.players)
-      .where(inArray(schema.players.teamId, boardTeamIds))
-      .all()) {
-      const list = squadByTeam.get(p.teamId) ?? [];
-      list.push(p.name);
-      squadByTeam.set(p.teamId, list);
-    }
-  }
-  const squadOf = (teamId: number | null) =>
-    teamId !== null ? (squadByTeam.get(teamId) ?? []) : [];
+  const squadByTeam = new Map<number, string[]>(
+    boardTeamIds.map((teamId) => [teamId, squadDisplayNames(db, teamId)]),
+  );
+  const squadOf = (teamId: number | null): string[] | null =>
+    teamId !== null ? (squadByTeam.get(teamId) ?? []) : null;
 
   // Betting cheat sheet: parsed odds (fresh within 6h) + first-goalscorer
   // prices for the board's matches. Display-only; absent rows render nothing.
@@ -204,8 +200,8 @@ export default async function TodayPage({
       // Result scorer gets the same canonical squad spelling as the pick —
       // the finished card shows both, and they must never disagree.
       firstScorer: canonicalScorer(match.firstScorer, [
-        ...squadOf(match.homeTeamId),
-        ...squadOf(match.awayTeamId),
+        ...(squadOf(match.homeTeamId) ?? []),
+        ...(squadOf(match.awayTeamId) ?? []),
       ]),
       liveHome: match.liveHome,
       liveAway: match.liveAway,
@@ -224,8 +220,8 @@ export default async function TodayPage({
             // stored raw-typed pick never disagrees with the squad list shown
             // inches away. New saves canonicalize at write (upsertPick).
             predScorer: canonicalScorer(myPick.predScorer, [
-              ...squadOf(match.homeTeamId),
-              ...squadOf(match.awayTeamId),
+              ...(squadOf(match.homeTeamId) ?? []),
+              ...(squadOf(match.awayTeamId) ?? []),
             ]),
             predFirstTeam: myPick.predFirstTeam as FirstTeam | null,
           }
