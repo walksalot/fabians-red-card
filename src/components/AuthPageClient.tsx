@@ -38,6 +38,12 @@ export function AuthPageClient({
           {mode === 'login' ? 'Create an account' : 'Sign in'}
         </Link>
       </p>
+      {mode === 'login' ? (
+        <p className="mt-2 text-center text-xs text-zinc-500">
+          Forgot your password? Ask your league admin — they can send you a
+          one-time reset link.
+        </p>
+      ) : null}
     </div>
   );
 }

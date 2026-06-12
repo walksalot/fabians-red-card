@@ -14,6 +14,35 @@ export default function MembersList({ slug, members: initialMembers, currentUser
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Freshly generated one-time reset link, shown once per request. */
+  const [resetLink, setResetLink] = useState<{ userId: number; url: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function onResetClick(member: AdminMember) {
+    setError(null);
+    setCopied(false);
+    setBusyId(member.userId);
+    const res = await apiSend<{ path: string }>(
+      `/api/leagues/${slug}/members/${member.userId}/reset-link`,
+      'POST',
+    );
+    setBusyId(null);
+    if (res.ok) {
+      setResetLink({ userId: member.userId, url: `${window.location.origin}${res.data.path}` });
+    } else {
+      setError(res.error);
+    }
+  }
+
+  async function copyResetLink() {
+    if (!resetLink) return;
+    try {
+      await navigator.clipboard.writeText(resetLink.url);
+      setCopied(true);
+    } catch {
+      // selection fallback: the input below is selectable
+    }
+  }
 
   async function onRemoveClick(member: AdminMember) {
     setError(null);
@@ -59,6 +88,15 @@ export default function MembersList({ slug, members: initialMembers, currentUser
                 <span className="shrink-0 text-xs text-zinc-500">you</span>
               ) : (
                 <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid={`member-reset-${m.username}`}
+                    disabled={busyId === m.userId}
+                    onClick={() => onResetClick(m)}
+                    className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-400 transition-colors hover:bg-emerald-400/10 hover:text-emerald-300 active:scale-95 disabled:opacity-60"
+                  >
+                    Reset password
+                  </button>
                   {confirming && (
                     <button
                       type="button"
@@ -93,8 +131,36 @@ export default function MembersList({ slug, members: initialMembers, currentUser
           );
         })}
       </ul>
+      {resetLink ? (
+        <div
+          data-testid="reset-link-box"
+          className="rounded-xl border border-emerald-400/25 bg-emerald-400/5 p-3"
+        >
+          <p className="text-xs font-semibold text-emerald-300">
+            One-time reset link for @
+            {members.find((m) => m.userId === resetLink.userId)?.username ?? 'member'} — send it
+            to them directly. Works once, expires in 24 hours.
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              readOnly
+              value={resetLink.url}
+              onFocus={(e) => e.target.select()}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 font-mono text-[11px] text-zinc-300"
+            />
+            <button
+              type="button"
+              onClick={copyResetLink}
+              className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-zinc-950"
+            >
+              {copied ? 'Copied ✓' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      ) : null}
       <p className="text-xs text-zinc-500">
         Removing a member deletes their entries, picks, boosters and points in this league.
+        Reset password makes a one-time link to send them — you never see their password.
       </p>
     </div>
   );

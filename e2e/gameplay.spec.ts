@@ -160,6 +160,37 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     await expect(page.getByText(/exact/i).first()).toBeVisible();
   });
 
+  test('admin issues a one-time reset link and the member sets a new password', async () => {
+    const adminContext = await browserRef.newContext(CONTEXT_OPTIONS);
+    const admin = await adminContext.newPage();
+    await login(admin, 'admin', 'e2e-admin-pass');
+    await admin.goto('/league/fabians-red-card/admin');
+    await admin.getByTestId('member-reset-victor').click();
+    const linkBox = admin.getByTestId('reset-link-box');
+    await expect(linkBox).toBeVisible();
+    const url = await linkBox.locator('input').inputValue();
+    expect(url).toContain('/reset/');
+    await adminContext.close();
+
+    // victor opens the link and sets a new password
+    const vContext = await browserRef.newContext(CONTEXT_OPTIONS);
+    const v = await vContext.newPage();
+    await v.goto(url);
+    await expect(v.getByText('victor', { exact: true })).toBeVisible();
+    await v.getByTestId('reset-password').fill('victor-new-pass');
+    await v.getByTestId('reset-submit').click();
+    await v.waitForURL(/league|\/$/, { timeout: 15000 });
+
+    // the link is one-time: a second visit shows the spent state
+    await v.goto(url);
+    await expect(v.getByText(/already been used|invalid/i)).toBeVisible();
+
+    // and the new password works while the old one fails
+    await v.context().clearCookies();
+    await login(v, 'victor', 'victor-new-pass');
+    await vContext.close();
+  });
+
   test('a registered user joins the private league with the join password', async () => {
     const pennyContext = await browserRef.newContext(CONTEXT_OPTIONS);
     const penny = await pennyContext.newPage();

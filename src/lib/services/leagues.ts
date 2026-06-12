@@ -100,6 +100,29 @@ export async function verifyLogin(
   return { id: user.id, username: user.username, displayName: user.displayName };
 }
 
+/** Set a new password (reset-link flow — authorization happens at the token layer). */
+export async function setPassword(db: Db, userId: number, password: string): Promise<void> {
+  if (!password || password.length < MIN_PASSWORD_LENGTH) {
+    throw new AppError(`password must be at least ${MIN_PASSWORD_LENGTH} characters`, 400);
+  }
+  getUserOr404(db, userId);
+  const passwordHash = await hash(password, BCRYPT_ROUNDS);
+  db.update(schema.users).set({ passwordHash }).where(eq(schema.users.id, userId)).run();
+}
+
+/** Logged-in password change: requires the current password. */
+export async function changePassword(
+  db: Db,
+  userId: number,
+  current: string,
+  next: string,
+): Promise<void> {
+  const user = getUserOr404(db, userId);
+  const ok = await compare(current, user.passwordHash);
+  if (!ok) throw new AppError('current password is incorrect', 403);
+  await setPassword(db, userId, next);
+}
+
 // ---------------------------------------------------------------------------
 // Leagues
 // ---------------------------------------------------------------------------
