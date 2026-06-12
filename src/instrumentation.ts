@@ -13,8 +13,24 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
-  if (process.env.SCHEDULER_DISABLED === '1') return;
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
+
+  // Idempotent data repairs run on every boot, even with schedulers disabled —
+  // they fix stored data ("<Name> null" roster/pick artifacts), not feeds.
+  try {
+    const { getDb } = await import('@/db');
+    const { fixNullSurnameArtifacts } = await import('@/lib/data-fixes');
+    const fixed = fixNullSurnameArtifacts(getDb());
+    if (fixed.playersFixed || fixed.picksFixed) {
+      console.log(
+        `[data-fix] repaired ${fixed.playersFixed} player name(s), ${fixed.picksFixed} pick(s) with " null" artifacts`,
+      );
+    }
+  } catch (err) {
+    console.error('[data-fix] failed:', err);
+  }
+
+  if (process.env.SCHEDULER_DISABLED === '1') return;
 
   const { getDb } = await import('@/db');
   const { runSync, autoSyncEnabled, syncOddsHorizon } = await import('@/lib/sync/espn-sync');

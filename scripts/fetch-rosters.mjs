@@ -35,7 +35,9 @@ for (const team of espnTeams) {
   const json = await res.json();
   const players = (json.athletes ?? [])
     .map((a) => ({
-      name: (a.fullName || a.displayName || '').trim(),
+      // ESPN's fullName for mononym players is "Casemiro null" (lastName is the
+      // literal string "null"); strip the artifact or saved picks score zero.
+      name: (a.fullName || a.displayName || '').trim().replace(/\s+null$/i, ''),
       position: a.position?.abbreviation ?? null,
     }))
     .filter((p) => p.name.length > 0);
