@@ -73,6 +73,15 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     const firstOption = open.getByTestId('scorer-option').first();
     await expect(firstOption).toContainText('Son Heung-Min');
     await expect(firstOption).toContainText('+450');
+
+    // the closed loophole: a bare surname (Adam Hlozek is on the seeded CZE
+    // squad) is rejected inline — no save happens
+    await open.getByTestId('pick-scorer').fill('Hlozek');
+    await open.getByTestId('pick-scorer').press('Escape'); // close the dropdown
+    await open.getByTestId('pick-save').click();
+    await expect(open.getByText(/pick a player from the squad list/i)).toBeVisible();
+    await expect(open.getByTestId('pick-save')).toHaveText('Save pick'); // not saved
+
     await open.getByTestId('pick-scorer').fill('son');
     const option = open.getByTestId('scorer-option').filter({ hasText: /son/i }).first();
     await expect(option).toBeVisible();

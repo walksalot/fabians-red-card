@@ -4,6 +4,7 @@ import {
   type ScoringRules,
   type Stage,
 } from '@/lib/scoring';
+import { UNDERDOG_PROB_MAX } from '@/lib/sync/espn-sync';
 import { STAGE_LABELS, formatCents, ordinal } from '../_components/format';
 import { loadLeagueContext } from '../_components/league-data';
 
@@ -70,7 +71,7 @@ export default async function RulesPage({
     {
       name: 'First goalscorer',
       points: rules.scorer,
-      how: 'You named the first player to score. Spelling, accents, capitalization, and periods are forgiven — "MBAPPE" matches "Mbappé".',
+      how: 'You named the first player to score — picked from one of the two squads. Spelling, accents, capitalization, and periods are forgiven ("MBAPPE" matches "Mbappé"), but it has to be the full name from the list.',
     },
     {
       name: 'First team to score',
@@ -107,7 +108,8 @@ export default async function RulesPage({
         <p>
           <strong>Picks lock at kickoff.</strong>{' '}
           You can change a pick as
-          often as you like before the match starts, but the moment it kicks
+          often as you like before the match starts — editing never affects
+          tiebreaks, so tweak away — but the moment it kicks
           off the pick is frozen. No pick on a match means zero points for that
           match — no exceptions, no late entries, no &ldquo;my wifi
           died&rdquo;.
@@ -153,10 +155,11 @@ export default async function RulesPage({
           <strong>×{league.boosterMultiplier}</strong>.
         </p>
         <p>
-          You can move the booster to a different match on the same matchday as
-          long as the match currently holding it has not kicked off. Once your
-          boosted match kicks off, the booster is locked in for that day —
-          choose wisely.
+          You can move the booster to a different match on the same matchday —
+          or remove it entirely — any time until the match currently holding it
+          kicks off or has a result, whichever comes first. Last-minute moves
+          are allowed and fair game. Once your boosted match kicks off (or its
+          result is in), the booster is locked in for that day.
         </p>
       </Section>
 
@@ -201,11 +204,13 @@ export default async function RulesPage({
         <ol className="list-decimal space-y-1 pl-5">
           <li>Most exact scores</li>
           <li>Most first-goalscorer hits</li>
-          <li>
-            Whoever locked in their picks earlier wins the tie. Decisiveness
-            pays.
-          </li>
+          <li>Most correct outcomes (win/draw/loss)</li>
         </ol>
+        <p>
+          Still tied after all four? That&apos;s a genuine tie — tied players
+          share the spot and split its prize money. No timestamps, no
+          who-clicked-first.
+        </p>
       </Section>
 
       <Section title="Prize pool">
@@ -249,9 +254,10 @@ export default async function RulesPage({
             </dt>
             <dd className="mt-0.5 text-zinc-400">
               Yes — tap the armed booster to remove it, or tap another match
-              that day to move it. Once your boosted match kicks off, it&apos;s
-              locked in. A booster only multiplies points you earn — it can
-              never cost you anything.
+              that day to move it, any time until the boosted match kicks off
+              or has a result (whichever comes first). Last-minute moves are
+              allowed and fair game. A booster only multiplies points you
+              earn — it can never cost you anything.
             </dd>
           </div>
           <div>
@@ -277,9 +283,10 @@ export default async function RulesPage({
               Do scorer names need exact spelling?
             </dt>
             <dd className="mt-0.5 text-zinc-400">
-              No — pick from the squad list, or type it: capitals and accents
-              don&apos;t matter, and last names count (&quot;Jimenez&quot; ={' '}
-              &quot;Raúl Jiménez&quot;).
+              Your scorer must be a player from one of the two squads — pick a
+              name from the list. Spelling, accents, capitalization and periods
+              are still forgiven, but bare last names no longer count: one word
+              matching three Martínezes was a loophole, closed 2026-06-12.
             </dd>
           </div>
           <div>
@@ -288,7 +295,7 @@ export default async function RulesPage({
             </dt>
             <dd className="mt-0.5 text-zinc-400">
               {league.autoUnderdogEnabled !== 0
-                ? 'The betting odds do — a side with a win chance of 25% or less is auto-flagged, and the flag freezes at kickoff.'
+                ? `The betting odds do — a side with a win chance of ${Math.round(UNDERDOG_PROB_MAX * 100)}% or less is auto-flagged, and the flag freezes at kickoff.`
                 : 'The admin flags underdogs by hand (none are flagged automatically right now).'}
             </dd>
           </div>

@@ -141,7 +141,30 @@ prizePool(league, entryCount): { totalCents, payouts: { place, percent, amountCe
 upsertPick(db, userId, { entryId, matchId, predHome, predAway, predScorer, predFirstTeam })
   // throws 403 if entry not owned by user; 409 'locked' if clock.now() >= kickoffUtc
   // OR match.status === 'finished' (a result may be entered ahead of kickoff);
-  // 0<=scores<=20; if predHome===0&&predAway===0 coerce predScorer=null, predFirstTeam='none'
+  // 409 'Teams for this match are not set yet' while either teamId is NULL — knockout
+  // TBD slots take no picks at all.
+  // 0<=scores<=20; if predHome===0&&predAway===0 coerce predScorer=null, predFirstTeam='none'.
+  // predScorer (non-null) is first canonicalized to the squad spelling when it
+  // unambiguously matches one squad player (canonicalScorer), then must be the FULL
+  // name of a player, compared via normalizeName. Squad resolution is shared
+  // (squads.ts: players table first, data/rosters.json fallback when a team has no
+  // player rows; squadDisplayNames feeds the UI dropdown and canonicalScorer):
+  //   both teams are always known here (TBD matches 409 above) → name must be on
+  //   either squad, else 400 'Scorer must be a player from one of the two squads —
+  //   pick a name from the list'. EXCEPTION: when BOTH squads resolve empty (no
+  //   table rows, no rosters.json entries), validation is SKIPPED — missing squad
+  //   data never blocks picks (fail-open).
+  //   The all-squads UNION rule (allSquadNameKeys: every players-table +
+  //   rosters.json name) now applies ONLY to the boot scrub's handling of legacy
+  //   TBD picks (data-fixes.ts) — upsertPick never reaches it. Same fail-open
+  //   EXCEPTION there: an EMPTY union (no table rows anywhere AND no readable
+  //   rosters.json) skips the scrub for those picks.
+  // Bare surnames are NOT accepted at save time.
+  // Identical re-save (compared after canonicalization) is a NO-OP, short-circuited
+  // BEFORE validation: a stored off-squad scorer is grandfathered on an identical
+  // re-save (the boot scrub below clears invalid scorers on future matches anyway);
+  // changing ANY field re-runs validation. Nothing is written and updatedAt is
+  // untouched on a no-op.
 getEntryPicks(db, entryId): Pick[]
 getMatchPicksPublic(db, leagueId, matchId): { entryId, label, pick }[]
   // ONLY when clock.now() >= kickoff (else throws 403 'picks hidden until kickoff')
@@ -150,9 +173,15 @@ getMatchPicksPublic(db, leagueId, matchId): { entryId, label, pick }[]
 ### boosters.ts
 ```ts
 setBooster(db, userId, { entryId, matchday, matchId })
-  // match must belong to matchday; target kickoff in future; if existing booster row for
-  // (entry, matchday): replace ONLY if previously chosen match hasn't kicked off, else 409.
-  // After change: if either old or new match already finished → recompute affected matchPoints.
+  // match must belong to matchday; target must be unkicked AND without a result
+  // (finished = locked, even ahead of kickoff — a known result is never a valid
+  // booster target); if existing booster row for (entry, matchday): replace ONLY
+  // while the previously chosen match is also unkicked and resultless, else 409.
+  // Last-minute moves are legal. No recompute path: a booster can never move onto
+  // or off a finished match, so existing matchPoints are never affected.
+clearBooster(db, userId, { entryId, matchday })
+  // toggle-off; allowed in the same window a move is (current match unkicked and
+  // resultless) else 409; 404 when no booster is set for that matchday
 getBooster(db, entryId, matchday): Booster | null
 ```
 
@@ -176,11 +205,15 @@ recomputeLeague(db, leagueId) // recompute all finished matches for that league'
 ### leaderboard.ts
 ```ts
 getLeaderboard(db, leagueId): Array<{ rank, entryId, userId, label, displayName, total,
-  exactCount, scorerHits, outcomeCount, lastPickAt }>
-  // total = sum(matchPoints.total); exactCount = #breakdowns with exact>0; scorerHits =
-  // #breakdowns with scorer>0. Sort: total DESC, exactCount DESC, scorerHits DESC,
-  // lastPickAt ASC (max pick.updatedAt; entries with no picks = Infinity), entryId ASC.
-  // Ranks assigned 1..n after sort (ties broken — ranks unique).
+  exactCount, scorerHits, outcomeCount }>
+  // total = sum(matchPoints.total), rounded to micro-points before comparison;
+  // exactCount = #breakdowns with exact>0; scorerHits = #breakdowns with scorer>0;
+  // outcomeCount = #breakdowns with outcome>0. Sort: total DESC, exactCount DESC,
+  // scorerHits DESC, outcomeCount DESC. Entries still tied after all four keys are a
+  // GENUINE tie: they SHARE the rank (competition ranking, 1-1-3) and split that
+  // placing's prize money. NO timestamp or signup-order key — save-timing and join
+  // order never break ties (an identical re-save is a no-op anyway). Display order
+  // inside a tie: entryId ASC (deterministic, carries no meaning).
 getEntryStats(db, entryId): { total, exactCount, scorerHits, picksMade, finishedPicked,
   accuracyPct, currentStreak, bestStreak, badges: string[] }
   // streak = consecutive finished picked matches (kickoff order) with total>0.
@@ -194,6 +227,38 @@ getTodayBoard(db, leagueId, entryId): { matchday, matches: Array<{ match, myPick
   locked, teams }> }   // matches of the next matchday with any unkicked-off match (or today's),
                        // plus any in-progress (kicked off, unfinished) from current matchday
 getSchedule(db): all matches with teams joined (for History/admin)
+```
+
+### squads.ts
+```ts
+squadDisplayNames(db, teamId): string[]   // raw names: players table first,
+  // data/rosters.json fallback by team code (file cached per process; a read
+  // FAILURE is never cached — retried next call). Feeds the UI dropdown.
+squadNameKeys(db, teamId): Set<string>    // normalizeName'd squadDisplayNames
+allSquadNameKeys(db): Set<string>         // normalized UNION of every players-table
+  // name AND every rosters.json name — the TBD-match scorer vocabulary
+```
+
+### data-fixes.ts (boot repairs — run from instrumentation.ts on every boot;
+### the scorer scrub is SKIPPED on boots where the heal threw, so a
+### half-repaired name vocabulary can never clear honest picks)
+```ts
+fixNullSurnameArtifacts(db): { playersFixed, picksFixed }
+  // strips the ESPN '<Name> null' artifact. Players repair (own transaction):
+  // when the cleaned name ALREADY exists for the same teamId the artifact row
+  // is DELETED (the prod seed inserts clean names first), else renamed.
+  // Picks repair (separate transaction — a players-side failure can never roll
+  // it back): ONLY picks whose match is status==='scheduled' AND unkicked
+  // (kickoffUtc > clock.now()); picks on finished/kicked-off matches stay
+  // byte-identical so no recompute can ever shift banked match_points.
+  // updatedAt is never touched. Idempotent.
+scrubInvalidFutureScorers(db): { scorersCleared }
+  // for every pick on a status==='scheduled', kickoff-in-the-future match with
+  // a non-null predScorer: validate with the squad rules (both teams known →
+  // either squad; both squads empty → skip; legacy TBD pick → allSquadNameKeys
+  // union — a branch upsertPick itself no longer reaches, TBD matches 409).
+  // On failure predScorer = NULL — predFirstTeam, scoreline and updatedAt stay
+  // untouched. Never reads finished/kicked-off matches. Idempotent.
 ```
 
 ## API routes (`src/app/api/...`) — all zod-validated, envelope shape above
@@ -210,9 +275,11 @@ POST /api/leagues/[slug]/join              { password? } → { entry }   (public
 POST /api/join/[token]                     → { league, entry }          (invite link)
 DELETE /api/leagues/[slug]/members/[userId] (admin)
 GET  /api/leagues/[slug]/leaderboard       → { rows, prizePool, memberCount }
+                                           (league MEMBERS only — 403 for any other account)
 GET  /api/leagues/[slug]/today?entryId=    → today board
 POST /api/picks                            upsertPick body
 POST /api/boosters                         setBooster body
+POST /api/boosters/clear                   { entryId, matchday } → clearBooster (toggle-off)
 GET  /api/leagues/[slug]/history?entryId=  → finished matches + picks + points
 POST /api/results          (primary-league admin)  enterResult body
 POST /api/results/clear    (primary-league admin)  { matchId }

@@ -303,7 +303,7 @@ describe('setBooster / getBooster', () => {
     expect(await getBooster(db, entry.id, MATCHDAY)).toBeNull();
   });
 
-  it('moving the booster OFF an already-finished match recomputes its points back to x1', async () => {
+  it('booster cannot target a match that already has a result, even before kickoff', async () => {
     const { db, user, league, entry } = setup();
     seedAdminMembership(db, league.id, user.id);
     seedPick(db, entry.id, EARLY_ID);
@@ -313,46 +313,48 @@ describe('setBooster / getBooster', () => {
       enterResult(db, user.id, { matchId: EARLY_ID, ...RESULT_1_0 });
       expect(totalFor(db, entry.id, EARLY_ID)).toBe(10); // exact, unboosted
 
-      await setBooster(db, user.id, {
-        entryId: entry.id,
-        matchday: MATCHDAY,
-        matchId: EARLY_ID,
-      });
-      expect(totalFor(db, entry.id, EARLY_ID)).toBe(20); // boosted x2
-
-      // Allowed: EARLY has not kicked off. The old match's points must drop
-      // back to x1 immediately — no stale doubled points on the leaderboard.
-      await setBooster(db, user.id, {
-        entryId: entry.id,
-        matchday: MATCHDAY,
-        matchId: LATE_ID,
-      });
-      expect(totalFor(db, entry.id, EARLY_ID)).toBe(10);
-      expect((await getBooster(db, entry.id, MATCHDAY))?.matchId).toBe(LATE_ID);
+      // Parking ×2 on a known result is the loophole this guard closes.
+      await expect(
+        setBooster(db, user.id, {
+          entryId: entry.id,
+          matchday: MATCHDAY,
+          matchId: EARLY_ID,
+        }),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(10); // unchanged
+      expect(await getBooster(db, entry.id, MATCHDAY)).toBeNull();
     });
   });
 
-  it('moving the booster ONTO an already-finished match recomputes its points to x2', async () => {
+  it('booster locks in place once its match has a result: no move, no escape', async () => {
     const { db, user, league, entry } = setup();
     seedAdminMembership(db, league.id, user.id);
     seedPick(db, entry.id, EARLY_ID);
 
     await withFakeNow(MORNING, async () => {
-      await setBooster(db, user.id, {
-        entryId: entry.id,
-        matchday: MATCHDAY,
-        matchId: LATE_ID,
-      });
-
-      enterResult(db, user.id, { matchId: EARLY_ID, ...RESULT_1_0 });
-      expect(totalFor(db, entry.id, EARLY_ID)).toBe(10); // not boosted yet
-
+      // Booster legitimately placed while everything was open…
       await setBooster(db, user.id, {
         entryId: entry.id,
         matchday: MATCHDAY,
         matchId: EARLY_ID,
       });
-      expect(totalFor(db, entry.id, EARLY_ID)).toBe(20); // boost applied on move
+      // …then the result lands early. Points settle WITH the boost (it was a
+      // genuine pre-result commitment), and the booster is frozen for the day.
+      enterResult(db, user.id, { matchId: EARLY_ID, ...RESULT_1_0 });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(20); // exact 10 × 2
+
+      await expect(
+        setBooster(db, user.id, {
+          entryId: entry.id,
+          matchday: MATCHDAY,
+          matchId: LATE_ID,
+        }),
+      ).rejects.toMatchObject({
+        status: 409,
+        message: 'Booster already locked for this matchday',
+      });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(20); // still boosted
+      expect((await getBooster(db, entry.id, MATCHDAY))?.matchId).toBe(EARLY_ID);
     });
   });
 });
@@ -390,7 +392,7 @@ describe('clearBooster', () => {
     });
   });
 
-  it('removing a booster from a finished-early match recomputes its points', async () => {
+  it('booster cannot be cleared once its match has a result (no escaping a bust)', async () => {
     const { db, user, league, entry } = setup();
     seedAdminMembership(db, league.id, user.id);
     seedPick(db, entry.id, EARLY_ID);
@@ -404,8 +406,11 @@ describe('clearBooster', () => {
         firstScoringTeam: 'home',
       });
       expect(totalFor(db, entry.id, EARLY_ID)).toBe(20); // exact 10 x2 boosted
-      await clearBooster(db, user.id, { entryId: entry.id, matchday: MATCHDAY });
-      expect(totalFor(db, entry.id, EARLY_ID)).toBe(10); // multiplier gone
+      await expect(
+        clearBooster(db, user.id, { entryId: entry.id, matchday: MATCHDAY }),
+      ).rejects.toMatchObject({ status: 409 });
+      expect(totalFor(db, entry.id, EARLY_ID)).toBe(20); // commitment stands
+      expect(boosterRows(db, entry.id)).toHaveLength(1);
     });
   });
 });

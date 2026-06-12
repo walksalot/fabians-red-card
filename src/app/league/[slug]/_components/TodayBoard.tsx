@@ -45,6 +45,8 @@ interface Props {
   boosterArmed: boolean;
   /** League scoring values for the in-context "How scoring works" sheet. */
   points: { exact: number; outcome: number; scorer: number; firstTeam: number; underdog: number };
+  /** Auto-underdog win-chance ceiling as a whole percent (from UNDERDOG_PROB_MAX). */
+  underdogPctMax: number;
   /** Day-browser control rendered in place of the static date headline. */
   dayNav?: React.ReactNode;
   /** Viewing a day ahead of the current one (drives the odds-coming hint). */
@@ -396,6 +398,7 @@ export default function TodayBoard({
   boosterLabel,
   boosterArmed,
   points,
+  underdogPctMax,
   dayNav = null,
   isFutureDay = false,
 }: Props) {
@@ -478,7 +481,11 @@ export default function TodayBoard({
         )}
       </div>
       <div className="flex items-center justify-between gap-2">
-        <HowItWorksSheet points={points} boosterMultiplier={boosterMultiplier} />
+        <HowItWorksSheet
+          points={points}
+          boosterMultiplier={boosterMultiplier}
+          underdogPctMax={underdogPctMax}
+        />
         {/* The chip names the booster match but used to offer no path to it —
             tapping now scrolls the armed card (or the first card that can
             still take the booster) into view under the sticky header. */}

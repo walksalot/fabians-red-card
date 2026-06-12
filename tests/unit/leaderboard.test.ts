@@ -178,24 +178,42 @@ describe('leaderboard service', () => {
     expect(rows[1].scorerHits).toBe(0);
   });
 
-  it('tiebreak: earliest pick submission wins when exacts and scorer hits tie', () => {
+  it('tiebreak: most correct outcomes wins when exacts and scorer hits tie', () => {
+    const db = freshDb();
+    const { league, entries } = standingsFixture(db, 2, 2);
+    const [e1, e2] = entries;
+    // Both 12 points, one exact, no scorer hits; e1's other points came from a
+    // correct outcome, e2's from first-team — outcomes break the tie.
+    awardPoints(db, e1.id, 1, { exact: 10, total: 10 });
+    awardPoints(db, e1.id, 2, { outcome: 2, total: 2 });
+    awardPoints(db, e2.id, 1, { exact: 10, total: 10 });
+    awardPoints(db, e2.id, 2, { firstTeam: 2, total: 2 });
+
+    const rows = getLeaderboard(db, league.id);
+    expect(rows.map((r) => r.entryId)).toEqual([e1.id, e2.id]);
+    expect(rows[0].outcomeCount).toBe(1);
+    expect(rows[1].outcomeCount).toBe(0);
+    expect(rows.map((r) => r.rank)).toEqual([1, 2]);
+  });
+
+  it('entries tied on every key share a rank and the next rank skips (1-1-3)', () => {
     const db = freshDb();
     const { league, entries } = standingsFixture(db, 3, 2);
     const [e1, e2, e3] = entries;
-    for (const e of entries) {
+    // e1 and e2 are point-for-point identical; e3 trails.
+    for (const e of [e1, e2]) {
       awardPoints(db, e.id, 1, { exact: 10, total: 10 });
       awardPoints(db, e.id, 2, { scorer: 8, total: 8 });
     }
-    // Identical points; e2 updated a pick later than e1; e3 has no picks at all.
-    makePick(db, e1.id, 1, { updatedAt: 1_000 });
-    makePick(db, e2.id, 1, { updatedAt: 1_000 });
-    makePick(db, e2.id, 2, { updatedAt: 2_000 });
+    awardPoints(db, e3.id, 1, { outcome: 2, total: 2 });
 
     const rows = getLeaderboard(db, league.id);
-    expect(rows.map((r) => r.entryId)).toEqual([e1.id, e2.id, e3.id]);
-    expect(rows[0].lastPickAt).toBe(1_000);
-    expect(rows[1].lastPickAt).toBe(2_000);
-    expect(rows[2].lastPickAt).toBeNull(); // no picks sorts last on this key
+    // Shared rank 1 (pot is split at a paid boundary), display order by entryId.
+    expect(rows.map((r) => [r.rank, r.entryId])).toEqual([
+      [1, e1.id],
+      [1, e2.id],
+      [3, e3.id],
+    ]);
   });
 
   it('tiebreak: float-rounded totals — mathematically equal sums tie before tiebreaks', () => {
@@ -247,16 +265,15 @@ describe('leaderboard service', () => {
     expect(pool.payouts.map((p) => p.amountCents)).toEqual([3600, 1800, 600]);
   });
 
-  it('leaderboard ranks are deterministic and unique', () => {
+  it('full ties are deterministic: all share rank 1, display order by entryId', () => {
     const db = freshDb();
     const { league, entries } = standingsFixture(db, 4, 1);
-    // All four entries fully tied on every key — falls through to entryId ASC.
+    // All four entries fully tied on every key — a genuine four-way tie.
     const first = getLeaderboard(db, league.id);
     const second = getLeaderboard(db, league.id);
 
     expect(second).toEqual(first);
-    expect(first.map((r) => r.rank)).toEqual([1, 2, 3, 4]);
-    expect(new Set(first.map((r) => r.rank)).size).toBe(4);
+    expect(first.map((r) => r.rank)).toEqual([1, 1, 1, 1]);
     expect(first.map((r) => r.entryId)).toEqual(entries.map((e) => e.id));
   });
 

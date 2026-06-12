@@ -54,7 +54,18 @@ test.describe('world cup pool journey (mobile dark)', () => {
 
     await form.getByTestId('pick-home').fill('2');
     await form.getByTestId('pick-away').fill('1');
-    await form.getByTestId('pick-scorer').fill('Test Scorer');
+    // Scorer picks must be a full name from one of the two squads (rule change
+    // 2026-06-12) — free text like 'Test Scorer' is now rejected client- and
+    // server-side. First board match is #1 MEX–RSA; Ochoa is on the MEX squad.
+    // Typing filters the squad dropdown; tapping the suggestion inserts the
+    // full name and closes the panel (so it can't overlap the fields below).
+    await form.getByTestId('pick-scorer').fill('Ochoa');
+    await form
+      .getByTestId('scorer-option')
+      .filter({ hasText: 'Guillermo Ochoa' })
+      .first()
+      .click();
+    await expect(form.getByTestId('pick-scorer')).toHaveValue('Guillermo Ochoa');
     await form.getByTestId('pick-first-team').selectOption('home');
     await form.getByTestId('pick-save').click();
     await expect(form.getByText(/saved/i).first()).toBeVisible();
@@ -79,7 +90,7 @@ test.describe('world cup pool journey (mobile dark)', () => {
     const persisted = page.getByTestId(firstPickFormTestId);
     await expect(persisted.getByTestId('pick-home')).toHaveValue('2');
     await expect(persisted.getByTestId('pick-away')).toHaveValue('1');
-    await expect(persisted.getByTestId('pick-scorer')).toHaveValue('Test Scorer');
+    await expect(persisted.getByTestId('pick-scorer')).toHaveValue('Guillermo Ochoa');
     await expect(persisted.getByTestId('pick-first-team')).toHaveValue('home');
   });
 
@@ -169,8 +180,8 @@ test.describe('world cup pool journey (mobile dark)', () => {
 
   test('admin enters a result; points recompute onto the table and history', async () => {
     // Still signed in as the seeded admin from the previous test. Enter the
-    // result that exactly matches daisy's pick from test 1 (2-1, 'Test
-    // Scorer', home first): exact 10 + scorer 8 + first team 2 = 20.
+    // result that exactly matches daisy's pick from test 1 (2-1, 'Guillermo
+    // Ochoa', home first): exact 10 + scorer 8 + first team 2 = 20.
     const matchId = Number(firstPickFormTestId.replace('pick-form-', ''));
     expect(Number.isInteger(matchId)).toBe(true);
 
@@ -178,7 +189,7 @@ test.describe('world cup pool journey (mobile dark)', () => {
     const resultForm = page.getByTestId(`result-form-${matchId}`);
     await resultForm.getByTestId(`result-home-${matchId}`).fill('2');
     await resultForm.getByTestId(`result-away-${matchId}`).fill('1');
-    await resultForm.getByTestId(`result-scorer-${matchId}`).fill('Test Scorer');
+    await resultForm.getByTestId(`result-scorer-${matchId}`).fill('Guillermo Ochoa');
     await resultForm
       .getByTestId(`result-firstteam-${matchId}`)
       .selectOption('home');
@@ -206,7 +217,7 @@ test.describe('world cup pool journey (mobile dark)', () => {
     const historyItem = page.getByTestId(`history-match-${matchId}`);
     await expect(historyItem).toBeVisible();
     await expect(historyItem).toContainText('2–1');
-    await expect(historyItem).toContainText('Test Scorer');
+    await expect(historyItem).toContainText('Guillermo Ochoa');
     await expect(historyItem).toContainText('+20 pts');
     await expect(historyItem).toContainText('Exact +10');
     await expect(historyItem).toContainText('Scorer +8');

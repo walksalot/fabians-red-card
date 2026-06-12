@@ -4,6 +4,7 @@ import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { normalizeName } from '@/lib/scoring';
 import { americanToProb } from '@/lib/odds';
+import { scorerOnSquads } from './scorer-validation';
 import { codeToFlagEmoji } from './flags';
 import { formatPoints } from './format';
 import type { FirstTeam, PickView } from './types';
@@ -15,9 +16,12 @@ interface Props {
   awayName: string;
   homeCode?: string | null;
   awayCode?: string | null;
-  /** Squad names for the scorer picker; empty arrays fall back to free text only. */
-  homeSquad?: string[];
-  awaySquad?: string[];
+  /**
+   * Squad names for the scorer picker; `null` = team unknown (TBD — client
+   * validation defers to the server), empty array = no squad data (free text).
+   */
+  homeSquad?: string[] | null;
+  awaySquad?: string[] | null;
   /** First-goalscorer odds by player name — sorts the picker by likelihood. */
   scorerOdds?: Record<string, string>;
   /** League-configured point values for the optional-field eyebrows. */
@@ -191,6 +195,18 @@ export default function PickForm({
       setError('Scores must be whole numbers from 0 to 20.');
       return;
     }
+    // Mirror the server's squad rule before the request leaves the phone:
+    // a scorer pick must be a full name from one of the two squads (the
+    // server rejects anything else with a 400 anyway — this just says so
+    // without a round trip). While either team is TBD (null squad) the client
+    // allows and defers — the server rejects picks on TBD matches outright.
+    if (!scorerOnSquads(scorer, homeSquad, awaySquad)) {
+      setStatus('error');
+      setError(
+        "Pick a player from the squad list — last names alone don't count anymore.",
+      );
+      return;
+    }
     setError(null);
     // Never claim "Saved" before the server confirms — a killed request must not
     // look like a stored pick (phones lose connections; picks decide bragging rights).
@@ -260,9 +276,9 @@ export default function PickForm({
           : (awayCode ?? awayName);
 
   // Squad rows surviving the typed filter — computed up front so the panel
-  // knows when a custom/misspelled name filters out every player. Free-text
-  // names are an advertised feature, so an all-filtered panel must say so
-  // instead of rendering an empty border (which painted as a stray gray line).
+  // knows when a custom/misspelled name filters out every player. An
+  // all-filtered panel must say so instead of rendering an empty border
+  // (which painted as a stray gray line).
   const scorerQuery = normalizeName(scorer);
   // Likelihood order when odds exist (shortest price first — the question
   // people Google answered in the list itself); alphabetical tail for
@@ -271,8 +287,8 @@ export default function PickForm({
     americanToProb(scorerOdds[n] ?? null) ?? -1;
   const scorerSections = (
     [
-      [homeName, homeSquad],
-      [awayName, awaySquad],
+      [homeName, homeSquad ?? []],
+      [awayName, awaySquad ?? []],
     ] as const
   ).map(([team, squad]) => ({
     team,
@@ -407,6 +423,13 @@ export default function PickForm({
               aria-expanded={scorerOpen}
               aria-controls={`scorer-options-${matchId}`}
               onFocus={(e) => {
+                // Focus can bounce away (to the Save button) and back inside
+                // the 150ms blur-close window — a stale timer must never shut
+                // the panel this focus just reopened.
+                if (scorerBlurTimer.current !== null) {
+                  window.clearTimeout(scorerBlurTimer.current);
+                  scorerBlurTimer.current = null;
+                }
                 setScorerOpen(true);
                 // The options panel opens up to 224px below this input; near
                 // the bottom of the viewport that renders under the fixed tab
@@ -440,16 +463,18 @@ export default function PickForm({
               }}
               className={wideInputClass}
             />
-            {scorerOpen && (homeSquad.length > 0 || awaySquad.length > 0) ? (
+            {scorerOpen &&
+            ((homeSquad?.length ?? 0) > 0 || (awaySquad?.length ?? 0) > 0) ? (
               <div
                 id={`scorer-options-${matchId}`}
                 className="absolute inset-x-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60"
               >
                 {!scorerHasMatches ? (
-                  // Typed name matches nobody in either squad — reinforce the
-                  // free-text path instead of looking broken.
+                  // Typed name matches nobody in either squad — say so here,
+                  // before the save button repeats it as an error (scorer
+                  // picks must come from the squad list since 2026-06-12).
                   <p className="px-3 py-2.5 text-xs text-zinc-500">
-                    No squad match — your typed name still counts.
+                    No squad match — pick a player from the list.
                   </p>
                 ) : null}
                 {scorerSections.map(({ team, options }) => {

@@ -20,9 +20,12 @@ interface Points {
 export default function HowItWorksSheet({
   points,
   boosterMultiplier,
+  underdogPctMax,
 }: {
   points: Points;
   boosterMultiplier: number;
+  /** Auto-underdog win-chance ceiling as a whole percent (from UNDERDOG_PROB_MAX). */
+  underdogPctMax: number;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -44,9 +47,13 @@ export default function HowItWorksSheet({
   const rows: Array<[string, string, string]> = [
     ['Exact score', `+${points.exact}`, 'Nail the scoreline exactly.'],
     ['Right result', `+${points.outcome}`, 'Right winner (or a draw), wrong score.'],
-    ['First goalscorer', `+${points.scorer}`, 'Pick from the squad list or type a name.'],
+    ['First goalscorer', `+${points.scorer}`, 'Must be a player from the squad list — tap a name.'],
     ['First team to score', `+${points.firstTeam}`, '"No goals" counts if you call a 0–0.'],
-    ['Underdog bonus', `+${points.underdog}`, 'Back a flagged underdog to win — and they do.'],
+    [
+      'Underdog bonus',
+      `+${points.underdog}`,
+      `Back a flagged underdog (win chance ≤ ${underdogPctMax}%) to win — and they do.`,
+    ],
   ];
 
   return (
@@ -125,8 +132,9 @@ export default function HowItWorksSheet({
                 Once per match day, tap <b>Boost ×{boosterMultiplier}</b>
                 {' '}on one match to multiply whatever points you earn there. It can never
                 cost you anything. Tap it again to remove it, or tap another
-                match to move it — until your boosted match kicks off, then
-                it&apos;s locked in for the day.
+                match to move it — any time until your boosted match kicks off
+                or has a result, then it&apos;s locked in for the day.
+                Last-minute moves are fair game.
               </p>
             </div>
 
@@ -135,17 +143,28 @@ export default function HowItWorksSheet({
               <p className="mt-1 text-[13px] leading-relaxed text-zinc-400">
                 Wrong guesses score zero — never negative. Scorer and first-team
                 picks are optional: leaving them blank just skips those points.
-                Scorer names are forgiving — accents don&apos;t matter and last
-                names count (&quot;Jimenez&quot; = &quot;Raúl Jiménez&quot;).
+                Your scorer must be a player from the squad list — spelling,
+                accents and capitals are forgiven, but bare last names
+                don&apos;t count anymore.
               </p>
             </div>
 
             <div className="mt-3 rounded-2xl bg-zinc-900 p-4 ring-1 ring-white/5">
               <p className="text-sm font-bold text-zinc-100">Deadlines</p>
               <p className="mt-1 text-[13px] leading-relaxed text-zinc-400">
-                Edit picks as often as you like until kickoff, then they lock
-                automatically. Scores and the table update on their own during
-                matches.
+                Edit picks as often as you like until kickoff — editing never
+                affects tiebreaks — then they lock automatically. Scores and
+                the table update on their own during matches.
+              </p>
+            </div>
+
+            <div className="mt-3 rounded-2xl bg-zinc-900 p-4 ring-1 ring-white/5">
+              <p className="text-sm font-bold text-zinc-100">Tied?</p>
+              <p className="mt-1 text-[13px] leading-relaxed text-zinc-400">
+                Most total points, then most exact scores, then most
+                first-goalscorer hits, then most correct outcomes
+                (win/draw/loss). Still level after all four? Genuine tie — you
+                share the spot and split its prize money.
               </p>
             </div>
 
