@@ -156,7 +156,9 @@ upsertPick(db, userId, { entryId, matchId, predHome, predAway, predScorer, predF
   //   data never blocks picks (fail-open).
   //   The all-squads UNION rule (allSquadNameKeys: every players-table +
   //   rosters.json name) now applies ONLY to the boot scrub's handling of legacy
-  //   TBD picks (data-fixes.ts) — upsertPick never reaches it.
+  //   TBD picks (data-fixes.ts) — upsertPick never reaches it. Same fail-open
+  //   EXCEPTION there: an EMPTY union (no table rows anywhere AND no readable
+  //   rosters.json) skips the scrub for those picks.
   // Bare surnames are NOT accepted at save time.
   // Identical re-save (compared after canonicalization) is a NO-OP, short-circuited
   // BEFORE validation: a stored off-squad scorer is grandfathered on an identical
@@ -237,7 +239,9 @@ allSquadNameKeys(db): Set<string>         // normalized UNION of every players-t
   // name AND every rosters.json name — the TBD-match scorer vocabulary
 ```
 
-### data-fixes.ts (boot repairs — run from instrumentation.ts on every boot)
+### data-fixes.ts (boot repairs — run from instrumentation.ts on every boot;
+### the scorer scrub is SKIPPED on boots where the heal threw, so a
+### half-repaired name vocabulary can never clear honest picks)
 ```ts
 fixNullSurnameArtifacts(db): { playersFixed, picksFixed }
   // strips the ESPN '<Name> null' artifact. Players repair (own transaction):
@@ -250,8 +254,9 @@ fixNullSurnameArtifacts(db): { playersFixed, picksFixed }
   // updatedAt is never touched. Idempotent.
 scrubInvalidFutureScorers(db): { scorersCleared }
   // for every pick on a status==='scheduled', kickoff-in-the-future match with
-  // a non-null predScorer: validate with upsertPick's rules (both teams known →
-  // either squad; both squads empty → skip; TBD → allSquadNameKeys union).
+  // a non-null predScorer: validate with the squad rules (both teams known →
+  // either squad; both squads empty → skip; legacy TBD pick → allSquadNameKeys
+  // union — a branch upsertPick itself no longer reaches, TBD matches 409).
   // On failure predScorer = NULL — predFirstTeam, scoreline and updatedAt stay
   // untouched. Never reads finished/kicked-off matches. Idempotent.
 ```

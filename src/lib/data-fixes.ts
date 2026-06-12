@@ -72,6 +72,9 @@ export function fixNullSurnameArtifacts(db: Db): NullSurnameFixResult {
       }
     });
   } catch (err) {
+    // Log eagerly: if the picks transaction below ALSO throws, the propagated
+    // error would otherwise be the only one anybody sees.
+    console.error('[data-fix] players repair failed:', err);
     playersError = err;
   }
 

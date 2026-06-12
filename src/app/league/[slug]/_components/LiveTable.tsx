@@ -150,6 +150,13 @@ function RaceSummary({
             <span className="tabular-nums">{formatPoints(gap)}</span> {unit}{' '}
             behind {leader.label}
           </>
+        ) : mine.rank === leader.rank ? (
+          // Mirror of the leader branch: a shared rank means every tiebreaker
+          // is exhausted for BOTH tied players, not just the row rendered first.
+          <>
+            Dead level with {leader.label} on every tiebreaker — end like this
+            and you split the prize
+          </>
         ) : (
           <>Level with {leader.label} — tiebreakers decide</>
         )}

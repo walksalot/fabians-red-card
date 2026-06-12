@@ -17,10 +17,12 @@ export async function register() {
 
   // Idempotent data repairs run on every boot, even with schedulers disabled —
   // they fix stored data ("<Name> null" roster/pick artifacts), not feeds.
+  let healOk = false;
   try {
     const { getDb } = await import('@/db');
     const { fixNullSurnameArtifacts } = await import('@/lib/data-fixes');
     const fixed = fixNullSurnameArtifacts(getDb());
+    healOk = true;
     if (fixed.playersFixed || fixed.picksFixed) {
       console.log(
         `[data-fix] repaired ${fixed.playersFixed} player name(s), ${fixed.picksFixed} pick(s) with " null" artifacts`,
@@ -32,17 +34,21 @@ export async function register() {
 
   // Boot scrub: NULL any invalid scorer on a future (unkicked, unfinished)
   // match — closes stale grandfathered picks without touching locked ones.
-  try {
-    const { getDb } = await import('@/db');
-    const { scrubInvalidFutureScorers } = await import('@/lib/data-fixes');
-    const scrubbed = scrubInvalidFutureScorers(getDb());
-    if (scrubbed.scorersCleared) {
-      console.log(
-        `[data-fix] cleared ${scrubbed.scorersCleared} invalid scorer pick(s) on future matches`,
-      );
+  // Skipped when the heal failed: scrubbing against a half-repaired
+  // vocabulary could clear honest picks the next successful heal would fix.
+  if (healOk) {
+    try {
+      const { getDb } = await import('@/db');
+      const { scrubInvalidFutureScorers } = await import('@/lib/data-fixes');
+      const scrubbed = scrubInvalidFutureScorers(getDb());
+      if (scrubbed.scorersCleared) {
+        console.log(
+          `[data-fix] cleared ${scrubbed.scorersCleared} invalid scorer pick(s) on future matches`,
+        );
+      }
+    } catch (err) {
+      console.error('[data-fix] scorer scrub failed:', err);
     }
-  } catch (err) {
-    console.error('[data-fix] scorer scrub failed:', err);
   }
 
   if (process.env.SCHEDULER_DISABLED === '1') return;
