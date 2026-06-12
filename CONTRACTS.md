@@ -141,7 +141,17 @@ prizePool(league, entryCount): { totalCents, payouts: { place, percent, amountCe
 upsertPick(db, userId, { entryId, matchId, predHome, predAway, predScorer, predFirstTeam })
   // throws 403 if entry not owned by user; 409 'locked' if clock.now() >= kickoffUtc
   // OR match.status === 'finished' (a result may be entered ahead of kickoff);
-  // 0<=scores<=20; if predHome===0&&predAway===0 coerce predScorer=null, predFirstTeam='none'
+  // 409 'Teams for this match are not set yet' while either teamId is NULL — knockout
+  // TBD slots take no picks at all.
+  // 0<=scores<=20; if predHome===0&&predAway===0 coerce predScorer=null, predFirstTeam='none'.
+  // predScorer (non-null) is canonicalized to the squad spelling when it unambiguously
+  // matches one squad player (canonicalScorer), then must be the FULL name of a player
+  // on one of the match's two squads, compared via normalizeName (players table;
+  // data/rosters.json fallback when a team has no player rows) → else 400 'Scorer must
+  // be a player from one of the two squads — pick a name from the list'. Bare surnames
+  // are NOT accepted at save time.
+  // Identical re-save (compared after canonicalization) is a NO-OP: nothing is written
+  // and updatedAt is untouched.
 getEntryPicks(db, entryId): Pick[]
 getMatchPicksPublic(db, leagueId, matchId): { entryId, label, pick }[]
   // ONLY when clock.now() >= kickoff (else throws 403 'picks hidden until kickoff')
@@ -150,9 +160,15 @@ getMatchPicksPublic(db, leagueId, matchId): { entryId, label, pick }[]
 ### boosters.ts
 ```ts
 setBooster(db, userId, { entryId, matchday, matchId })
-  // match must belong to matchday; target kickoff in future; if existing booster row for
-  // (entry, matchday): replace ONLY if previously chosen match hasn't kicked off, else 409.
-  // After change: if either old or new match already finished → recompute affected matchPoints.
+  // match must belong to matchday; target must be unkicked AND without a result
+  // (finished = locked, even ahead of kickoff — a known result is never a valid
+  // booster target); if existing booster row for (entry, matchday): replace ONLY
+  // while the previously chosen match is also unkicked and resultless, else 409.
+  // Last-minute moves are legal. No recompute path: a booster can never move onto
+  // or off a finished match, so existing matchPoints are never affected.
+clearBooster(db, userId, { entryId, matchday })
+  // toggle-off; allowed in the same window a move is (current match unkicked and
+  // resultless) else 409; 404 when no booster is set for that matchday
 getBooster(db, entryId, matchday): Booster | null
 ```
 
@@ -176,11 +192,15 @@ recomputeLeague(db, leagueId) // recompute all finished matches for that league'
 ### leaderboard.ts
 ```ts
 getLeaderboard(db, leagueId): Array<{ rank, entryId, userId, label, displayName, total,
-  exactCount, scorerHits, outcomeCount, lastPickAt }>
-  // total = sum(matchPoints.total); exactCount = #breakdowns with exact>0; scorerHits =
-  // #breakdowns with scorer>0. Sort: total DESC, exactCount DESC, scorerHits DESC,
-  // lastPickAt ASC (max pick.updatedAt; entries with no picks = Infinity), entryId ASC.
-  // Ranks assigned 1..n after sort (ties broken — ranks unique).
+  exactCount, scorerHits, outcomeCount }>
+  // total = sum(matchPoints.total), rounded to micro-points before comparison;
+  // exactCount = #breakdowns with exact>0; scorerHits = #breakdowns with scorer>0;
+  // outcomeCount = #breakdowns with outcome>0. Sort: total DESC, exactCount DESC,
+  // scorerHits DESC, outcomeCount DESC. Entries still tied after all four keys are a
+  // GENUINE tie: they SHARE the rank (competition ranking, 1-1-3) and split that
+  // placing's prize money. NO timestamp or signup-order key — save-timing and join
+  // order never break ties (an identical re-save is a no-op anyway). Display order
+  // inside a tie: entryId ASC (deterministic, carries no meaning).
 getEntryStats(db, entryId): { total, exactCount, scorerHits, picksMade, finishedPicked,
   accuracyPct, currentStreak, bestStreak, badges: string[] }
   // streak = consecutive finished picked matches (kickoff order) with total>0.
@@ -210,9 +230,11 @@ POST /api/leagues/[slug]/join              { password? } → { entry }   (public
 POST /api/join/[token]                     → { league, entry }          (invite link)
 DELETE /api/leagues/[slug]/members/[userId] (admin)
 GET  /api/leagues/[slug]/leaderboard       → { rows, prizePool, memberCount }
+                                           (league MEMBERS only — 403 for any other account)
 GET  /api/leagues/[slug]/today?entryId=    → today board
 POST /api/picks                            upsertPick body
 POST /api/boosters                         setBooster body
+POST /api/boosters/clear                   { entryId, matchday } → clearBooster (toggle-off)
 GET  /api/leagues/[slug]/history?entryId=  → finished matches + picks + points
 POST /api/results          (primary-league admin)  enterResult body
 POST /api/results/clear    (primary-league admin)  { matchId }

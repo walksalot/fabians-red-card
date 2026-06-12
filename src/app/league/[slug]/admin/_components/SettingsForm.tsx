@@ -32,9 +32,12 @@ const labelCls = 'block text-xs font-medium uppercase tracking-wide text-zinc-40
 export default function SettingsForm({
   slug,
   settings,
+  underdogPctMax,
 }: {
   slug: string;
   settings: LeagueSettings;
+  /** Auto-underdog win-chance ceiling as a whole percent (from UNDERDOG_PROB_MAX). */
+  underdogPctMax: number;
 }) {
   const [name, setName] = useState(settings.name);
   const [isPrivate, setIsPrivate] = useState(settings.isPrivate);
@@ -325,7 +328,8 @@ export default function SettingsForm({
             Auto-flag underdogs from betting odds
             <span className="mt-0.5 block text-xs font-normal text-zinc-500">
               Arms the +{settings.scoringRules.underdog} underdog bonus automatically
-              when the odds say one side is a clear underdog (win chance ≤ 25%).
+              when the odds say one side is a clear underdog (win chance ≤{' '}
+              {underdogPctMax}%).
               Flags freeze at kickoff. Turn off to flag matches by hand below.
             </span>
           </span>

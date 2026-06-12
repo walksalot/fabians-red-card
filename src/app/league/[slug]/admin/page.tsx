@@ -4,6 +4,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { getDb, schema } from '@/db';
 import { getSessionUser } from '@/lib/session';
 import { nowMs } from '@/lib/clock';
+import { UNDERDOG_PROB_MAX } from '@/lib/sync/espn-sync';
 import InviteBox from './_components/InviteBox';
 import SettingsForm from './_components/SettingsForm';
 import MembersList from './_components/MembersList';
@@ -266,7 +267,11 @@ export default async function AdminPage({
 
         <section id="settings" className={sectionCls}>
           <h2 className="mb-3 text-base font-semibold text-zinc-100">Settings</h2>
-          <SettingsForm slug={slug} settings={settings} />
+          <SettingsForm
+            slug={slug}
+            settings={settings}
+            underdogPctMax={Math.round(UNDERDOG_PROB_MAX * 100)}
+          />
         </section>
 
         <section id="members" className={sectionCls}>

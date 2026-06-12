@@ -4,6 +4,7 @@ import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { normalizeName } from '@/lib/scoring';
 import { americanToProb } from '@/lib/odds';
+import { scorerOnSquads } from './scorer-validation';
 import { codeToFlagEmoji } from './flags';
 import { formatPoints } from './format';
 import type { FirstTeam, PickView } from './types';
@@ -189,6 +190,17 @@ export default function PickForm({
     ) {
       setStatus('error');
       setError('Scores must be whole numbers from 0 to 20.');
+      return;
+    }
+    // Mirror the server's squad rule before the request leaves the phone:
+    // a scorer pick must be a full name from one of the two squads (the
+    // server rejects anything else with a 400 anyway — this just says so
+    // without a round trip). Free text stays legal while squads are unknown.
+    if (!scorerOnSquads(scorer, homeSquad, awaySquad)) {
+      setStatus('error');
+      setError(
+        "Pick a player from the squad list — last names alone don't count anymore.",
+      );
       return;
     }
     setError(null);

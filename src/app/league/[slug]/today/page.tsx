@@ -5,6 +5,7 @@ import { oddsForDisplay } from '@/lib/odds';
 import { canonicalScorer } from '@/lib/scoring';
 import { getMatchdayOverview, getTodayBoard } from '@/lib/services/today';
 import { getLiveBoards } from '@/lib/services/live';
+import { UNDERDOG_PROB_MAX } from '@/lib/sync/espn-sync';
 import { shortTeamName } from '../_components/flags';
 import EmptyState from '@/components/EmptyState';
 import EntrySwitcher from '../_components/EntrySwitcher';
@@ -301,6 +302,7 @@ export default async function TodayPage({
           boosterLabel={boosterLabel}
           boosterArmed={headerBooster !== undefined}
           points={scoringPoints}
+          underdogPctMax={Math.round(UNDERDOG_PROB_MAX * 100)}
         />
       ) : (
         <EmptyState
