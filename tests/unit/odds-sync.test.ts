@@ -77,7 +77,7 @@ describe('odds via runSync', () => {
     expect(m.underdogTeamId).toBeNull();
   });
 
-  it('auto-underdog ON: flags a clear underdog (≤25%) and clears it when odds tighten', async () => {
+  it('auto-underdog ON: flags a clear underdog (≤15%) and clears it when odds tighten', async () => {
     const db = seedWorld(freshDb(), { autoUnderdog: 1 });
     // away +1200 → heavy underdog
     await withFakeNow(BEFORE, () => runSync(db, async () => [preEventWithOdds('-600', '+1200')]));

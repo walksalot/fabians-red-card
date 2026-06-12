@@ -286,6 +286,190 @@ describe('upsertPick', () => {
     expect(saved.predScorer).toBeNull();
     expect(saved.predFirstTeam).toBe('none');
   });
+
+  it('re-saving an identical pick is a no-op: updatedAt is NOT refreshed', async () => {
+    const { db, user, entry } = setup();
+    const t1 = '2026-06-11T10:00:00Z';
+    const t2 = '2026-06-11T12:30:00Z';
+    const t3 = '2026-06-11T13:00:00Z';
+    const created = await withFakeNow(t1, () =>
+      upsertPick(db, user.id, basePick(entry.id)),
+    );
+    // Byte-identical re-save: nothing changes, especially not the timestamp.
+    const resaved = await withFakeNow(t2, () =>
+      upsertPick(db, user.id, basePick(entry.id)),
+    );
+    expect(resaved.updatedAt).toBe(Date.parse(t1));
+    expect(resaved).toEqual(created);
+    // A real change still refreshes it.
+    const changed = await withFakeNow(t3, () =>
+      upsertPick(db, user.id, { ...basePick(entry.id), predHome: 3 }),
+    );
+    expect(changed.updatedAt).toBe(Date.parse(t3));
+  });
+});
+
+describe('scorer roster validation', () => {
+  /** Match with real team ids + seeded squads (the post-fix happy path). */
+  function setupWithSquads() {
+    const { db, user, league, entry } = setup();
+    db.insert(schema.teams)
+      .values([
+        { id: 1, code: 'ARG', name: 'Argentina', groupLetter: 'A' },
+        { id: 2, code: 'FRA', name: 'France', groupLetter: 'B' },
+      ])
+      .run();
+    db.insert(schema.players)
+      .values([
+        { teamId: 1, name: 'Lautaro Martínez', position: 'F' },
+        { teamId: 1, name: 'Emiliano Martínez', position: 'G' },
+        { teamId: 2, name: 'Kylian Mbappé', position: 'F' },
+      ])
+      .run();
+    const matchId = 42;
+    db.insert(schema.matches)
+      .values({
+        id: matchId,
+        stage: 'group',
+        kickoffUtc: KICKOFF_UTC,
+        matchday: MATCHDAY,
+        venue: 'Test Stadium',
+        city: 'Test City',
+        homeTeamId: 1,
+        awayTeamId: 2,
+      })
+      .run();
+    return { db, user, league, entry, matchId };
+  }
+
+  it('accepts a full squad name, accent- and case-insensitively', async () => {
+    const { db, user, entry, matchId } = setupWithSquads();
+    await withFakeNow(BEFORE_KICKOFF, async () => {
+      const saved = await upsertPick(db, user.id, {
+        ...basePick(entry.id),
+        matchId,
+        predScorer: 'lautaro martinez',
+      });
+      // Stored canonicalized to the squad spelling (unambiguous match).
+      expect(saved.predScorer).toBe('Lautaro Martínez');
+    });
+  });
+
+  it('accepts a player from the away squad', async () => {
+    const { db, user, entry, matchId } = setupWithSquads();
+    await withFakeNow(BEFORE_KICKOFF, async () => {
+      const saved = await upsertPick(db, user.id, {
+        ...basePick(entry.id),
+        matchId,
+        predScorer: 'Kylian Mbappé',
+      });
+      expect(saved.predScorer).toBe('Kylian Mbappé');
+    });
+  });
+
+  it('rejects a bare surname (the "martinez" loophole is closed)', async () => {
+    const { db, user, entry, matchId } = setupWithSquads();
+    await withFakeNow(BEFORE_KICKOFF, async () => {
+      await expect(
+        upsertPick(db, user.id, {
+          ...basePick(entry.id),
+          matchId,
+          predScorer: 'Martinez',
+        }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
+  it('rejects a player who is not in either squad', async () => {
+    const { db, user, entry, matchId } = setupWithSquads();
+    await withFakeNow(BEFORE_KICKOFF, async () => {
+      await expect(
+        upsertPick(db, user.id, {
+          ...basePick(entry.id),
+          matchId,
+          predScorer: 'Erling Haaland',
+        }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
+  it('0-0 coercion still wins: a garbage scorer on a 0-0 pick is nulled, not rejected', async () => {
+    const { db, user, entry, matchId } = setupWithSquads();
+    await withFakeNow(BEFORE_KICKOFF, async () => {
+      const saved = await upsertPick(db, user.id, {
+        ...basePick(entry.id),
+        matchId,
+        predHome: 0,
+        predAway: 0,
+        predScorer: 'definitely not a player',
+      });
+      expect(saved.predScorer).toBeNull();
+    });
+  });
+
+  it('falls back to the bundled rosters file when the players table is empty', async () => {
+    const { db, user, entry } = setup();
+    // Teams exist (codes match data/rosters.json) but NO players rows seeded.
+    db.insert(schema.teams)
+      .values([
+        { id: 30, code: 'BRA', name: 'Brazil', groupLetter: 'C' },
+        { id: 31, code: 'MEX', name: 'Mexico', groupLetter: 'A' },
+      ])
+      .run();
+    const matchId = 43;
+    db.insert(schema.matches)
+      .values({
+        id: matchId,
+        stage: 'group',
+        kickoffUtc: KICKOFF_UTC,
+        matchday: MATCHDAY,
+        venue: 'Test Stadium',
+        city: 'Test City',
+        homeTeamId: 30,
+        awayTeamId: 31,
+      })
+      .run();
+    await withFakeNow(BEFORE_KICKOFF, async () => {
+      // Casemiro is on Brazil's squad in data/rosters.json (post "null" fix).
+      const saved = await upsertPick(db, user.id, {
+        ...basePick(entry.id),
+        matchId,
+        predScorer: 'Casemiro',
+      });
+      expect(saved.predScorer).toBe('Casemiro');
+      await expect(
+        upsertPick(db, user.id, {
+          ...basePick(entry.id),
+          matchId,
+          predScorer: 'Erling Haaland',
+        }),
+      ).rejects.toMatchObject({ status: 400 });
+    });
+  });
+
+  it('re-saving a non-canonical spelling of the stored scorer is a no-op', async () => {
+    const { db, user, entry, matchId } = setupWithSquads();
+    const t1 = '2026-06-11T10:00:00Z';
+    const t2 = '2026-06-11T12:30:00Z';
+    const created = await withFakeNow(t1, () =>
+      upsertPick(db, user.id, {
+        ...basePick(entry.id),
+        matchId,
+        predScorer: 'Lautaro Martínez',
+      }),
+    );
+    // Re-typing the accent-less spelling canonicalizes to the stored row —
+    // identical pick, so nothing changes (especially not updatedAt).
+    const resaved = await withFakeNow(t2, () =>
+      upsertPick(db, user.id, {
+        ...basePick(entry.id),
+        matchId,
+        predScorer: 'lautaro martinez',
+      }),
+    );
+    expect(resaved.updatedAt).toBe(Date.parse(t1));
+    expect(resaved).toEqual(created);
+  });
 });
 
 describe('getMatchPicksPublic', () => {

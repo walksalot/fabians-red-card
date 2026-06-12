@@ -17,8 +17,6 @@ export interface LeaderboardRow {
   exactCount: number;
   scorerHits: number;
   outcomeCount: number;
-  /** Epoch ms of the entry's latest pick update; null when the entry has no picks. */
-  lastPickAt: number | null;
 }
 
 export interface EntryStats {
@@ -45,17 +43,22 @@ function roundTotal(value: number): number {
   return Math.round(value * 1e6) / 1e6;
 }
 
+/**
+ * Tiebreak order (league vote, 2026-06-12): total → most exact scores → most
+ * scorer hits → most correct outcomes. Entries still tied after all four keys
+ * are a GENUINE tie: they share a rank (competition ranking, 1-1-3) and a paid
+ * boundary splits the pot. Deliberately no timestamp/signup-order key —
+ * nothing here can be gamed by save-timing or join order.
+ */
 function compareStandings(a: Standing, b: Standing): number {
   if (a.total !== b.total) return b.total - a.total;
   if (a.exactCount !== b.exactCount) return b.exactCount - a.exactCount;
   if (a.scorerHits !== b.scorerHits) return b.scorerHits - a.scorerHits;
-  const la = a.lastPickAt ?? Infinity; // entries without picks sort last on this key
-  const lb = b.lastPickAt ?? Infinity;
-  if (la !== lb) return la - lb;
-  return a.entryId - b.entryId;
+  if (a.outcomeCount !== b.outcomeCount) return b.outcomeCount - a.outcomeCount;
+  return 0;
 }
 
-/** Standings for one league, sorted and assigned unique ranks 1..n. */
+/** Standings for one league, sorted; full ties share a rank (1-1-3). */
 export function getLeaderboard(db: Db, leagueId: number): LeaderboardRow[] {
   const entryRows = db
     .select({ entry: schema.entries, user: schema.users })
@@ -70,11 +73,6 @@ export function getLeaderboard(db: Db, leagueId: number): LeaderboardRow[] {
     .select()
     .from(schema.matchPoints)
     .where(inArray(schema.matchPoints.entryId, entryIds))
-    .all();
-  const pickRows = db
-    .select({ entryId: schema.picks.entryId, updatedAt: schema.picks.updatedAt })
-    .from(schema.picks)
-    .where(inArray(schema.picks.entryId, entryIds))
     .all();
 
   const totals = new Map<
@@ -96,29 +94,31 @@ export function getLeaderboard(db: Db, leagueId: number): LeaderboardRow[] {
     totals.set(mp.entryId, agg);
   }
 
-  const lastPickAt = new Map<number, number>();
-  for (const p of pickRows) {
-    const prev = lastPickAt.get(p.entryId);
-    if (prev === undefined || p.updatedAt > prev) lastPickAt.set(p.entryId, p.updatedAt);
+  const standings: Standing[] = entryRows
+    .slice()
+    .sort((a, b) => a.entry.id - b.entry.id) // deterministic display order inside ties
+    .map(({ entry, user }) => {
+      const agg = totals.get(entry.id);
+      return {
+        entryId: entry.id,
+        userId: entry.userId,
+        label: entry.label,
+        displayName: user.displayName,
+        total: roundTotal(agg?.total ?? 0),
+        exactCount: agg?.exactCount ?? 0,
+        scorerHits: agg?.scorerHits ?? 0,
+        outcomeCount: agg?.outcomeCount ?? 0,
+      };
+    });
+
+  standings.sort(compareStandings); // stable: pre-sorted by entryId within ties
+  const out: LeaderboardRow[] = [];
+  for (let i = 0; i < standings.length; i++) {
+    const tiedWithPrev =
+      i > 0 && compareStandings(standings[i - 1], standings[i]) === 0;
+    out.push({ rank: tiedWithPrev ? out[i - 1].rank : i + 1, ...standings[i] });
   }
-
-  const standings: Standing[] = entryRows.map(({ entry, user }) => {
-    const agg = totals.get(entry.id);
-    return {
-      entryId: entry.id,
-      userId: entry.userId,
-      label: entry.label,
-      displayName: user.displayName,
-      total: roundTotal(agg?.total ?? 0),
-      exactCount: agg?.exactCount ?? 0,
-      scorerHits: agg?.scorerHits ?? 0,
-      outcomeCount: agg?.outcomeCount ?? 0,
-      lastPickAt: lastPickAt.get(entry.id) ?? null,
-    };
-  });
-
-  standings.sort(compareStandings);
-  return standings.map((row, i) => ({ rank: i + 1, ...row }));
+  return out;
 }
 
 /** Profile stats for one entry: totals, streaks over finished picked matches, badges. */

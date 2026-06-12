@@ -41,9 +41,11 @@ function hasKickedOff(kickoffUtc: string): boolean {
 
 /**
  * Choose (or move) the entry's daily booster: exactly one boosted match per
- * matchday. The target match must be on that matchday and unkicked. An
- * existing booster can be replaced only while its current match is also
- * unkicked — once that match kicks off, the booster is locked for the day.
+ * matchday. The target match must be on that matchday, unkicked AND without a
+ * result (mirrors the pick lock: a match with a known result is never a valid
+ * target for a "prediction" amplifier). An existing booster can be replaced
+ * only while its current match is also unkicked and resultless — once either
+ * happens, the booster is locked for the day.
  */
 export async function setBooster(
   db: Db,
@@ -55,7 +57,10 @@ export async function setBooster(
   if (match.matchday !== input.matchday) {
     throw new AppError('Match is not on the requested matchday', 400);
   }
-  if (hasKickedOff(match.kickoffUtc)) {
+  // Same lock rule as picks (picks.ts): kicked off OR finished = locked. The
+  // finished check closes the "park ×2 on a known result" hole when an admin
+  // enters a result ahead of kickoff.
+  if (match.status === 'finished' || hasKickedOff(match.kickoffUtc)) {
     throw new AppError('Match has already kicked off', 409);
   }
   // Mirrors the upsertPick guard: the daily booster must not be spendable on
@@ -75,60 +80,41 @@ export async function setBooster(
     )
     .get();
 
-  const changed = !existing || existing.matchId !== input.matchId;
-  const finishedMatchIds = new Set<number>();
-  if (changed && match.status === 'finished') finishedMatchIds.add(match.id);
-
   if (existing && existing.matchId !== input.matchId) {
     const previous = db
       .select()
       .from(schema.matches)
       .where(eq(schema.matches.id, existing.matchId))
       .get();
-    if (previous && hasKickedOff(previous.kickoffUtc)) {
+    if (
+      previous &&
+      (previous.status === 'finished' || hasKickedOff(previous.kickoffUtc))
+    ) {
       throw new AppError('Booster already locked for this matchday', 409);
     }
-    if (previous?.status === 'finished') finishedMatchIds.add(previous.id);
   }
 
-  // Per CONTRACTS.md: if either the old or new match is already finished
-  // (admin can enter results ahead of kickoff), points must not go stale.
-  // results.ts owns recomputation; imported lazily because it statically
-  // depends on this module (boosted-match lookup) — avoids an import cycle.
-  // Resolved BEFORE the transaction: better-sqlite3 transactions are sync.
-  const recomputeMatch =
-    finishedMatchIds.size > 0 ? (await import('./results')).recomputeMatch : null;
-
-  // Booster write + recompute commit together: if the recompute throws, the
-  // booster move rolls back too, so a retry never skips the recompute via the
-  // `changed` short-circuit. Statements via `db` inside the callback run on
-  // the same better-sqlite3 connection, i.e. inside this transaction.
+  // No recompute path needed here anymore: boosters can no longer be placed on
+  // or moved off matches that have results, so stored points never go stale.
   const ts = nowMs();
-  return db.transaction(() => {
-    const row = existing
-      ? db
-          .update(schema.boosters)
-          .set({ matchId: input.matchId, updatedAt: ts }) // createdAt preserved
-          .where(eq(schema.boosters.id, existing.id))
-          .returning()
-          .get()
-      : db
-          .insert(schema.boosters)
-          .values({
-            entryId: input.entryId,
-            matchday: input.matchday,
-            matchId: input.matchId,
-            createdAt: ts,
-            updatedAt: ts,
-          })
-          .returning()
-          .get();
-
-    if (recomputeMatch) {
-      for (const id of finishedMatchIds) recomputeMatch(db, id);
-    }
-    return row;
-  });
+  return existing
+    ? db
+        .update(schema.boosters)
+        .set({ matchId: input.matchId, updatedAt: ts }) // createdAt preserved
+        .where(eq(schema.boosters.id, existing.id))
+        .returning()
+        .get()
+    : db
+        .insert(schema.boosters)
+        .values({
+          entryId: input.entryId,
+          matchday: input.matchday,
+          matchId: input.matchId,
+          createdAt: ts,
+          updatedAt: ts,
+        })
+        .returning()
+        .get();
 }
 
 /** The entry's booster for a matchday, or null when none is set. */
@@ -158,8 +144,7 @@ export interface ClearBoosterInput {
 /**
  * Remove the entry's booster for a matchday — the toggle-off. Allowed in the
  * same window in which the booster could be moved: until its current match
- * kicks off. If that match was finished early (admin can enter results ahead
- * of kickoff), its points are recomputed without the multiplier atomically.
+ * kicks off or has a result (whichever comes first).
  */
 export async function clearBooster(
   db: Db,
@@ -180,15 +165,9 @@ export async function clearBooster(
   if (!existing) throw new AppError('No booster set for this matchday', 404);
 
   const match = getMatchOr404(db, existing.matchId);
-  if (hasKickedOff(match.kickoffUtc)) {
+  if (match.status === 'finished' || hasKickedOff(match.kickoffUtc)) {
     throw new AppError('Booster already locked for this matchday', 409);
   }
 
-  const recomputeMatch =
-    match.status === 'finished' ? (await import('./results')).recomputeMatch : null;
-
-  db.transaction(() => {
-    db.delete(schema.boosters).where(eq(schema.boosters.id, existing.id)).run();
-    if (recomputeMatch) recomputeMatch(db, match.id);
-  });
+  db.delete(schema.boosters).where(eq(schema.boosters.id, existing.id)).run();
 }

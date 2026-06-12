@@ -1,8 +1,10 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
 import { nowMs } from '@/lib/clock';
 import { AppError } from '@/lib/errors';
-import { canonicalScorer } from '@/lib/scoring';
+import { canonicalScorer, normalizeName } from '@/lib/scoring';
 
 export type Pick = typeof schema.picks.$inferSelect;
 
@@ -77,6 +79,66 @@ function normalizeScorer(raw: string | null | undefined): string | null {
   return trimmed;
 }
 
+/** Bundled squad lists — fallback when the players table has no rows for a team. */
+let rostersFile: Record<string, { name: string }[]> | null = null;
+function rostersFromFile(code: string): string[] {
+  if (rostersFile === null) {
+    try {
+      rostersFile = JSON.parse(
+        fs.readFileSync(path.join(process.cwd(), 'data', 'rosters.json'), 'utf8'),
+      );
+    } catch {
+      rostersFile = {};
+    }
+  }
+  return (rostersFile?.[code] ?? []).map((p) => p.name);
+}
+
+/** Normalized names of a team's squad: players table first, data file fallback. */
+function squadNameKeys(db: Db, teamId: number): Set<string> {
+  const rows = db
+    .select({ name: schema.players.name })
+    .from(schema.players)
+    .where(eq(schema.players.teamId, teamId))
+    .all();
+  let names = rows.map((r) => r.name);
+  if (names.length === 0) {
+    const team = db
+      .select({ code: schema.teams.code })
+      .from(schema.teams)
+      .where(eq(schema.teams.id, teamId))
+      .get();
+    if (team) names = rostersFromFile(team.code);
+  }
+  return new Set(names.map(normalizeName));
+}
+
+/**
+ * League rule (announced 2026-06-12): a scorer pick must be a real player from
+ * one of the match's two squads — full name, matched accent/case-insensitively.
+ * Closes the bare-surname loophole ("martinez" covering three Martínezes).
+ * Skipped while either team is unknown (knockout placeholders): there is no
+ * squad to validate against yet.
+ */
+function requireScorerOnSquads(
+  db: Db,
+  match: { homeTeamId: number | null; awayTeamId: number | null },
+  predScorer: string,
+): void {
+  if (match.homeTeamId === null || match.awayTeamId === null) return;
+  const key = normalizeName(predScorer);
+  const home = squadNameKeys(db, match.homeTeamId);
+  const away = squadNameKeys(db, match.awayTeamId);
+  // Fail-open when no squad data exists at all — missing squad data must
+  // never lock players out of a pick component.
+  if (home.size === 0 && away.size === 0) return;
+  if (home.has(key) || away.has(key)) return;
+  throw new AppError(
+    'Scorer must be a player from one of the two squads — pick a name from the list',
+    400,
+  );
+}
+
 /**
  * Create or update the pick of one of the user's entries for a match.
  * Locked from kickoff (409). A 0-0 prediction coerces scorer to null and
@@ -130,6 +192,30 @@ export async function upsertPick(
     predScorer = null;
     predFirstTeam = 'none';
   }
+
+  // Identical re-save: change nothing — especially not updatedAt. (Re-saving
+  // an unchanged pick used to silently refresh the timestamp.)
+  const existing = db
+    .select()
+    .from(schema.picks)
+    .where(
+      and(
+        eq(schema.picks.entryId, input.entryId),
+        eq(schema.picks.matchId, input.matchId),
+      ),
+    )
+    .get();
+  if (
+    existing &&
+    existing.predHome === input.predHome &&
+    existing.predAway === input.predAway &&
+    existing.predScorer === predScorer &&
+    existing.predFirstTeam === predFirstTeam
+  ) {
+    return existing;
+  }
+
+  if (predScorer !== null) requireScorerOnSquads(db, match, predScorer);
 
   const ts = nowMs();
   return db

@@ -10,6 +10,7 @@ import {
   handle,
   jsonOk,
   memberCountOf,
+  requireMember,
 } from '@/lib/api-helpers';
 
 type RouteCtx = { params: Promise<{ slug: string }> };
@@ -17,9 +18,12 @@ type RouteCtx = { params: Promise<{ slug: string }> };
 export const GET = handle<RouteCtx>(async (_req, { params }) => {
   const { slug } = await params;
   const db = getDb();
-  await requireUser(db);
+  const user = await requireUser(db);
   const league = await getLeagueBySlug(db, slug);
   if (!league) throw new AppError('League not found', 404);
+  // Standings, locked picks and daily deltas are league-internal — members only
+  // (this route used to require only a login, leaking data to any account).
+  requireMember(db, league.id, user.id);
   const rows = await getLeaderboard(db, league.id);
   // Additive display field: points banked on the current matchday, so the
   // table can render the "+N today" daily-race delta beside season totals.

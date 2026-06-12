@@ -224,8 +224,14 @@ export async function runSync(
   return { datesChecked: dates, results, liveUpdates, teamFills, oddsUpdates, notes };
 }
 
-/** Clear-underdog threshold: weaker side's de-vigged win prob at or below this. */
-const UNDERDOG_PROB_MAX = 0.25;
+/**
+ * Clear-underdog threshold: weaker side's de-vigged win prob at or below this.
+ * 0.15 (true minnows only) per the league vote of 2026-06-12 — at +5 points a
+ * looser threshold would make backing the dog the EV-optimal pick in close
+ * matches (verified by simulation); at ≤15% the bonus never distorts play.
+ * Exported so player-facing copy always states the live value.
+ */
+export const UNDERDOG_PROB_MAX = 0.15;
 
 /** True when the primary league wants underdogs auto-flagged from odds. */
 function autoUnderdogEnabled(db: Db): boolean {
