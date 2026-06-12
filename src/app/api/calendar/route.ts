@@ -9,10 +9,11 @@ export const dynamic = 'force-dynamic';
  * Apple/Google Calendar and get their own kickoff reminders. It exposes only the
  * public match schedule — no league or player data — so it needs no auth.
  */
-export async function GET() {
+export async function GET(req: Request) {
   const db = getDb();
   const primary = db.select().from(schema.leagues).orderBy(asc(schema.leagues.id)).limit(1).get();
-  const ics = buildCalendar(db, primary?.name ?? "Fabian's Red Card");
+  const origin = new URL(req.url).origin;
+  const ics = buildCalendar(db, primary?.name ?? "Fabian's Red Card", origin);
   return new Response(ics, {
     status: 200,
     headers: {

@@ -41,13 +41,14 @@ function fold(line: string): string {
   return parts.join('\r\n');
 }
 
-export function buildCalendar(db: Db, leagueName: string): string {
+export function buildCalendar(db: Db, leagueName: string, baseUrl?: string): string {
   const rows = db
     .select({
       id: schema.matches.id,
       stage: schema.matches.stage,
       groupLetter: schema.matches.groupLetter,
       kickoffUtc: schema.matches.kickoffUtc,
+      matchday: schema.matches.matchday,
       venue: schema.matches.venue,
       city: schema.matches.city,
       homePlaceholder: schema.matches.homePlaceholder,
@@ -98,7 +99,12 @@ export function buildCalendar(db: Db, leagueName: string): string {
       `DTEND:${icsStamp(end.toISOString())}`,
       fold(`SUMMARY:${icsEscape(summary)}`),
       fold(`LOCATION:${icsEscape(`${m.venue}, ${m.city}`)}`),
-      fold(`DESCRIPTION:${icsEscape(`Match ${m.id} · ${stageLabel}. Get your pick in before kickoff!`)}`),
+      fold(
+        `DESCRIPTION:${icsEscape(
+          `Match ${m.id} · ${stageLabel}. Get your pick in before kickoff!` +
+            (baseUrl ? ` ${baseUrl}/league/fabians-red-card/today?day=${m.matchday}` : ''),
+        )}`,
+      ),
       'BEGIN:VALARM',
       'TRIGGER:-PT60M',
       'ACTION:DISPLAY',

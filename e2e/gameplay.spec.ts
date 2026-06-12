@@ -50,8 +50,10 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     const locked = page.getByTestId('pick-form-1');
     await expect(locked).toBeVisible();
     await expect(locked.getByText('Picks are locked for this match.')).toBeVisible();
-    // seeded live feed data → the card shows the live score, not a bare badge
+    // seeded live feed data → the card shows the live score, not a bare badge,
+    // with the match clock (minutes accrued) in place of a generic "Live" label
     await expect(locked.getByText('1–0').first()).toBeVisible();
+    await expect(locked.getByText("64'")).toBeVisible();
     await expect(locked.getByTestId('pick-save')).toHaveCount(0);
 
     const open = page.getByTestId('pick-form-2');
@@ -99,12 +101,56 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     await expect(page.getByTestId('pick-form-1').getByTestId('booster-toggle')).toBeDisabled();
   });
 
+  test('day browser steps to a future matchday, saves a pick there, and returns to today', async () => {
+    await page.goto('/league/fabians-red-card/today');
+
+    // current day: back-arrow is inert (no link), the amber radar dot shows
+    // because tomorrow (June 12) still has unpicked matches
+    await expect(page.getByTestId('day-picker')).toBeVisible();
+    await expect(page.getByTestId('day-prev')).toHaveCount(0);
+    await expect(page.getByTestId('day-gap-dot')).toBeVisible();
+
+    // step forward → June 12 board shows ONLY that day's matches (3 + 4),
+    // with no carryover of the in-progress match 1
+    await page.getByTestId('day-next').click();
+    await expect(page).toHaveURL(/day=2026-06-12/);
+    await expect(page.getByTestId('pick-form-3')).toBeVisible();
+    await expect(page.getByTestId('pick-form-4')).toBeVisible();
+    await expect(page.getByTestId('pick-form-1')).toHaveCount(0);
+
+    // no odds seeded that far out → the future-day hint explains why
+    await expect(page.getByText('Betting odds appear closer to matchday.')).toBeVisible();
+
+    // a pick on a future match saves exactly like a same-day pick
+    const future = page.getByTestId('pick-form-3');
+    await future.getByTestId('pick-home').fill('2');
+    await future.getByTestId('pick-away').fill('0');
+    await future.getByTestId('pick-save').click();
+    await expect(future.getByText(/saved/i).first()).toBeVisible();
+
+    // the at-a-glance sheet shows true progress per day
+    await page.getByTestId('day-picker').click();
+    await expect(page.getByTestId('day-list')).toBeVisible();
+    await expect(page.getByTestId('day-row-2026-06-11')).toContainText('today');
+    await expect(page.getByTestId('day-row-2026-06-11')).toContainText('2/2 picked');
+    await expect(page.getByTestId('day-row-2026-06-12')).toContainText('1/2 picked');
+
+    // tapping today's row lands back on the canonical /today URL with the
+    // in-progress match 1 visible again
+    await page.getByTestId('day-row-2026-06-11').click();
+    await expect(page).toHaveURL(/\/today$/);
+    await expect(page.getByTestId('pick-form-1')).toBeVisible();
+    await expect(page.getByTestId('pick-form-2')).toBeVisible();
+  });
+
   test('"if it ended now" live board shows engine-true provisional points', async () => {
     // Paula is signed in from test 1. The strip appears on Today and Table.
     await page.goto('/league/fabians-red-card/today');
     const strip = page.getByTestId('live-now');
     await expect(strip).toBeVisible();
     await expect(strip).toContainText('1–0'); // the live snapshot score
+    // the match clock sits right beside the score heading, glanceable
+    await expect(strip.getByTestId('live-clock-1')).toHaveText("64'");
 
     await page.getByTestId('live-now-toggle-1').click();
     const board = page.getByTestId('live-board-1');

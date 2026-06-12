@@ -114,11 +114,9 @@ export default function BoosterButton({
               : `Boost ×${multiplier}`}
         </span>
       </button>
-      {boosted && !disabled ? (
-        <p className="mt-1 text-[10px] font-medium text-zinc-500">
-          doubles this match · tap to remove
-        </p>
-      ) : null}
+      {/* The armed "tap to remove" caption renders in TodayBoard under the
+          header row — keeping it out of this stack keeps the pill vertically
+          centered with the chips sharing its row. */}
       {error && <p className="mt-1 text-xs text-brand-bright">{error}</p>}
     </div>
   );

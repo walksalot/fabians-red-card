@@ -57,7 +57,9 @@ export default async function LeagueLayout({
             <Link
               href={`/league/${slug}/profile`}
               aria-label={`You are ${ordinal(mine.rank)} with ${formatPoints(mine.total)} points — open profile`}
-              className="ml-auto flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-zinc-900 px-2.5 text-[11px] font-semibold tabular-nums ring-1 ring-inset ring-white/10 transition-all duration-150 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 active:scale-95"
+              // before: pseudo-element expands the 28px pill's tap surface to
+              // ~44px without growing the visual (BoosterButton's pattern).
+              className="relative ml-auto flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-zinc-900 px-2.5 text-[11px] font-semibold tabular-nums ring-1 ring-inset ring-white/10 transition-all duration-150 before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 active:scale-95"
             >
               {/* Podium places carry their medal tint onto every screen. */}
               <span className={MEDAL_TEXT_TONES[mine.rank] ?? 'text-zinc-300'}>

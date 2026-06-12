@@ -45,6 +45,10 @@ interface Props {
   boosterArmed: boolean;
   /** League scoring values for the in-context "How scoring works" sheet. */
   points: { exact: number; outcome: number; scorer: number; firstTeam: number; underdog: number };
+  /** Day-browser control rendered in place of the static date headline. */
+  dayNav?: React.ReactNode;
+  /** Viewing a day ahead of the current one (drives the odds-coming hint). */
+  isFutureDay?: boolean;
 }
 
 function formatRemaining(ms: number): string {
@@ -177,14 +181,18 @@ function TeamSide({
         {flag ?? '\u{1F3F3}\u{FE0F}'}
       </span>
       {/* Short display name for long FIFA names (no mid-word ellipsis);
-          title keeps the full name on press-and-hold. */}
+          title keeps the full name on press-and-hold. One font step down
+          below 380px — at 360px the columns are ~8px too narrow for
+          "Bosnia & Herz.", and ellipsizing an abbreviation reads as broken. */}
       <span
         title={name}
-        className="w-full truncate text-sm font-bold leading-tight text-zinc-50"
+        className="w-full truncate text-sm font-bold leading-tight text-zinc-50 max-[379px]:text-[13px]"
       >
         {shortTeamName(name)}
       </span>
-      {code ? (
+      {/* Skip the code eyebrow when it just repeats the name ("USA" / "USA"
+          read as a duplicated-label glitch). */}
+      {code && code.toLowerCase() !== shortTeamName(name).toLowerCase() ? (
         <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
           {code}
         </span>
@@ -216,7 +224,8 @@ function FixtureCenter({ item, stale }: { item: TodayMatchView; stale: boolean }
         <span className="flex items-center gap-1">
           <LiveDot size="h-1.5 w-1.5" pulse />
           <span className="text-[10px] font-semibold uppercase tracking-widest text-brand-bright/80">
-            Live
+            {/* feed clock = minutes accrued ("55'", "HT"); dot already says live */}
+            {item.liveClock ?? 'Live'}
           </span>
         </span>
       </div>
@@ -341,10 +350,12 @@ function PickSummary({ item }: { item: TodayMatchView }) {
                 : CHIP_TONES.score
             }`}
           >
+            {/* "Right result" — the same name the live legend, the scoring
+                sheet and the Rules teach for this category. */}
             {quality === 'exact'
               ? 'Exact score'
               : quality === 'outcome'
-                ? 'Right outcome'
+                ? 'Right result'
                 : 'No points yet'}
           </span>
           <span className="text-[10px] font-medium text-zinc-400">
@@ -385,6 +396,8 @@ export default function TodayBoard({
   boosterLabel,
   boosterArmed,
   points,
+  dayNav = null,
+  isFutureDay = false,
 }: Props) {
   const router = useRouter();
   // Picks saved this session (server data only updates on refresh) — merged
@@ -394,6 +407,10 @@ export default function TodayBoard({
     m.myPick !== null || savedClient[m.matchId] === true;
   const pickedCount = items.filter(hasPick).length;
   const allPicked = pickedCount === items.length;
+  // Every fixture is a bracket placeholder — nobody can pick anything, so the
+  // amber "0/N picked" urgency (and any lock countdown) would be a demand to
+  // do the impossible. The whole day reads as a calm "bracket pending".
+  const allTbd = items.length > 0 && items.every((m) => m.teamsTbd);
   // While anything on the board is locked/in-play, re-fetch server data every
   // 30s (visibility-aware) — same cadence as the leaderboard. Client state in
   // the pick forms survives a refresh, so typing is never interrupted.
@@ -430,27 +447,38 @@ export default function TodayBoard({
 
   return (
     <div className="space-y-3">
-      {/* Day header: stage + fixture count + live pick progress, booster chip. */}
-      <div className="flex items-end justify-between gap-2">
-        <div className="min-w-0">
-          {/* Stage truncates first; the pick-progress counter can never clip
-              ("5/5 picked" is the most actionable piece of the header). The
-              fixture count is implicit in the denominator, so it stays out. */}
-          <p className="flex min-w-0 items-baseline text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
-            <span className="truncate">
-              {commonStage ? (STAGE_LABELS[commonStage] ?? commonStage) : 'Matchday'}
+      {/* Day header: stage + fixture count eyebrow over the full-width day
+          browser, then ONE aligned utility row (scoring sheet + booster chip)
+          — stacking the pills on separate ragged lines read as misaligned. */}
+      <div className="min-w-0">
+        {/* Stage truncates first; the pick-progress counter can never clip
+            ("5/5 picked" is the most actionable piece of the header). The
+            fixture count is implicit in the denominator, so it stays out. */}
+        <p className="flex min-w-0 items-baseline text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+          <span className="truncate">
+            {commonStage ? (STAGE_LABELS[commonStage] ?? commonStage) : 'Matchday'}
+          </span>
+          <span className="shrink-0">&nbsp;·&nbsp;</span>
+          {allTbd ? (
+            <span className="shrink-0 whitespace-nowrap text-zinc-400">
+              Bracket pending
             </span>
-            <span className="shrink-0">&nbsp;·&nbsp;</span>
+          ) : (
             <span
               className={`shrink-0 whitespace-nowrap ${allPicked ? 'text-emerald-400' : 'text-amber-300'}`}
             >
               {pickedCount}/{items.length} picked
             </span>
-          </p>
+          )}
+        </p>
+        {dayNav ?? (
           <h2 className="truncate font-display text-lg font-bold tracking-tight text-zinc-50">
             {formatMatchday(matchday)}
           </h2>
-        </div>
+        )}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <HowItWorksSheet points={points} boosterMultiplier={boosterMultiplier} />
         {/* The chip names the booster match but used to offer no path to it —
             tapping now scrolls the armed card (or the first card that can
             still take the booster) into view under the sticky header. */}
@@ -461,7 +489,15 @@ export default function TodayBoard({
               (m) => m.status !== 'finished' && !m.locked && !m.boosterDisabled,
             );
           const interactive = target !== undefined;
-          const chipClass = `mb-0.5 chip ${
+          // Bracket-pending day: nothing can be boosted, so "Booster
+          // available" would contradict every disabled card below — state
+          // when it actually opens instead.
+          const label = allTbd ? 'Booster opens with the bracket' : boosterLabel;
+          // h-7 matches the "How scoring works" pill sharing this row;
+          // `shrink min-w-0` undo the chip utility's flex-shrink:0 so the
+          // truncating label span below keeps long fixture names ("On Canada
+          // vs Bosnia and Herzegovina") inside the 390px row.
+          const chipClass = `chip h-7 min-w-0 shrink ${
             boosterArmed
               ? 'bg-amber-400/10 text-amber-300 ring-1 ring-inset ring-amber-400/25'
               : interactive
@@ -477,19 +513,19 @@ export default function TodayBoard({
             <>
               <svg
                 viewBox="0 0 24 24"
-                className={`h-3 w-3 ${boosterArmed ? '' : 'text-amber-300/80'}`}
+                className={`h-3 w-3 shrink-0 ${boosterArmed ? '' : 'text-amber-300/80'}`}
                 fill="currentColor"
                 aria-hidden="true"
               >
                 <path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z" />
               </svg>
-              {boosterLabel}
+              <span className="min-w-0 truncate">{label}</span>
               {/* Chevron-down = "this takes you somewhere below" — only on the
                   unarmed jump pill; the armed chip stays a pure status record. */}
               {interactive && !boosterArmed ? (
                 <svg
                   viewBox="0 0 24 24"
-                  className="h-3 w-3 text-zinc-500"
+                  className="h-3 w-3 shrink-0 text-zinc-500"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2.5"
@@ -506,22 +542,34 @@ export default function TodayBoard({
           return (
             <button
               type="button"
-              aria-label={`${boosterLabel} — jump to match`}
+              aria-label={`${label} — jump to match`}
               onClick={() =>
                 document
                   .querySelector(`[data-testid="pick-form-${target.matchId}"]`)
                   ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
               }
-              className={`${chipClass} transition-transform duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 active:scale-95`}
+              // before: pseudo-element grows the 28px pill's tap surface past
+              // the 44px floor without changing its visual size (same goal as
+              // BoosterButton's hit-area expansion on the cards).
+              className={`${chipClass} relative transition-transform duration-150 before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 active:scale-95`}
             >
               {inner}
             </button>
           );
         })()}
       </div>
-      <div className="-mt-1 flex justify-start">
-        <HowItWorksSheet points={points} boosterMultiplier={boosterMultiplier} />
-      </div>
+      {/* zinc-500, not 600 — this line answers "where are the odds?", so it
+          matches the readable caption tone used inside the cards. Shown on ANY
+          day whose open cards all lack odds (not just future days): users who
+          saw odds on other cards deserve the same explanation on matchday. */}
+      {items.every((m) => m.odds === null) &&
+      items.some((m) => m.status !== 'finished' && !m.locked) ? (
+        <p className="text-[11px] text-zinc-500">
+          {isFutureDay
+            ? 'Betting odds appear closer to matchday.'
+            : 'Betting odds appear closer to kickoff.'}
+        </p>
+      ) : null}
       {items.map((m, i) => {
         const isLive =
           m.status !== 'finished' && (m.locked || m.liveStatus === 'in');
@@ -545,9 +593,12 @@ export default function TodayBoard({
           }`}
           style={{ animationDelay: `${Math.min(i, 6) * 60}ms` }}
         >
-          {/* Header: stage caption (mixed-stage days only) + pick state + booster + status */}
-          <div className="flex items-center justify-between gap-2">
-            <span className="flex min-w-0 items-center gap-1.5">
+          {/* Header: stage caption (mixed-stage days only) + pick state + booster + status.
+              flex-wrap (and no min-w-0 on the left span): when large text zoom
+              makes the chips outgrow the row, the right group drops to a second
+              line instead of sliding over the "Needs pick" chip. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5">
               {/* Stage eyebrow only on mixed-stage days — the official match
                   number moved beside the venue caption so a kickoff-sorted
                   board never leads with a non-monotonic "MATCH 14 → 12" scan. */}
@@ -572,7 +623,7 @@ export default function TodayBoard({
                 >
                   <path d="M4.5 12.5 10 18 19.5 6.5" />
                 </svg>
-              ) : m.status !== 'finished' && !picked && !isLive ? (
+              ) : m.status !== 'finished' && !picked && !isLive && !m.teamsTbd ? (
                 <span className="inline-flex shrink-0 items-center rounded-full bg-amber-400/10 px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-amber-300 ring-1 ring-inset ring-amber-400/25">
                   Needs pick
                 </span>
@@ -582,7 +633,9 @@ export default function TodayBoard({
               {m.status !== 'finished' ? (
                 // Locked + unarmed = a dead control; CSS-hide it (stays mounted
                 // for e2e) and keep the chip only as a record when armed.
-                <span className={isLive && !m.boosted ? 'hidden' : ''}>
+                // Bracket-pending cards get the same treatment: a grayed-out
+                // pill on a match nobody can boost is a dead control too.
+                <span className={(isLive || m.teamsTbd) && !m.boosted ? 'hidden' : ''}>
                   <BoosterButton
                     entryId={entryId}
                     matchday={m.matchday}
@@ -598,17 +651,32 @@ export default function TodayBoard({
                 </span>
               ) : null}
               {/* Live windows render NOTHING here — the red ring + center
-                  lockup state "live" exactly once. The chip returns at FT. */}
+                  lockup state "live" exactly once. The chip returns at FT.
+                  Bracket-pending cards skip the countdown too: a lock timer
+                  for a match nobody can pick promises an impossible action. */}
               {m.status === 'finished' ? (
                 <StatusChip />
-              ) : isLive ? null : (
+              ) : isLive || m.teamsTbd ? null : (
                 <Countdown kickoffUtc={m.kickoffUtc} serverNowMs={serverNowMs} />
               )}
             </span>
           </div>
 
-          {/* Fixture row: home | score-or-time | away */}
-          <div className="mt-2.5 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          {/* Armed-booster teaching caption — rendered OUTSIDE the header row
+              so the pill stays on the row's center line beside the Locks chip
+              (stacking the caption under the pill staggered it ~15px).
+              Centered: right-aligned it sat squarely under the Locks chip,
+              which made the lock timer look tappable. */}
+          {m.status !== 'finished' && m.boosted && !m.boosterDisabled ? (
+            <p className="mt-1 text-center text-[10px] font-medium text-zinc-500">
+              doubles this match · tap to remove
+            </p>
+          ) : null}
+
+          {/* Fixture row: home | score-or-time | away. The gap tightens below
+              380px to hand the team-name columns the width they lose on small
+              Androids (pairs with the name's font step-down). */}
+          <div className="mt-2.5 grid grid-cols-[1fr_auto_1fr] items-center gap-3 max-[379px]:gap-2">
             <TeamSide name={m.homeName} code={m.homeCode} align="left" />
             <FixtureCenter item={m} stale={stale} />
             <TeamSide name={m.awayName} code={m.awayCode} align="right" />
@@ -665,6 +733,10 @@ export default function TodayBoard({
                 Picks are locked for this match.
               </p>
             </div>
+          ) : m.teamsTbd ? (
+            <p className="mt-3 rounded-lg bg-zinc-950/50 px-3 py-2.5 text-xs text-zinc-500 ring-1 ring-inset ring-white/5">
+              Bracket pending — picks open as soon as both teams are known.
+            </p>
           ) : (
             <>
               {m.odds ? (
@@ -680,6 +752,8 @@ export default function TodayBoard({
               <PickForm
               entryId={entryId}
               matchId={m.matchId}
+              scorerPoints={points.scorer}
+              firstTeamPoints={points.firstTeam}
               homeName={m.homeName}
               awayName={m.awayName}
               homeCode={m.homeCode}

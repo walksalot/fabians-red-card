@@ -49,6 +49,8 @@ export interface LiveBoard {
   liveHome: number;
   liveAway: number;
   liveFirstScorer: string | null;
+  /** Feed's match clock ("55'", "HT") — minutes accrued, soccer counts up. */
+  liveClock: string | null;
   liveUpdatedAt: number | null;
   /** False while the match has kicked off but the feed hasn't reported yet. */
   hasLiveData: boolean;
@@ -206,11 +208,16 @@ export function getLiveBoards(db: Db, leagueId: number): LiveBoard[] {
       };
     });
 
-    // best provisional first; no-pick rows sink; stable by label for ties
+    // Best provisional first; no-pick rows sink. Points ties break by the
+    // documented tiebreaker chain (Rules: most exact scores, then most
+    // first-goalscorer hits), applied to this snapshot; label keeps the
+    // order stable when everything is level.
     rows.sort(
       (a, b) =>
         Number(b.pick !== null) - Number(a.pick !== null) ||
         b.total - a.total ||
+        (b.breakdown?.exact ?? 0) - (a.breakdown?.exact ?? 0) ||
+        (b.breakdown?.scorer ?? 0) - (a.breakdown?.scorer ?? 0) ||
         a.label.localeCompare(b.label),
     );
 
@@ -227,6 +234,7 @@ export function getLiveBoards(db: Db, leagueId: number): LiveBoard[] {
       liveHome: m.liveHome ?? 0,
       liveAway: m.liveAway ?? 0,
       liveFirstScorer: m.liveFirstScorer,
+      liveClock: m.liveClock,
       liveUpdatedAt: m.liveUpdatedAt,
       hasLiveData,
       rows,

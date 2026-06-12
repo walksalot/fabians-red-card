@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 interface Points {
   exact: number;
@@ -24,6 +25,21 @@ export default function HowItWorksSheet({
   boosterMultiplier: number;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Escape closes the sheet and hands focus back to the trigger — the dialog
+  // declares aria-modal, so keyboard users rightly expect it.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open]);
 
   const rows: Array<[string, string, string]> = [
     ['Exact score', `+${points.exact}`, 'Nail the scoreline exactly.'],
@@ -38,8 +54,11 @@ export default function HowItWorksSheet({
       <button
         type="button"
         data-testid="how-it-works"
+        ref={triggerRef}
         onClick={() => setOpen(true)}
-        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-zinc-900 px-2.5 text-[11px] font-semibold text-zinc-300 ring-1 ring-inset ring-white/10 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+        // before: pseudo-element expands the 28px pill's tap surface past the
+        // 44px floor without growing the visual (BoosterButton's pattern).
+        className="relative inline-flex h-7 shrink-0 items-center gap-1 rounded-full bg-zinc-900 px-2.5 text-[11px] font-semibold text-zinc-300 ring-1 ring-inset ring-white/10 transition-colors before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
       >
         <svg
           viewBox="0 0 24 24"
@@ -57,8 +76,14 @@ export default function HowItWorksSheet({
         How scoring works
       </button>
 
+      {/* Portaled to <body>: the league template's persistent fade animation
+          traps the page subtree in its own stacking context, so an in-tree
+          sheet could never paint over the fixed z-50 tab bar / sticky header.
+          z-60 keeps the ordering explicit. Open only ever flips on the
+          client, so the portal target always exists. */}
       {open ? (
-        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="How scoring works">
+        createPortal(
+        <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="How scoring works">
           <button
             type="button"
             aria-label="Close"
@@ -128,7 +153,9 @@ export default function HowItWorksSheet({
               Payouts, tiebreakers and the fine print live in the Rules tab.
             </p>
           </div>
-        </div>
+        </div>,
+        document.body,
+        )
       ) : null}
     </>
   );

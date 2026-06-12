@@ -107,14 +107,25 @@ export function AuthForm({
           autoComplete={
             mode === 'register' ? 'new-password' : 'current-password'
           }
+          // State the 8+ rule up front when creating a password (the reset
+          // page already does) — native minLength makes the browser the
+          // first error path, same pattern as PickForm's score bounds.
+          minLength={mode === 'register' ? 8 : undefined}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          placeholder="••••••••"
+          placeholder={
+            mode === 'register' ? '8+ characters' : '••••••••'
+          }
           className={inputClass}
         />
       </label>
 
-      {error ? <p className="text-sm text-brand-bright">{error}</p> : null}
+      {/* Always-rendered slot (one reserved text-sm line): the auth card is
+          vertically centered, so popping the error in must not jump every
+          field up by half the message height at the moment of failure. */}
+      <p aria-live="polite" className="min-h-5 text-sm text-brand-bright">
+        {error}
+      </p>
 
       <button
         type="submit"

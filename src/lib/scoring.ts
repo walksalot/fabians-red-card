@@ -103,6 +103,22 @@ export function scorerMatches(pick: string, actual: string): boolean {
   return aT.slice(aT.length - pT.length).join(' ') === p;
 }
 
+/**
+ * Canonical squad spelling for a typed scorer pick: when the typed name
+ * unambiguously matches exactly one squad player ("Raul Jimenez" →
+ * "Raúl Jiménez"), return the squad spelling so every display shows the same
+ * name the squad list and results use. Ambiguous or unknown names stay as
+ * typed — the forgiving matching at scoring time keeps its semantics.
+ */
+export function canonicalScorer(
+  typed: string | null,
+  squad: readonly string[],
+): string | null {
+  if (typed === null) return null;
+  const hits = squad.filter((name) => scorerMatches(typed, name));
+  return hits.length === 1 ? hits[0] : typed;
+}
+
 export function scorePick(
   pick: PickInput,
   result: ResultInput,

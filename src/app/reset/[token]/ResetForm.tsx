@@ -39,20 +39,28 @@ export default function ResetForm({ token }: { token: string }) {
 
   return (
     <form onSubmit={onSubmit} className="mt-4 space-y-3">
-      <input
-        data-testid="reset-password"
-        type="password"
-        autoComplete="new-password"
-        placeholder="New password (8+ characters)"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2.5 text-zinc-100"
-      />
+      {/* Same field recipe as AuthForm (label eyebrow, zinc-950/60 well,
+          emerald focus ring) — one input language across every auth screen. */}
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-zinc-400">
+          New password
+        </span>
+        <input
+          data-testid="reset-password"
+          type="password"
+          autoComplete="new-password"
+          minLength={8}
+          placeholder="8+ characters"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="h-12 w-full rounded-xl border border-zinc-700 bg-zinc-950/60 px-4 text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
+        />
+      </label>
       <button
         data-testid="reset-submit"
         type="submit"
         disabled={busy || password.length === 0}
-        className="h-11 w-full rounded-xl bg-emerald-400 font-semibold text-zinc-950 transition-transform active:scale-[.99] disabled:opacity-50"
+        className="h-12 w-full rounded-xl bg-emerald-400 font-semibold text-zinc-950 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 active:scale-[.99] disabled:opacity-50"
       >
         {busy ? 'Saving…' : 'Set password & sign in'}
       </button>

@@ -70,12 +70,16 @@ export default function OddsStrip({
             {away} {formatPct(odds.awayProb)}
           </span>
         </span>
-        <span className="mt-1 flex items-center justify-between text-[10px] text-zinc-500">
-          <span>
+        {/* One line at any width: the attribution truncates, the toggle never
+            wraps (a "goals" orphan + a caret on its own line read as broken
+            at 360px). The ~goals figure lives in the expanded panel. */}
+        <span className="mt-1 flex items-center justify-between gap-2 text-[10px] text-zinc-500">
+          <span className="min-w-0 truncate">
             Odds: {odds.provider} via ESPN · as of {asOf}
-            {odds.overUnder !== null ? ` · ~${odds.overUnder} goals` : ''}
           </span>
-          <span className="text-zinc-400">{expanded ? 'less ▴' : 'details ▾'}</span>
+          <span className="shrink-0 whitespace-nowrap text-zinc-400">
+            {expanded ? 'less ▴' : 'details ▾'}
+          </span>
         </span>
       </button>
 
@@ -111,6 +115,12 @@ export default function OddsStrip({
             <p className="mt-1.5 border-t border-white/5 pt-1.5 text-center text-zinc-500">
               Total goals: over {odds.overUnder} <span className="text-zinc-300">{odds.overOdds}</span>{' '}
               · under <span className="text-zinc-300">{odds.underOdds}</span>
+            </p>
+          ) : odds.overUnder !== null ? (
+            // Prices missing — still surface the line itself, since the
+            // collapsed strip no longer carries "~N goals".
+            <p className="mt-1.5 border-t border-white/5 pt-1.5 text-center text-zinc-500">
+              Expected total: ~{odds.overUnder} goals
             </p>
           ) : null}
           <p className="mt-1.5 text-center text-[10px] text-zinc-600">

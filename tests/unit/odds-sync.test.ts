@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
-import { runSync } from '@/lib/sync/espn-sync';
+import { runSync, syncOddsHorizon } from '@/lib/sync/espn-sync';
 import { syncScorerOdds, type JsonFetcher } from '@/lib/sync/espn-props';
 import type { EspnEvent } from '@/lib/sync/espn-map';
 import { freshDb, withFakeNow } from '../helpers/db';
@@ -175,5 +175,33 @@ describe('datesNeedingSync (via runSync fetch capture)', () => {
     );
     expect(requested).toContain('20260611'); // ET matchday — the page the event lives on
     expect(requested).toContain('20260612'); // UTC date kept as belt-and-braces
+  });
+});
+
+describe('syncOddsHorizon (via fetch capture)', () => {
+  it('stale past matchdays never consume the future look-ahead window', async () => {
+    const db = freshDb();
+    const fixture = { stage: 'group', venue: 'V', city: 'C', status: 'scheduled' } as const;
+    db.insert(schema.matches).values([
+      // stranded on a past day (postponed / sync outage) — must be skipped
+      { id: 10, ...fixture, kickoffUtc: '2026-06-05T19:00:00Z', matchday: '2026-06-05' },
+      // kicked off an hour ago: the current day's carryover, still counts
+      { id: 11, ...fixture, kickoffUtc: '2026-06-11T19:00:00Z', matchday: '2026-06-11' },
+      { id: 12, ...fixture, kickoffUtc: '2026-06-12T19:00:00Z', matchday: '2026-06-12' },
+      { id: 13, ...fixture, kickoffUtc: '2026-06-13T19:00:00Z', matchday: '2026-06-13' },
+      { id: 14, ...fixture, kickoffUtc: '2026-06-14T19:00:00Z', matchday: '2026-06-14' },
+      { id: 15, ...fixture, kickoffUtc: '2026-06-15T19:00:00Z', matchday: '2026-06-15' },
+      { id: 16, ...fixture, kickoffUtc: '2026-06-16T19:00:00Z', matchday: '2026-06-16' },
+    ]).run();
+    const fetched: string[] = [];
+    await withFakeNow(BEFORE, () =>
+      syncOddsHorizon(db, async (d) => {
+        fetched.push(d);
+        return [];
+      }),
+    );
+    expect(fetched).toEqual([
+      '20260611', '20260612', '20260613', '20260614', '20260615',
+    ]);
   });
 });

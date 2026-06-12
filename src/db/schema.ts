@@ -141,6 +141,9 @@ export const matches = sqliteTable('matches', {
   liveAway: integer('live_away'),
   liveStatus: text('live_status'), // 'in' while playing, cleared otherwise
   liveUpdatedAt: integer('live_updated_at'),
+  // Match clock as the feed reports it ("55'", "90'+3'", "HT") — soccer counts
+  // up, so this is minutes accrued, not remaining. Display only.
+  liveClock: text('live_clock'),
   // Live first-goal facts (drive the "if it ended now" provisional board).
   liveFirstScorer: text('live_first_scorer'),
   liveFirstScoringTeam: text('live_first_scoring_team'), // 'home'|'away'

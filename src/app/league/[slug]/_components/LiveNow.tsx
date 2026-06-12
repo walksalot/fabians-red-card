@@ -98,6 +98,16 @@ export default function LiveNow({
                   </span>{' '}
                   {b.awayCode ?? b.awayName}{' '}
                   <span aria-hidden="true">{codeToFlagEmoji(b.awayCode) ?? ''}</span>
+                  {b.liveClock ? (
+                    // minutes accrued from the feed ("55'", "HT") — soccer
+                    // counts up, so this reads as how deep into the game we are
+                    <span
+                      data-testid={`live-clock-${b.matchId}`}
+                      className="ml-1.5 inline-block rounded-md bg-brand/15 px-1.5 py-0.5 align-middle text-[11px] font-bold tabular-nums text-brand-bright"
+                    >
+                      {b.liveClock}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="block text-[11px] font-medium text-zinc-500">
                   Who&apos;s scoring right now — if it ended now
@@ -159,7 +169,7 @@ export default function LiveNow({
                         {r.breakdown.exact > 0 ? <span className="text-emerald-400">EX</span> : null}
                         {r.breakdown.outcome > 0 ? <span className="text-emerald-400">W</span> : null}
                         {r.breakdown.scorer > 0 ? <span className="text-emerald-400">GS</span> : null}
-                        {r.breakdown.firstTeam > 0 ? <span className="text-zinc-400">1st</span> : null}
+                        {r.breakdown.firstTeam > 0 ? <span className="text-emerald-400">1st</span> : null}
                         {r.breakdown.underdog > 0 ? <span className="text-emerald-400">UD</span> : null}
                       </span>
                     ) : null}
@@ -173,7 +183,17 @@ export default function LiveNow({
                     </span>
                   </div>
                 ))}
-                <p className="pt-2 text-center text-[10px] text-zinc-600">
+                {/* One-line decoder for the compact component codes above —
+                    they appear nowhere else spelled out mid-match. 11px
+                    zinc-400, not 10px zinc-600: these lines carry meaning and
+                    must clear the small-text contrast floor. */}
+                {b.rows.some((r) => r.breakdown) ? (
+                  <p className="pt-2 text-center text-[11px] text-zinc-400">
+                    EX exact · W right result · GS goalscorer · 1st first team
+                    · UD underdog
+                  </p>
+                ) : null}
+                <p className="pt-2 text-center text-[11px] text-zinc-400">
                   Provisional — points bank at the final whistle.
                 </p>
               </div>

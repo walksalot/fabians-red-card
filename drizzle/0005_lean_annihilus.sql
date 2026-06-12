@@ -1,0 +1,1 @@
+ALTER TABLE `matches` ADD `live_clock` text;

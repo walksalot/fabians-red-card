@@ -51,7 +51,7 @@ export default function InviteBox({ inviteToken, memberCount }: Props) {
           type="button"
           data-testid="invite-copy"
           onClick={copy}
-          className="shrink-0 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-zinc-950 active:scale-95"
+          className="min-h-10 shrink-0 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-zinc-950 active:scale-95"
         >
           {copied ? 'Copied ✓' : 'Copy'}
         </button>

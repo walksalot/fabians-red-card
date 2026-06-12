@@ -36,5 +36,8 @@ export const GET = handle<RouteCtx>(async (_req, { params }) => {
     })),
     prizePool: prizePool(league, entryCountOf(db, league.id)),
     memberCount: memberCountOf(db, league.id),
+    // Pool math is per ENTRY while the card cites members — ship both so the
+    // card can name the entry count whenever the two denominators differ.
+    entryCount: entryCountOf(db, league.id),
   });
 });

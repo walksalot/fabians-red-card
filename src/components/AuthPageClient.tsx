@@ -33,7 +33,9 @@ export function AuthPageClient({
         {mode === 'login' ? 'New here?' : 'Already have an account?'}{' '}
         <Link
           href={otherHref}
-          className="rounded font-semibold text-emerald-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+          // Padding + negative margin: ~44px tap surface without moving the
+          // 17px-tall text line.
+          className="-mx-2 -my-3 inline-block rounded px-2 py-3 font-semibold text-emerald-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
         >
           {mode === 'login' ? 'Create an account' : 'Sign in'}
         </Link>

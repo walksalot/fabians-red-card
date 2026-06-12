@@ -21,6 +21,7 @@ export function Chevron({ className }: { className: string }) {
   );
 }
 
-/** App-standard select styling (PickForm pattern: no native chrome + chevron). */
+/** App-standard select styling (PickForm pattern: no native chrome + chevron).
+    min-h-10 = the 40px tap floor, matching the admin buttons beside it. */
 export const adminSelectCls =
-  'appearance-none rounded-xl border border-zinc-700 bg-zinc-950/60 py-1.5 pl-2.5 pr-8 text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30';
+  'min-h-10 appearance-none rounded-xl border border-zinc-700 bg-zinc-950/60 py-1.5 pl-2.5 pr-8 text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30';

@@ -190,7 +190,8 @@ export default function SettingsForm({
             {hasPassword ? 'A join password is currently set.' : 'No join password set.'}
           </p>
           {hasPassword && (
-            <label className="flex items-center gap-2 text-xs text-zinc-300">
+            // min-h-10: lift the checkbox row to the 40px tap floor.
+            <label className="flex min-h-10 cursor-pointer items-center gap-2 text-xs text-zinc-300">
               <input
                 type="checkbox"
                 checked={clearPassword}
@@ -275,7 +276,8 @@ export default function SettingsForm({
           <button
             type="button"
             onClick={() => setPayout([...payout, '0'])}
-            className="rounded-xl border border-zinc-700 px-2 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-zinc-800/60"
+            // min-h-10 / px-3: 40px tap floor (was 60×30, too small for thumbs)
+            className="min-h-10 rounded-xl border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 transition-colors hover:bg-zinc-800/60"
           >
             + place
           </button>

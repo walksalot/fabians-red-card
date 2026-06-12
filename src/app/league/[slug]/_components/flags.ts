@@ -111,13 +111,21 @@ const SHORT_TEAM_NAMES: Record<string, string> = {
   'Korea Republic': 'Korea Rep.',
   'Republic of Ireland': 'Ireland',
   'United Arab Emirates': 'UAE',
-  'United States': 'USA',
+  // 'United States' deliberately NOT shortened to 'USA': it fits the fixture
+  // grid, and a name identical to its code loses the small code eyebrow —
+  // the only one-line team block on a board of two-line blocks.
   'IR Iran': 'Iran',
 };
 
 /** Short display name for long FIFA team names; everything else passes through. */
 export function shortTeamName(name: string): string {
-  return SHORT_TEAM_NAMES[name] ?? name;
+  const mapped = SHORT_TEAM_NAMES[name];
+  if (mapped) return mapped;
+  // Knockout placeholders ("Group A runners-up") — drop the word "Group" so
+  // the qualifier (winners vs runners-up) survives one line at 390px.
+  const placeholder = /^Group ([A-L]) (winners|runners-up)$/.exec(name);
+  if (placeholder) return `${placeholder[1]} ${placeholder[2]}`;
+  return name;
 }
 
 function iso2ToFlag(iso2: string): string {

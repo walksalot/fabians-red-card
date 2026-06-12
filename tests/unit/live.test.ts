@@ -89,6 +89,27 @@ describe('getLiveBoards (if it ended now)', () => {
     });
   });
 
+  it('breaks provisional points ties by the documented tiebreakers (exact, then scorer)', async () => {
+    const world = seedWorld(freshDb());
+    const { db, leagueId } = world;
+    // Labels chosen so the old alphabetical fallback would rank Anna first —
+    // the documented chain (most exact scores before goalscorer hits) must
+    // put Zed's exact on top instead.
+    const anna = world.entry('Anna'); // 2-1: outcome 2 + scorer 8 + firstTeam 2 = 12
+    const zed = world.entry('Zed'); // 1-0: exact 10 + firstTeam 2 = 12
+    pick(db, anna, { predHome: 2, predAway: 1, predScorer: 'Raúl Jiménez', predFirstTeam: 'home' });
+    pick(db, zed, { predHome: 1, predAway: 0, predFirstTeam: 'home' });
+    setLive(db, {
+      liveHome: 1, liveAway: 0, liveStatus: 'in', liveUpdatedAt: 5,
+      liveFirstScorer: 'Raul Jimenez', liveFirstScoringTeam: 'home',
+    });
+    await withFakeNow(DURING, () => {
+      const [board] = getLiveBoards(db, leagueId);
+      expect(board.rows[0].total).toBe(board.rows[1].total); // a genuine points tie
+      expect(board.rows.map((r) => r.label)).toEqual(['Zed', 'Anna']);
+    });
+  });
+
   it('entries without a pick rank last with no breakdown', async () => {
     const world = seedWorld(freshDb());
     const { db, leagueId } = world;

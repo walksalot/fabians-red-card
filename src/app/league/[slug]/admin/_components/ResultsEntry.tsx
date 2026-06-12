@@ -13,13 +13,15 @@ import {
 } from './shared';
 import { adminSelectCls, Chevron } from './ui';
 
-/** App-standard compact input styling (mirrors PickForm's field system). */
+/** App-standard compact input styling (mirrors PickForm's field system).
+    min-h-10 keeps every row control at the 40px tap floor — the admin enters
+    104 results from a phone, and the Save/Clear buttons beside them are 40px. */
 const scoreInputCls =
-  'w-12 rounded-xl border border-zinc-700 bg-zinc-950/60 px-1 py-1.5 text-center text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30';
+  'min-h-10 w-12 rounded-xl border border-zinc-700 bg-zinc-950/60 px-1 py-1.5 text-center text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30';
 // No flex-1 here: the flex shorthand would override the basis-full that puts
 // the scorer input on its own row (saved names must never clip at 390px).
 const textInputCls =
-  'min-w-0 rounded-xl border border-zinc-700 bg-zinc-950/60 px-2.5 py-1.5 text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30 disabled:opacity-50';
+  'min-h-10 min-w-0 rounded-xl border border-zinc-700 bg-zinc-950/60 px-2.5 py-1.5 text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30 disabled:opacity-50';
 
 /** Compact fixture label: flag + FIFA code; full name only for TBD/placeholders. */
 function TeamTag({
@@ -33,10 +35,13 @@ function TeamTag({
 }) {
   const flag = codeToFlagEmoji(code);
   if (!code) {
+    // Knockout placeholders ("Group A runners-up") don't fit the slot sized
+    // for 3-letter codes — wrap to two smaller lines instead of truncating
+    // both sides to the identical "Group …".
     return (
       <span
         title={name}
-        className={`min-w-0 flex-1 truncate text-sm text-zinc-300 ${
+        className={`line-clamp-2 min-w-0 flex-1 text-xs leading-tight text-zinc-300 ${
           align === 'right' ? 'text-right' : ''
         }`}
       >
@@ -144,8 +149,10 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
   const [home, setHome] = useState(match.homeScore !== null ? String(match.homeScore) : '');
   const [away, setAway] = useState(match.awayScore !== null ? String(match.awayScore) : '');
   const [scorer, setScorer] = useState(match.firstScorer ?? '');
-  const [firstTeam, setFirstTeam] = useState<'home' | 'away' | 'none'>(
-    match.firstScoringTeam ?? 'home',
+  // '' = unentered. Defaulting to 'home' let an admin save "first team: home"
+  // without ever choosing it — every blank form looked pre-filled.
+  const [firstTeam, setFirstTeam] = useState<'' | 'home' | 'away' | 'none'>(
+    match.firstScoringTeam ?? '',
   );
   const [finished, setFinished] = useState(match.status === 'finished');
   const [saving, setSaving] = useState(false);
@@ -157,13 +164,15 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
     home: match.homeScore !== null ? String(match.homeScore) : '',
     away: match.awayScore !== null ? String(match.awayScore) : '',
     scorer: match.firstScorer ?? '',
-    firstTeam: (match.firstScoringTeam ?? 'home') as 'home' | 'away' | 'none',
+    firstTeam: (match.firstScoringTeam ?? '') as '' | 'home' | 'away' | 'none',
   }));
 
   const zeroZero =
     home.trim() !== '' && away.trim() !== '' && Number(home) === 0 && Number(away) === 0;
   // 0-0 means nobody scored: first team to score is forced to 'none'.
-  const effectiveFirstTeam: 'home' | 'away' | 'none' = zeroZero ? 'none' : firstTeam;
+  const effectiveFirstTeam: '' | 'home' | 'away' | 'none' = zeroZero
+    ? 'none'
+    : firstTeam;
 
   function onScores(h: string, a: string) {
     setHome(h);
@@ -186,6 +195,12 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
       a < 0
     ) {
       setMsg({ kind: 'err', text: 'Enter both scores' });
+      return;
+    }
+    // The select starts on a placeholder — goals were scored, so the admin
+    // must actively say who scored first (no silent 'home' default).
+    if (!zeroZero && effectiveFirstTeam === '') {
+      setMsg({ kind: 'err', text: 'Pick the first team to score' });
       return;
     }
     const trimmedScorer = scorer.trim();
@@ -227,7 +242,7 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
     if (res.ok) {
       setFinished(false);
       // Server-side the result is gone — whatever sits in the inputs is unsaved.
-      setSavedSnapshot({ home: '', away: '', scorer: '', firstTeam: 'home' });
+      setSavedSnapshot({ home: '', away: '', scorer: '', firstTeam: '' });
       setMsg({ kind: 'ok', text: 'Result cleared' });
       window.setTimeout(() => setMsg(null), 2500);
     } else {
@@ -317,10 +332,15 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
             aria-label="First team to score"
             value={effectiveFirstTeam}
             onChange={(e) => {
-              if (!zeroZero) setFirstTeam(e.target.value as 'home' | 'away' | 'none');
+              if (!zeroZero) {
+                setFirstTeam(e.target.value as '' | 'home' | 'away' | 'none');
+              }
             }}
             className={adminSelectCls}
           >
+            <option value="" disabled>
+              First team to score…
+            </option>
             <option value="home">First: home</option>
             <option value="away">First: away</option>
             <option value="none">First: none (0-0)</option>
@@ -331,7 +351,7 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
           type="submit"
           data-testid={`result-save-${match.id}`}
           disabled={saving}
-          className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-60 ${
+          className={`min-h-10 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-60 ${
             dirty
               ? // Unsaved edits in this form — the one row that earns solid green.
                 'bg-emerald-500 text-zinc-950 hover:bg-emerald-400'
@@ -346,7 +366,7 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
             data-testid={`result-clear-${match.id}`}
             onClick={onClear}
             disabled={saving}
-            className="rounded-xl border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 transition-colors hover:bg-zinc-800/60 active:scale-95 disabled:opacity-60"
+            className="min-h-10 rounded-xl border border-zinc-700 px-3 py-1.5 text-xs font-semibold text-zinc-300 transition-colors hover:bg-zinc-800/60 active:scale-95 disabled:opacity-60"
           >
             Clear
           </button>

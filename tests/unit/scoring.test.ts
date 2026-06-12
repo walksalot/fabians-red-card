@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SCORING_RULES,
+  canonicalScorer,
   normalizeName,
   scorePick,
   scorerMatches,
@@ -256,5 +257,26 @@ describe('scorerMatches (forgiving scorer comparison)', () => {
   it('empty strings never match', () => {
     expect(scorerMatches('', 'Anyone')).toBe(false);
     expect(scorerMatches('  ', 'Anyone')).toBe(false);
+  });
+});
+
+describe('canonicalScorer (display spelling of a typed pick)', () => {
+  const SQUAD = ['Raúl Jiménez', 'Hirving Lozano', 'Kylian Mbappé'];
+  it('returns the canonical squad spelling on an unambiguous match', () => {
+    expect(canonicalScorer('Raul Jimenez', SQUAD)).toBe('Raúl Jiménez');
+    expect(canonicalScorer('jimenez', SQUAD)).toBe('Raúl Jiménez');
+    expect(canonicalScorer('MBAPPE', SQUAD)).toBe('Kylian Mbappé');
+  });
+  it('keeps the typed text when no squad player matches', () => {
+    expect(canonicalScorer('Some Random Guy', SQUAD)).toBe('Some Random Guy');
+    expect(canonicalScorer('Messi', [])).toBe('Messi');
+  });
+  it('keeps the typed text when the name is ambiguous', () => {
+    expect(
+      canonicalScorer('jimenez', ['Raúl Jiménez', 'Luis Jiménez']),
+    ).toBe('jimenez');
+  });
+  it('passes null through', () => {
+    expect(canonicalScorer(null, SQUAD)).toBeNull();
   });
 });

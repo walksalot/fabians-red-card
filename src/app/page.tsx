@@ -35,7 +35,12 @@ export default async function HomePage() {
       <header className="space-y-2">
         <Brand />
         <p className="text-sm text-zinc-400">
-          Hey {user.displayName} — pick a league or start a new one.
+          {/* No leagues yet → there is nothing to "pick"; point at the two
+              paths this page actually offers (create, or open an invite). */}
+          Hey {user.displayName} —{' '}
+          {memberships.length > 0
+            ? 'pick a league or start a new one.'
+            : 'start a league below, or open the invite link your friend sent you.'}
         </p>
       </header>
 

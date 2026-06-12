@@ -58,10 +58,10 @@ export async function createUser(
 ): Promise<PublicUser> {
   const username = input.username.trim().toLowerCase();
   if (!USERNAME_RE.test(username)) {
-    throw new AppError('username must be 3-30 characters using a-z, 0-9, _ or -', 400);
+    throw new AppError('Usernames are 3-30 characters using a-z, 0-9, _ or -.', 400);
   }
   const displayName = input.displayName.trim();
-  if (!displayName) throw new AppError('display name is required', 400);
+  if (!displayName) throw new AppError('Enter a display name.', 400);
   if (!input.password || input.password.length < MIN_PASSWORD_LENGTH) {
     throw new AppError(
       `password must be at least ${MIN_PASSWORD_LENGTH} characters`,
@@ -74,7 +74,7 @@ export async function createUser(
     .from(schema.users)
     .where(eq(schema.users.username, username))
     .get();
-  if (existing) throw new AppError('username is already taken', 409);
+  if (existing) throw new AppError('That username is already taken.', 409);
 
   const passwordHash = await hash(input.password, BCRYPT_ROUNDS);
   const row = db
@@ -96,7 +96,7 @@ export async function verifyLogin(
     .where(eq(schema.users.username, username))
     .get();
   const ok = user ? await compare(input.password, user.passwordHash) : false;
-  if (!user || !ok) throw new AppError('invalid username or password', 401);
+  if (!user || !ok) throw new AppError('Invalid username or password.', 401);
   return { id: user.id, username: user.username, displayName: user.displayName };
 }
 
@@ -119,7 +119,7 @@ export async function changePassword(
 ): Promise<void> {
   const user = getUserOr404(db, userId);
   const ok = await compare(current, user.passwordHash);
-  if (!ok) throw new AppError('current password is incorrect', 403);
+  if (!ok) throw new AppError('Current password is incorrect.', 403);
   await setPassword(db, userId, next);
 }
 
@@ -294,7 +294,7 @@ export async function joinByPassword(
   if (!existing) {
     if (league.joinPasswordHash !== null) {
       const ok = await compare(password, league.joinPasswordHash);
-      if (!ok) throw new AppError('wrong league password', 403);
+      if (!ok) throw new AppError('Wrong league password — check with your league admin.', 403);
     } else if (league.isPrivate !== 0) {
       // Private league without a join password is only joinable via invite link.
       throw new AppError('this league can only be joined via invite link', 403);

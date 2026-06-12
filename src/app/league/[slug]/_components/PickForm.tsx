@@ -1,9 +1,11 @@
 'use client';
 
 import { useRef, useState, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { normalizeName } from '@/lib/scoring';
 import { americanToProb } from '@/lib/odds';
 import { codeToFlagEmoji } from './flags';
+import { formatPoints } from './format';
 import type { FirstTeam, PickView } from './types';
 
 interface Props {
@@ -18,6 +20,9 @@ interface Props {
   awaySquad?: string[];
   /** First-goalscorer odds by player name — sorts the picker by likelihood. */
   scorerOdds?: Record<string, string>;
+  /** League-configured point values for the optional-field eyebrows. */
+  scorerPoints: number;
+  firstTeamPoints: number;
   initial: PickView | null;
   /** Notifies the board a pick now exists server-side (drives card status marks). */
   onSaved?: () => void;
@@ -98,7 +103,7 @@ function ScoreField({
   // with internal hairline dividers (border-x on the input). The container owns
   // the focus state via focus-within so the whole cluster lights up emerald.
   return (
-    <div className="flex min-w-0 flex-1 items-stretch overflow-hidden rounded-xl bg-zinc-950/60 ring-1 ring-inset ring-white/10 transition-shadow focus-within:ring-emerald-400/50">
+    <div className="flex min-w-0 flex-1 items-stretch overflow-hidden rounded-xl bg-zinc-950/60 ring-1 ring-inset ring-white/10 transition-shadow focus-within:ring-2 focus-within:ring-emerald-400/60">
       <StepButton
         ariaLabel={`Decrease ${ariaLabel}`}
         glyph="minus"
@@ -136,6 +141,8 @@ export default function PickForm({
   homeSquad = [],
   awaySquad = [],
   scorerOdds = {},
+  scorerPoints,
+  firstTeamPoints,
   homeCode,
   awayCode,
   initial,
@@ -151,6 +158,7 @@ export default function PickForm({
   );
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
   // A pick is stored server-side (pre-existing or saved this session) — drives
   // the quieter "Update pick" CTA so only un-picked matches scream solid green.
   const [hasSaved, setHasSaved] = useState(initial !== null);
@@ -214,6 +222,9 @@ export default function PickForm({
         // collapsed row doubles as the save confirmation.
         setExpandedByUser(false);
         onSaved?.();
+        // re-sync server-rendered chrome (day-browser progress chips, gap dot)
+        // — client form state survives a refresh, so nothing here resets
+        router.refresh();
       }
     } catch {
       setStatus('error');
@@ -236,14 +247,40 @@ export default function PickForm({
     !expandedByUser &&
     (status === 'idle' || status === 'saved');
 
+  // Team CODE (KOR), not the full name, in the collapsed summary: the row has
+  // one line, and a long scorer name must never ellipsize the First value
+  // into a dangling "First: ...".
   const firstTeamLabel =
     firstTeam === ''
       ? null
       : firstTeam === 'none'
         ? 'No goals'
         : firstTeam === 'home'
-          ? homeName
-          : awayName;
+          ? (homeCode ?? homeName)
+          : (awayCode ?? awayName);
+
+  // Squad rows surviving the typed filter — computed up front so the panel
+  // knows when a custom/misspelled name filters out every player. Free-text
+  // names are an advertised feature, so an all-filtered panel must say so
+  // instead of rendering an empty border (which painted as a stray gray line).
+  const scorerQuery = normalizeName(scorer);
+  // Likelihood order when odds exist (shortest price first — the question
+  // people Google answered in the list itself); alphabetical tail for
+  // players without a posted price.
+  const scorerProbOf = (n: string) =>
+    americanToProb(scorerOdds[n] ?? null) ?? -1;
+  const scorerSections = (
+    [
+      [homeName, homeSquad],
+      [awayName, awaySquad],
+    ] as const
+  ).map(([team, squad]) => ({
+    team,
+    options: squad
+      .filter((n) => scorerQuery === '' || normalizeName(n).includes(scorerQuery))
+      .sort((a, b) => scorerProbOf(b) - scorerProbOf(a) || a.localeCompare(b)),
+  }));
+  const scorerHasMatches = scorerSections.some((s) => s.options.length > 0);
 
   return (
     <form onSubmit={onSubmit} className="mt-3 space-y-2.5">
@@ -303,22 +340,26 @@ export default function PickForm({
               </svg>
               Saved
             </span>
-            {/* Only the segments that exist — a bare "—" reads like broken data. */}
-            <span className="truncate text-xs text-zinc-400">
+            {/* Only the segments that exist — a bare "—" reads like broken data.
+                The scorer segment truncates on its own; the short First value
+                is shrink-proof so it always survives a long scorer name. */}
+            <span className="flex min-w-0 items-baseline text-xs text-zinc-400">
               {scorer.trim() !== '' || firstTeamLabel ? (
                 <>
                   {scorer.trim() !== '' ? (
-                    <>
+                    <span className="min-w-0 truncate">
                       Scorer:{' '}
                       <span className="text-zinc-200">{scorer.trim()}</span>
-                    </>
+                    </span>
                   ) : null}
-                  {scorer.trim() !== '' && firstTeamLabel ? ' · ' : null}
+                  {scorer.trim() !== '' && firstTeamLabel ? (
+                    <span className="shrink-0 whitespace-pre"> · </span>
+                  ) : null}
                   {firstTeamLabel ? (
-                    <>
+                    <span className="shrink-0 whitespace-nowrap">
                       First:{' '}
                       <span className="text-zinc-200">{firstTeamLabel}</span>
-                    </>
+                    </span>
                   ) : null}
                 </>
               ) : (
@@ -348,9 +389,11 @@ export default function PickForm({
       <div className={collapsed ? 'hidden' : 'animate-fade-slide-in space-y-2.5'}>
         <div>
           {/* Proper eyebrow (not placeholder-as-label) — symmetric with the
-              first-team field below, and the +8 stays visible while typing. */}
+              first-team field below, and the points stay visible while typing.
+              Values come from league settings (admins can change them), never
+              hardcoded — same source the HowItWorksSheet reads. */}
           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
-            First goalscorer <span className="text-emerald-400">+8</span>
+            First goalscorer <span className="text-emerald-400">+{formatPoints(scorerPoints)}</span>
           </span>
           <div className="relative">
             <input
@@ -363,9 +406,25 @@ export default function PickForm({
               role="combobox"
               aria-expanded={scorerOpen}
               aria-controls={`scorer-options-${matchId}`}
-              onFocus={() => setScorerOpen(true)}
+              onFocus={(e) => {
+                setScorerOpen(true);
+                // The options panel opens up to 224px below this input; near
+                // the bottom of the viewport that renders under the fixed tab
+                // bar. Centering the field on focus keeps the whole panel
+                // visible above the bar without the user scrolling.
+                e.currentTarget.scrollIntoView({
+                  block: 'center',
+                  behavior: 'smooth',
+                });
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') setScorerOpen(false);
+                // Tab = "move on": close the panel and let focus travel
+                // naturally (no preventDefault) to the next control. The
+                // options are tabIndex={-1}, so focus can never land on a
+                // row that the blur timer is about to unmount (which dropped
+                // keyboard focus to <body> for one dead Tab stop).
+                if (e.key === 'Tab') setScorerOpen(false);
               }}
               onBlur={() => {
                 // let an option tap land before the panel closes
@@ -386,20 +445,14 @@ export default function PickForm({
                 id={`scorer-options-${matchId}`}
                 className="absolute inset-x-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60"
               >
-                {(
-                  [
-                    [homeName, homeSquad],
-                    [awayName, awaySquad],
-                  ] as const
-                ).map(([team, squad]) => {
-                  const q = normalizeName(scorer);
-                  // Likelihood order when odds exist (shortest price first —
-                  // the question people Google answered in the list itself);
-                  // alphabetical tail for players without a posted price.
-                  const probOf = (n: string) => americanToProb(scorerOdds[n] ?? null) ?? -1;
-                  const options = squad
-                    .filter((n) => q === '' || normalizeName(n).includes(q))
-                    .sort((a, b) => probOf(b) - probOf(a) || a.localeCompare(b));
+                {!scorerHasMatches ? (
+                  // Typed name matches nobody in either squad — reinforce the
+                  // free-text path instead of looking broken.
+                  <p className="px-3 py-2.5 text-xs text-zinc-500">
+                    No squad match — your typed name still counts.
+                  </p>
+                ) : null}
+                {scorerSections.map(({ team, options }) => {
                   if (options.length === 0) return null;
                   return (
                     <div key={team}>
@@ -411,6 +464,10 @@ export default function PickForm({
                           key={n}
                           type="button"
                           data-testid="scorer-option"
+                          // Out of the Tab sequence (combobox pattern): Tab
+                          // from the input must land on the next form control,
+                          // not on a suggestion the blur timer then unmounts.
+                          tabIndex={-1}
                           // mousedown beats the input blur, so the tap registers
                           onMouseDown={(e) => {
                             e.preventDefault();
@@ -421,7 +478,11 @@ export default function PickForm({
                             setScorerOpen(false);
                             touch();
                           }}
-                          className="flex w-full items-baseline justify-between gap-2 px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800 active:bg-zinc-800"
+                          // py-2.5 lifts each option row to the ~44px tap
+                          // floor — these are rapid-fire thumb targets.
+                          // Shared emerald focus ring (not the stock blue UA
+                          // outline) for keyboard users tabbing the list.
+                          className="flex w-full items-baseline justify-between gap-2 px-3 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400/60 active:bg-zinc-800"
                         >
                           <span className="min-w-0 truncate">{n}</span>
                           {scorerOdds[n] ? (
@@ -442,27 +503,9 @@ export default function PickForm({
           </p>
         </div>
         <div>
-          <span className="mb-1 flex items-center justify-between gap-2">
-            <span className="block text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
-              First team to score <span className="text-emerald-400">+2</span>
-            </span>
-            {hasSaved && !dirty && status === 'idle' ? (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-[10px] font-bold text-emerald-300 ring-1 ring-inset ring-emerald-400/25">
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-3 w-3"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M4.5 12.5 10 18 19.5 6.5" />
-                </svg>
-                Saved
-              </span>
-            ) : null}
+          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+            First team to score{' '}
+            <span className="text-emerald-400">+{formatPoints(firstTeamPoints)}</span>
           </span>
           <div className="relative">
             <select
@@ -500,25 +543,15 @@ export default function PickForm({
             </svg>
           </div>
         </div>
-        <button
-          data-testid="pick-save"
-          type="submit"
-          disabled={status === 'saving'}
-          className={`flex h-12 w-full items-center justify-center gap-2 rounded-xl text-sm font-bold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[.98] disabled:opacity-60 ${
-            status === 'saved'
-              ? 'bg-emerald-300 text-emerald-950 shadow-[0_0_20px_-4px_rgba(52,211,153,0.55)]'
-              : hasSaved && status !== 'error'
-                ? // A pick already exists — quiet outline so the solid-green CTA
-                  // stays reserved for genuinely un-picked matches.
-                  'bg-emerald-400/10 text-emerald-300 ring-1 ring-inset ring-emerald-400/30 hover:bg-emerald-400/20'
-                : 'bg-emerald-400 text-zinc-950 hover:bg-emerald-300'
-          }`}
-        >
-          {status === 'saved' ? (
-            <>
+        {/* Card-level "Saved" chip beside the CTA (only in the re-opened Edit
+            state) — inlining it on a field's label row read as if just that
+            one field were saved. */}
+        <div className="flex items-center gap-2">
+          {hasSaved && !dirty && status === 'idle' ? (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-400/10 px-2 py-0.5 text-[10px] font-bold text-emerald-300 ring-1 ring-inset ring-emerald-400/25">
               <svg
                 viewBox="0 0 24 24"
-                className="h-5 w-5 animate-pop-in"
+                className="h-3 w-3"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="3"
@@ -529,15 +562,47 @@ export default function PickForm({
                 <path d="M4.5 12.5 10 18 19.5 6.5" />
               </svg>
               Saved
-            </>
-          ) : status === 'saving' ? (
-            'Saving…'
-          ) : hasSaved ? (
-            'Update pick'
-          ) : (
-            'Save pick'
-          )}
-        </button>
+            </span>
+          ) : null}
+          <button
+            data-testid="pick-save"
+            type="submit"
+            disabled={status === 'saving'}
+            className={`flex h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl text-sm font-bold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 active:scale-[.98] disabled:opacity-60 ${
+              status === 'saved'
+                ? 'bg-emerald-300 text-emerald-950 shadow-[0_0_20px_-4px_rgba(52,211,153,0.55)]'
+                : hasSaved && status !== 'error'
+                  ? // A pick already exists — quiet outline so the solid-green CTA
+                    // stays reserved for genuinely un-picked matches.
+                    'bg-emerald-400/10 text-emerald-300 ring-1 ring-inset ring-emerald-400/30 hover:bg-emerald-400/20'
+                  : 'bg-emerald-400 text-zinc-950 hover:bg-emerald-300'
+            }`}
+          >
+            {status === 'saved' ? (
+              <>
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5 animate-pop-in"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4.5 12.5 10 18 19.5 6.5" />
+                </svg>
+                Saved
+              </>
+            ) : status === 'saving' ? (
+              'Saving…'
+            ) : hasSaved ? (
+              'Update pick'
+            ) : (
+              'Save pick'
+            )}
+          </button>
+        </div>
         {status === 'error' && error && (
           <p className="text-sm text-brand-bright">{error}</p>
         )}

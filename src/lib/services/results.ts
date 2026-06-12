@@ -123,6 +123,7 @@ function writeResult(db: Db, input: EnterResultInput, source: 'manual' | 'auto')
         liveStatus: null,
         liveFirstScorer: null,
         liveFirstScoringTeam: null,
+        liveClock: null,
       })
       .where(eq(schema.matches.id, input.matchId))
       .returning()
@@ -161,6 +162,8 @@ export function setLiveScore(
     updatedAtMs: number;
     firstScorer?: string | null;
     firstScoringTeam?: 'home' | 'away' | null;
+    /** Feed's match clock ("55'", "HT"); minutes accrued, display only. */
+    clock?: string | null;
   },
 ): void {
   const match = getMatchOrThrow(db, input.matchId);
@@ -173,6 +176,7 @@ export function setLiveScore(
       liveUpdatedAt: input.updatedAtMs,
       liveFirstScorer: input.firstScorer ?? null,
       liveFirstScoringTeam: input.firstScoringTeam ?? null,
+      liveClock: input.clock ?? null,
     })
     .where(eq(schema.matches.id, input.matchId))
     .run();

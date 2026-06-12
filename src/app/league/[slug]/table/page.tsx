@@ -53,6 +53,7 @@ export default async function TablePage({
         initialRows={rows}
         initialPool={pool}
         initialMemberCount={memberCount}
+        initialEntryCount={entryCount}
         buyInCents={league.buyInCents}
         currency={league.currency}
         meUserId={user.id}

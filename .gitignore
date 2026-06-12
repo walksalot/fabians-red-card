@@ -53,3 +53,6 @@ GROUP-CHAT-MESSAGE.txt
 FABIAN-ADMIN-PACKAGE.txt
 FABIAN-ADMIN-GUIDE.png
 FABIAN-ADMIN-GUIDE.pdf
+
+# Claude Code harness state (session worktrees carry their own .next output)
+.claude/

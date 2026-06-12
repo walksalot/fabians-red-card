@@ -72,7 +72,10 @@ function liveEvent(): EspnEvent {
     name: 'South Africa at Mexico',
     competitions: [
       {
-        status: { type: { completed: false, state: 'in' } },
+        status: {
+          displayClock: "55'",
+          type: { completed: false, state: 'in', shortDetail: "55'" },
+        },
         competitors: [
           { homeAway: 'home', score: '1', team: { id: '100', abbreviation: 'MEX', displayName: 'Mexico' } },
           { homeAway: 'away', score: '0', team: { id: '200', abbreviation: 'RSA', displayName: 'South Africa' } },
@@ -131,6 +134,7 @@ describe('runSync (auto-results orchestrator)', () => {
     expect(match?.status).toBe('scheduled');
     expect(match?.liveStatus).toBe('in');
     expect(match?.liveHome).toBe(1);
+    expect(match?.liveClock).toBe("55'"); // feed clock rides along for the display
     expect(db.select().from(schema.matchPoints).all()).toHaveLength(0); // live never scores
   });
 

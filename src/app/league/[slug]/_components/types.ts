@@ -47,9 +47,13 @@ export interface TodayMatchView {
   liveHome: number | null;
   liveAway: number | null;
   liveStatus: string | null;
+  /** Feed's match clock ("55'", "HT") — minutes accrued, soccer counts up. */
+  liveClock: string | null;
   /** Squad names for the scorer picker (empty until teams are known). */
   homeSquad: string[];
   awaySquad: string[];
+  /** Both team slots known? Knockout placeholders render a pending note. */
+  teamsTbd: boolean;
   /** Betting cheat sheet (null when absent/stale); MatchOdds from '@/lib/odds'. */
   odds: import('@/lib/odds').MatchOdds | null;
   /** First-goalscorer odds by player name (american strings); empty when none. */
@@ -68,6 +72,9 @@ export interface TodayMatchView {
  */
 export interface LockedPickView {
   matchId: number;
+  /** YYYY-MM-DD — names the matchday in the reveal header (it is often
+      yesterday's, so "today's picks" would be a lie the morning after). */
+  matchday: string;
   homeName: string;
   awayName: string;
   homeCode: string | null;

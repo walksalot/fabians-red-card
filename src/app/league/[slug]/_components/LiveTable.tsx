@@ -6,7 +6,13 @@ import EmptyState from '@/components/EmptyState';
 import Monogram from '@/components/Monogram';
 import { CHIP_TONES, breakdownChips } from './breakdown-chips';
 import { codeToFlagEmoji, shortTeamName } from './flags';
-import { MEDAL_TONES, formatCents, formatPoints, ordinal } from './format';
+import {
+  MEDAL_TONES,
+  formatCents,
+  formatMatchdayShort,
+  formatPoints,
+  ordinal,
+} from './format';
 import type {
   LeaderboardRowView,
   LockedPickView,
@@ -18,6 +24,7 @@ interface Props {
   initialRows: LeaderboardRowView[];
   initialPool: PrizePoolView;
   initialMemberCount: number;
+  initialEntryCount: number;
   buyInCents: number;
   currency: string;
   /** Signed-in user's id — highlights their row(s). */
@@ -143,9 +150,12 @@ function RaceSummary({
   );
 }
 
-/** Shared grid template — header and rows must stay in lockstep. */
+/** Shared grid template — header and rows must stay in lockstep.
+    The fixed columns are squeezed to their content (rank 36px, 28px avatar,
+    numbers) so the 1fr ENTRY cell keeps full first names readable down to
+    360px — "Paula" must never render as "P..". */
 const ROW_GRID =
-  'grid grid-cols-[2.5rem_2.25rem_1fr_2.5rem_2.75rem_3.25rem] items-center gap-2';
+  'grid grid-cols-[2.25rem_2rem_1fr_2.25rem_1.75rem_1.75rem] items-center gap-1.5';
 
 /**
  * One locked/finished fixture inside an expanded row: compact fixture lockup,
@@ -275,12 +285,15 @@ function LockedPicksPanel({
     >
       <div className="min-h-0 overflow-hidden">
         <div className="bg-zinc-950/40 px-4 pb-2.5 pt-2">
+          {/* Name the actual matchday — these are often yesterday's finished
+              matches, so "today's" read as a contradiction every morning. */}
           <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
-            {label} · today&apos;s locked picks
+            {label} · locked picks
+            {picks.length > 0 ? ` · ${formatMatchdayShort(picks[0].matchday)}` : ''}
           </p>
           {picks.length === 0 ? (
             <p className="py-2 text-xs text-zinc-500">
-              Nothing locked yet today — picks reveal at kickoff.
+              Nothing locked yet — picks reveal at kickoff.
             </p>
           ) : (
             <div className="mt-1">
@@ -312,6 +325,7 @@ export default function LiveTable({
   initialRows,
   initialPool,
   initialMemberCount,
+  initialEntryCount,
   buyInCents,
   currency,
   meUserId,
@@ -319,6 +333,7 @@ export default function LiveTable({
   const [rows, setRows] = useState(initialRows);
   const [pool, setPool] = useState(initialPool);
   const [memberCount, setMemberCount] = useState(initialMemberCount);
+  const [entryCount, setEntryCount] = useState(initialEntryCount);
   // ▲/▼ baseline: the ranks from the user's PREVIOUS visit (persisted per
   // league in localStorage), so movement shows the morning after results land
   // — not only during a live poll. Falls back to this visit's ranks.
@@ -383,6 +398,7 @@ export default function LiveTable({
             rows: LeaderboardRowView[];
             prizePool: PrizePoolView;
             memberCount: number;
+            entryCount: number;
           };
         } | null = await res.json().catch(() => null);
         if (!cancelled && json?.ok && json.data) {
@@ -406,6 +422,7 @@ export default function LiveTable({
           setRows(next);
           setPool(json.data.prizePool);
           setMemberCount(json.data.memberCount);
+          setEntryCount(json.data.entryCount);
         }
       } catch {
         // Network blip — keep showing the last good data.
@@ -459,27 +476,58 @@ export default function LiveTable({
           <h2 className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
             Prize pool
           </h2>
-          <p className="mt-1 font-display text-3xl font-bold tabular-nums tracking-tight text-emerald-400">
-            {formatCents(pool.totalCents, currency)}
-          </p>
-          <p className="mt-1 text-sm text-zinc-400">
-            Buy-in {formatCents(buyInCents, currency)} per entry ·{' '}
-            <span data-testid="member-count">{memberCount}</span> members
-          </p>
-          {pool.payouts.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {pool.payouts.map((p) => (
-                <span
-                  key={p.place}
-                  className={`chip ring-1 ring-inset ${
-                    MEDAL_TONES[p.place] ??
-                    'bg-zinc-800/80 text-zinc-300 ring-white/10'
-                  }`}
-                >
-                  {ordinal(p.place)} {formatCents(p.amountCents, currency)}
-                </span>
-              ))}
-            </div>
+          {buyInCents === 0 ? (
+            // No buy-in configured — a hero "$0" with $0/$0/$0 payout pills
+            // reads as a calculation bug, not a free league. State it plainly,
+            // in member-facing words (the Rules page's framing), never
+            // admin-speak like "no buy-in set".
+            <p className="mt-1 text-sm text-zinc-300">
+              Free league — playing for bragging rights ·{' '}
+              <span data-testid="member-count">{memberCount}</span> members
+              {/* Members without an entry never appear in the rows below —
+                  name the entry count too whenever the denominators differ,
+                  so "3 members" can't contradict a 2-row table. */}
+              {entryCount !== memberCount ? (
+                <>
+                  {' '}
+                  · {entryCount} {entryCount === 1 ? 'entry' : 'entries'}
+                </>
+              ) : null}
+            </p>
+          ) : (
+            <>
+              <p className="mt-1 font-display text-3xl font-bold tabular-nums tracking-tight text-emerald-400">
+                {formatCents(pool.totalCents, currency)}
+              </p>
+              <p className="mt-1 text-sm text-zinc-400">
+                Buy-in {formatCents(buyInCents, currency)} per entry ·{' '}
+                <span data-testid="member-count">{memberCount}</span> members
+                {/* The pool multiplies ENTRIES (see buy-in copy above), so
+                    when members ≠ entries the total would visibly disagree
+                    with buy-in × members — name both denominators. */}
+                {entryCount !== memberCount ? (
+                  <>
+                    {' '}
+                    · {entryCount} {entryCount === 1 ? 'entry' : 'entries'}
+                  </>
+                ) : null}
+              </p>
+              {pool.payouts.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {pool.payouts.map((p) => (
+                    <span
+                      key={p.place}
+                      className={`chip ring-1 ring-inset ${
+                        MEDAL_TONES[p.place] ??
+                        'bg-zinc-800/80 text-zinc-300 ring-white/10'
+                      }`}
+                    >
+                      {ordinal(p.place)} {formatCents(p.amountCents, currency)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -496,13 +544,14 @@ export default function LiveTable({
           <span />
           <span>Entry</span>
           <span className="text-right">Pts</span>
-          {/* Plain text labels — decoder glyphs fused the columns at 390px;
-              title hints keep the long-form meaning on press-and-hold. */}
+          {/* Compact two-letter heads (the live board's vocabulary) keep the
+              ENTRY column wide enough for real names at 360-390px; title
+              hints keep the long-form meaning on press-and-hold. */}
           <span className="text-right" title="Exact scorelines hit">
-            Exact
+            EX
           </span>
           <span className="text-right" title="First goalscorers hit">
-            Scorer
+            GS
           </span>
         </div>
         {rows.length === 0 ? (
@@ -561,14 +610,13 @@ export default function LiveTable({
                     className={isMe ? 'ring-2 ring-emerald-400/40' : ''}
                   />
                   <span className="flex min-w-0 items-center gap-1.5">
+                    {/* No "You" pill: the emerald row tint, inset edge,
+                        monogram ring and emerald total already mark the row,
+                        and the pill was what crushed short names to "P.." at
+                        390px. */}
                     <span className="truncate font-semibold text-zinc-100">
                       {r.label}
                     </span>
-                    {isMe ? (
-                      <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-400/10 px-1.5 text-[10px] font-bold text-emerald-300 ring-1 ring-inset ring-emerald-400/25">
-                        You
-                      </span>
-                    ) : null}
                     {lastRank !== null && r.rank === lastRank ? (
                       <LastPlaceCard />
                     ) : null}
@@ -634,6 +682,14 @@ export default function LiveTable({
             );
           })
         )}
+        {/* Decoder for the two-letter column heads — the first two
+            tiebreakers; earliest lock-in (the third, per Rules) must be named
+            too or two 0–0 columns can't explain a decided order. 11px
+            zinc-400: 10px zinc-500 sat under the 4.5:1 contrast floor. */}
+        <p className="border-t border-white/5 px-4 py-2 text-center text-[11px] font-medium text-zinc-400">
+          EX exact scores · GS goalscorer hits · earliest locks — tiebreakers
+          in this order
+        </p>
       </div>
     </div>
   );

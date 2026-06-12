@@ -1,7 +1,8 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
 import { nowMs } from '@/lib/clock';
 import { AppError } from '@/lib/errors';
+import { canonicalScorer } from '@/lib/scoring';
 
 export type Pick = typeof schema.picks.$inferSelect;
 
@@ -101,8 +102,29 @@ export async function upsertPick(
   if (match.status === 'finished' || hasKickedOff(match.kickoffUtc)) {
     throw new AppError('Picks are locked for this match', 409);
   }
+  if (match.homeTeamId === null || match.awayTeamId === null) {
+    throw new AppError('Teams for this match are not set yet', 409);
+  }
 
   let predScorer = normalizeScorer(input.predScorer);
+  // Store the canonical squad spelling when the typed name unambiguously
+  // matches one player ("Raul Jimenez" → "Raúl Jiménez") — every later
+  // display (reveals, history, live board) then shows the same spelling the
+  // squad list and results use. Ambiguous or unknown names stay as typed so
+  // the forgiving suffix matching at scoring time keeps its semantics.
+  if (predScorer !== null) {
+    const squad = db
+      .select({ name: schema.players.name })
+      .from(schema.players)
+      .where(
+        inArray(schema.players.teamId, [match.homeTeamId, match.awayTeamId]),
+      )
+      .all();
+    predScorer = canonicalScorer(
+      predScorer,
+      squad.map((p) => p.name),
+    );
+  }
   let predFirstTeam: FirstTeam | null = rawFirstTeam;
   if (input.predHome === 0 && input.predAway === 0) {
     predScorer = null;

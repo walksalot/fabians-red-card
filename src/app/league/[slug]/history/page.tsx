@@ -1,5 +1,6 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { schema } from '@/db';
+import { canonicalScorer } from '@/lib/scoring';
 import EntrySwitcher from '../_components/EntrySwitcher';
 import HistoryList from '../_components/HistoryList';
 import {
@@ -61,6 +62,30 @@ export default async function HistoryPage({
   const codeOf = (teamId: number | null) =>
     teamId !== null ? (teamMap.get(teamId)?.code ?? null) : null;
 
+  // Squads for the finished matches' teams — canonical scorer spelling only
+  // (same display rule as Today: "Raul Jimenez" renders as "Raúl Jiménez").
+  const finishedTeamIds = [
+    ...new Set(
+      finished
+        .flatMap((m) => [m.homeTeamId, m.awayTeamId])
+        .filter((id): id is number => id !== null),
+    ),
+  ];
+  const squadByTeam = new Map<number, string[]>();
+  if (finishedTeamIds.length > 0) {
+    for (const p of db
+      .select({ teamId: schema.players.teamId, name: schema.players.name })
+      .from(schema.players)
+      .where(inArray(schema.players.teamId, finishedTeamIds))
+      .all()) {
+      const list = squadByTeam.get(p.teamId) ?? [];
+      list.push(p.name);
+      squadByTeam.set(p.teamId, list);
+    }
+  }
+  const squadOf = (teamId: number | null) =>
+    teamId !== null ? (squadByTeam.get(teamId) ?? []) : [];
+
   // Group by matchday, newest day first; kickoff order within a day.
   const byDay = new Map<string, MatchRow[]>();
   for (const match of finished) {
@@ -104,13 +129,20 @@ export default async function HistoryPage({
         awayCode: codeOf(m.awayTeamId),
         homeScore: m.homeScore ?? 0,
         awayScore: m.awayScore ?? 0,
-        firstScorer: m.firstScorer,
+        // Same canonical spelling as the pick line on the same card.
+        firstScorer: canonicalScorer(m.firstScorer, [
+          ...squadOf(m.homeTeamId),
+          ...squadOf(m.awayTeamId),
+        ]),
         firstScoringTeam: m.firstScoringTeam as FirstTeam | null,
         myPick: pick
           ? {
               predHome: pick.predHome,
               predAway: pick.predAway,
-              predScorer: pick.predScorer,
+              predScorer: canonicalScorer(pick.predScorer, [
+                ...squadOf(m.homeTeamId),
+                ...squadOf(m.awayTeamId),
+              ]),
               predFirstTeam: pick.predFirstTeam as FirstTeam | null,
             }
           : null,

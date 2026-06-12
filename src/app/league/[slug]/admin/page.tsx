@@ -197,7 +197,9 @@ export default async function AdminPage({
     { href: '#settings', label: 'Settings' },
     { href: '#members', label: 'Members' },
     { href: hasResultsFocus ? '#results-today' : '#results', label: 'Results' },
-    { href: '#fixtures', label: 'Fixtures' },
+    // "Knockouts", matching the section's "Knockout teams" heading — the old
+    // "Fixtures" chip jumped to a section with a different name.
+    { href: '#fixtures', label: 'Knockouts' },
     { href: '#underdog', label: 'Underdog' },
   ];
 

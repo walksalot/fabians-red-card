@@ -16,7 +16,9 @@ export function breakdownChips(
   if (b.exact > 0)
     chips.push({ label: `Exact +${formatPoints(b.exact)}`, tone: 'score' });
   if (b.outcome > 0)
-    chips.push({ label: `Outcome +${formatPoints(b.outcome)}`, tone: 'score' });
+    // "Result", matching the "right result" name the live legend, the scoring
+    // sheet and the Rules use for this category — never "outcome" here.
+    chips.push({ label: `Result +${formatPoints(b.outcome)}`, tone: 'score' });
   if (b.scorer > 0)
     chips.push({ label: `Scorer +${formatPoints(b.scorer)}`, tone: 'score' });
   if (b.firstTeam > 0)

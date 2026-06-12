@@ -2,12 +2,15 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { schema } from '@/db';
 import { nowMs } from '@/lib/clock';
 import { oddsForDisplay } from '@/lib/odds';
-import { getTodayBoard } from '@/lib/services/today';
+import { canonicalScorer } from '@/lib/scoring';
+import { getMatchdayOverview, getTodayBoard } from '@/lib/services/today';
 import { getLiveBoards } from '@/lib/services/live';
+import { shortTeamName } from '../_components/flags';
 import EmptyState from '@/components/EmptyState';
 import EntrySwitcher from '../_components/EntrySwitcher';
 import TodayBoard from '../_components/TodayBoard';
 import LiveNow from '../_components/LiveNow';
+import DayNav from '../_components/DayNav';
 import {
   loadLeagueContext,
   pickSelectedEntry,
@@ -24,7 +27,7 @@ export default async function TodayPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ entry?: string | string[] }>;
+  searchParams: Promise<{ entry?: string | string[]; day?: string | string[] }>;
 }) {
   const { slug } = await params;
   const sp = await searchParams;
@@ -47,7 +50,11 @@ export default async function TodayPage({
     // defaults stand if the JSON is ever malformed
   }
 
-  const board = await getTodayBoard(db, league.id, entry.id);
+  const rawDay = Array.isArray(sp.day) ? sp.day[0] : sp.day;
+  const requestedDay =
+    rawDay !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(rawDay) ? rawDay : undefined;
+  const overview = getMatchdayOverview(db, league.id, entry.id);
+  const board = await getTodayBoard(db, league.id, entry.id, requestedDay);
   const boardMatchday = board?.matchday ?? null;
   const rawItems = board?.matches ?? [];
 
@@ -85,8 +92,10 @@ export default async function TodayPage({
 
   // Betting cheat sheet: parsed odds (fresh within 6h) + first-goalscorer
   // prices for the board's matches. Display-only; absent rows render nothing.
-  // Locked matches never render odds, so their lines are gated out here too —
-  // otherwise they'd ship unrendered inside the serialized RSC payload.
+  // Matches that never render an odds strip — locked, or already finished
+  // (the admin can enter a result ahead of kickoff) — are gated out here too,
+  // otherwise their lines would ship unrendered inside the serialized RSC
+  // payload.
   const ODDS_FRESH_MS = 6 * 3600_000;
   const nowMsVal = nowMs();
   const scorerOddsRows =
@@ -163,6 +172,10 @@ export default async function TodayPage({
 
   const items: TodayMatchView[] = rawItems.map(({ match, myPick, locked }) => {
     const boosted = boosterByDay.get(match.matchday)?.matchId === match.id;
+    // Finished cards never render odds even when the result landed pre-kickoff
+    // (locked=false), so hide their lines from the payload as well.
+    const hideOdds = locked || match.status === 'finished';
+    const teamsTbd = match.homeTeamId === null || match.awayTeamId === null;
     const point = pointsByMatch.get(match.id);
     let breakdown: BreakdownView | null = null;
     if (point) {
@@ -187,19 +200,32 @@ export default async function TodayPage({
       locked,
       homeScore: match.homeScore,
       awayScore: match.awayScore,
-      firstScorer: match.firstScorer,
+      // Result scorer gets the same canonical squad spelling as the pick —
+      // the finished card shows both, and they must never disagree.
+      firstScorer: canonicalScorer(match.firstScorer, [
+        ...squadOf(match.homeTeamId),
+        ...squadOf(match.awayTeamId),
+      ]),
       liveHome: match.liveHome,
       liveAway: match.liveAway,
       liveStatus: match.liveStatus,
+      liveClock: match.liveClock,
       homeSquad: squadOf(match.homeTeamId),
       awaySquad: squadOf(match.awayTeamId),
-      odds: oddsOf(match, locked),
-      scorerOdds: locked ? {} : (scorerOddsByMatch.get(match.id) ?? {}),
+      teamsTbd,
+      odds: oddsOf(match, hideOdds),
+      scorerOdds: hideOdds ? {} : (scorerOddsByMatch.get(match.id) ?? {}),
       myPick: myPick
         ? {
             predHome: myPick.predHome,
             predAway: myPick.predAway,
-            predScorer: myPick.predScorer,
+            // Canonical squad spelling ("Raul Jimenez" → "Raúl Jiménez") so a
+            // stored raw-typed pick never disagrees with the squad list shown
+            // inches away. New saves canonicalize at write (upsertPick).
+            predScorer: canonicalScorer(myPick.predScorer, [
+              ...squadOf(match.homeTeamId),
+              ...squadOf(match.awayTeamId),
+            ]),
             predFirstTeam: myPick.predFirstTeam as FirstTeam | null,
           }
         : null,
@@ -207,6 +233,7 @@ export default async function TodayPage({
       boosterDisabled:
         locked ||
         match.status === 'finished' ||
+        teamsTbd || // server rejects boosters on TBD matchups (409)
         (!boosted && !(movableByDay.get(match.matchday) ?? true)),
       points: point ? { total: point.total, breakdown } : null,
     };
@@ -217,10 +244,14 @@ export default async function TodayPage({
   const headerHolder = headerBooster
     ? items.find((i) => i.matchId === headerBooster.matchId)
     : undefined;
+  // Codes (CAN vs BIH) keep the chip inside the 390px utility row — full FIFA
+  // names ("Bosnia and Herzegovina") overflowed the viewport when armed.
+  const shortSide = (name: string, code: string | null) =>
+    code ?? shortTeamName(name);
   const boosterLabel = headerBooster
     ? `On ${
         headerHolder
-          ? `${headerHolder.homeName} vs ${headerHolder.awayName}`
+          ? `${shortSide(headerHolder.homeName, headerHolder.homeCode)} vs ${shortSide(headerHolder.awayName, headerHolder.awayCode)}`
           : `match #${headerBooster.matchId}`
       }`
     : 'Booster available';
@@ -246,6 +277,22 @@ export default async function TodayPage({
       {boardMatchday !== null && items.length > 0 ? (
         <TodayBoard
           entryId={entry.id}
+          dayNav={
+            overview.currentDay !== null && boardMatchday !== null ? (
+              <DayNav
+                slug={slug}
+                viewedDay={boardMatchday}
+                currentDay={overview.currentDay}
+                days={overview.days}
+                nextDayHasGaps={overview.nextDayHasGaps}
+              />
+            ) : null
+          }
+          isFutureDay={
+            overview.currentDay !== null &&
+            boardMatchday !== null &&
+            boardMatchday > overview.currentDay
+          }
           serverNowMs={nowMs()}
           boosterMultiplier={league.boosterMultiplier}
           items={items}

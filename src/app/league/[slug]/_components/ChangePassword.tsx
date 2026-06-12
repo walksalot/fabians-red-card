@@ -1,10 +1,20 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 /** Collapsible self-serve password change on the Profile screen. */
 export default function ChangePassword() {
   const [open, setOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // The card sits at the bottom of Profile, so the revealed fields would
+  // otherwise open underneath the fixed tab bar and look like a dead tap.
+  // scroll-mb on the form keeps the submit button clear of the bar.
+  useEffect(() => {
+    if (open) {
+      formRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [open]);
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [busy, setBusy] = useState(false);
@@ -51,7 +61,8 @@ export default function ChangePassword() {
           setOpen((o) => !o);
           setDone(false);
         }}
-        className="flex w-full items-center justify-between text-left text-sm font-semibold text-zinc-200"
+        // min-h-11 (44px) — the bare text row was a 20px tap target.
+        className="flex min-h-11 w-full items-center justify-between text-left text-sm font-semibold text-zinc-200"
       >
         Change password
         <span className="text-xs text-zinc-500">{open ? '▴' : '▾'}</span>
@@ -60,7 +71,7 @@ export default function ChangePassword() {
         <p className="mt-2 text-xs font-medium text-emerald-400">Password updated ✓</p>
       ) : null}
       {open ? (
-        <form onSubmit={onSubmit} className="mt-3 space-y-2">
+        <form ref={formRef} onSubmit={onSubmit} className="mt-3 scroll-mb-24 space-y-2">
           <input
             data-testid="cp-current"
             type="password"
@@ -83,7 +94,9 @@ export default function ChangePassword() {
             data-testid="cp-submit"
             type="submit"
             disabled={busy || current.length === 0 || next.length === 0}
-            className="w-full rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:opacity-50"
+            // h-11 (44px) — matches the tap floor and the inputs above; py-2
+            // left it a squat 36px.
+            className="h-11 w-full rounded-lg bg-emerald-500 px-4 text-sm font-semibold text-zinc-950 disabled:opacity-50"
           >
             {busy ? 'Saving…' : 'Update password'}
           </button>

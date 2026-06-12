@@ -20,15 +20,14 @@ export function jsonErr(error: string, status: number): NextResponse {
   return NextResponse.json({ ok: false, error }, { status });
 }
 
-/** Flatten a ZodError into a single human-readable message. */
+/**
+ * Flatten a ZodError into a single human-readable message. No `field:` path
+ * prefix — these strings render verbatim in form error slots, and "password:
+ * Too small…" reads as a stack trace to a non-technical user. User-facing
+ * schemas (register, login) carry self-contained custom messages.
+ */
 function zodMessage(err: ZodError): string {
-  return err.issues
-    .map((issue) =>
-      issue.path.length > 0
-        ? `${issue.path.map(String).join('.')}: ${issue.message}`
-        : issue.message,
-    )
-    .join('; ');
+  return err.issues.map((issue) => issue.message).join('; ');
 }
 
 /**

@@ -86,8 +86,9 @@ insertPick.run(victorEntry, 1, 1, 0, 'Hirving Lozano', 'home', t('2026-06-11T11:
 // now" board. Paula (2-1 RJ home): outcome 2 + scorer 8 + first-team 2 = 12.
 // Victor (1-0 HL home): exact 10 + first-team 2 = 12.
 sqlite.prepare(`UPDATE matches SET live_home = 1, live_away = 0, live_status = 'in',
-  live_updated_at = ?, live_first_scorer = 'Raúl Jiménez', live_first_scoring_team = 'home'
-  WHERE id = 1`).run(t('2026-06-11T23:59:00Z'));
+  live_updated_at = ?, live_first_scorer = 'Raúl Jiménez', live_first_scoring_team = 'home',
+  live_clock = ?
+  WHERE id = 1`).run(t('2026-06-11T23:59:00Z'), "64'");
 
 // Betting cheat sheet for the upcoming match 2 (KOR v CZE): odds snapshot
 // fresh relative to FAKE_NOW, plus first-goalscorer prices for the dropdown.

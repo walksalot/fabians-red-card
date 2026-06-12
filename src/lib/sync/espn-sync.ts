@@ -191,6 +191,7 @@ export async function runSync(
           updatedAtMs: nowMs,
           firstScorer: action.firstScorer,
           firstScoringTeam: action.firstScoringTeam,
+          clock: action.clock,
         });
         liveUpdates++;
       } else if (action.kind === 'teams') {
@@ -264,6 +265,62 @@ function applyOdds(db: Db, matchId: number, odds: import('@/lib/odds').MatchOdds
   }
 
   db.update(schema.matches).set(updates).where(eq(schema.matches.id, matchId)).run();
+}
+
+/**
+ * Pre-fetch odds for the day browser's near future: the next few matchdays
+ * beyond the live sync window. Applies ONLY odds actions (results/live state
+ * stay the 60s loop's job). Runs on the slow 10-minute tick.
+ */
+export async function syncOddsHorizon(
+  db: Db,
+  fetchScoreboard: ScoreboardFetcher = fetchScoreboardFromEspn,
+  horizonDays = 5,
+): Promise<number> {
+  const nowMs = now().getTime();
+  // Lower bound: an unfinished match stranded on a past matchday (postponed
+  // game, sync outage) must not consume the future look-ahead window. Matches
+  // kicked off within the last day still count — that is the current day's
+  // in-progress carryover, never a stale one.
+  const staleBeforeMs = nowMs - 24 * 3600_000;
+  const days = [
+    ...new Set(
+      db
+        .select({
+          matchday: schema.matches.matchday,
+          kickoffUtc: schema.matches.kickoffUtc,
+        })
+        .from(schema.matches)
+        .where(eq(schema.matches.status, 'scheduled'))
+        .all()
+        .filter((r) => Date.parse(r.kickoffUtc) >= staleBeforeMs)
+        .map((r) => r.matchday),
+    ),
+  ]
+    .sort()
+    .slice(0, horizonDays);
+  if (days.length === 0) return 0;
+
+  const events: EspnEvent[] = [];
+  for (const day of days) {
+    try {
+      events.push(...(await fetchScoreboard(day.replace(/-/g, ''))));
+    } catch {
+      // horizon odds are best-effort; the live loop owns error reporting
+    }
+  }
+  const plan = planSync(events, snapshotMatches(db), nowMs);
+  let applied = 0;
+  for (const action of plan.actions) {
+    if (action.kind !== 'odds') continue;
+    try {
+      applyOdds(db, action.matchId, action.odds, nowMs);
+      applied++;
+    } catch {
+      /* best-effort */
+    }
+  }
+  return applied;
 }
 
 export function setAppState(db: Db, key: string, value: string): void {

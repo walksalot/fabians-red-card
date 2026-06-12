@@ -63,7 +63,7 @@ export default async function RulesPage({
       how: 'Your predicted scoreline is identical to the final result.',
     },
     {
-      name: 'Correct outcome',
+      name: 'Right result',
       points: rules.outcome,
       how: 'Consolation when you were not exact but called the right result — home win, draw, or away win. Never added on top of an exact score.',
     },
@@ -149,7 +149,7 @@ export default async function RulesPage({
       <Section title="The booster">
         <p>
           You get <strong>one booster per matchday</strong>. Place it on a
-          match and every point you earn there is multiplied by{' '}
+          match and every point you earn there counts{' '}
           <strong>×{league.boosterMultiplier}</strong>.
         </p>
         <p>
@@ -195,36 +195,50 @@ export default async function RulesPage({
       </Section>
 
       <Section title="Tiebreakers">
-        <p>When entries are level, ties are broken in this order:</p>
+        {/* Points can never break a tie between entries that are LEVEL on
+            points — listing it first contradicted the premise. */}
+        <p>When entries are level on points, ties are broken in this order:</p>
         <ol className="list-decimal space-y-1 pl-5">
-          <li>Most total points</li>
           <li>Most exact scores</li>
           <li>Most first-goalscorer hits</li>
           <li>
-            Earliest pick submission — whoever last saved a pick earlier wins
-            the tie. Decisiveness pays.
+            Whoever locked in their picks earlier wins the tie. Decisiveness
+            pays.
           </li>
         </ol>
       </Section>
 
       <Section title="Prize pool">
-        <p>
-          Buy-in is{' '}
-          <strong>{formatCents(league.buyInCents, league.currency)}</strong>{' '}
-          per entry. The pool is the buy-in multiplied by the number of
-          entries, paid out as:
-        </p>
-        <ul className="list-disc space-y-1 pl-5">
-          {payoutSplit.map((percent, i) => (
-            <li key={i}>
-              <strong>{ordinal(i + 1)} place</strong> — {percent}% of the pool
-            </li>
-          ))}
-        </ul>
-        <p className="text-xs text-zinc-400">
-          The pool is tracked here for bragging rights only — money changes
-          hands in person, not through this app.
-        </p>
+        {league.buyInCents === 0 ? (
+          // Mirror the Table's free-league special case — walking through
+          // $0 × entries × payout percentages reads as a calculation bug and
+          // contradicts the "Free league" card one tab over.
+          <p>
+            This is a free league — no buy-in, no pool. You&apos;re playing
+            for bragging rights only.
+          </p>
+        ) : (
+          <>
+            <p>
+              Buy-in is{' '}
+              <strong>{formatCents(league.buyInCents, league.currency)}</strong>{' '}
+              per entry. The pool is the buy-in multiplied by the number of
+              entries, paid out as:
+            </p>
+            <ul className="list-disc space-y-1 pl-5">
+              {payoutSplit.map((percent, i) => (
+                <li key={i}>
+                  <strong>{ordinal(i + 1)} place</strong> — {percent}% of the
+                  pool
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-zinc-400">
+              The pool is tracked here for bragging rights only — money
+              changes hands in person, not through this app.
+            </p>
+          </>
+        )}
       </Section>
 
       <Section title="Quick answers">

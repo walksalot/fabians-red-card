@@ -1,6 +1,6 @@
 'use client';
 
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { EntryOption } from './types';
 
 /** Switch between a user's entries (?entry=<id>) on Today / History / Profile. */
@@ -13,6 +13,7 @@ export default function EntrySwitcher({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   if (entries.length < 2) return null;
 
   return (
@@ -21,7 +22,12 @@ export default function EntrySwitcher({
       <select
         data-testid="entry-switcher"
         value={currentId}
-        onChange={(e) => router.push(`${pathname}?entry=${e.target.value}`)}
+        onChange={(e) => {
+          // Keep the rest of the query (e.g. a browsed ?day=) across switches.
+          const sp = new URLSearchParams(searchParams);
+          sp.set('entry', e.target.value);
+          router.push(`${pathname}?${sp}`);
+        }}
         className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100"
       >
         {entries.map((entry) => (

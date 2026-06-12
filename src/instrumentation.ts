@@ -17,7 +17,7 @@ export async function register() {
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
 
   const { getDb } = await import('@/db');
-  const { runSync, autoSyncEnabled } = await import('@/lib/sync/espn-sync');
+  const { runSync, autoSyncEnabled, syncOddsHorizon } = await import('@/lib/sync/espn-sync');
   const { syncScorerOdds } = await import('@/lib/sync/espn-props');
   const { runBackupIfDue } = await import('@/lib/backup');
 
@@ -52,6 +52,7 @@ export async function register() {
     try {
       const db = getDb();
       if (!autoSyncEnabled(db)) return;
+      await syncOddsHorizon(db); // day-browser odds for the next few matchdays
       const summary = await syncScorerOdds(db);
       if (summary.matchesUpdated > 0) {
         console.log(

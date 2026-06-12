@@ -36,7 +36,10 @@ export interface EspnDetail {
 }
 
 export interface EspnCompetition {
-  status?: { type?: { completed?: boolean; state?: string } };
+  status?: {
+    displayClock?: string;
+    type?: { completed?: boolean; state?: string; shortDetail?: string };
+  };
   odds?: unknown;
   competitors?: EspnCompetitor[];
   details?: EspnDetail[];
@@ -74,6 +77,8 @@ export type SyncAction =
       /** First-goal facts as they stand mid-match (null until the first goal). */
       firstScorer: string | null;
       firstScoringTeam: 'home' | 'away' | null;
+      /** Match clock as the feed shows it ("55'", "HT", "90'+3'"); null when absent. */
+      clock: string | null;
     }
   | {
       kind: 'result';
@@ -109,6 +114,16 @@ function parseScore(v: string | number | undefined): number | null {
   if (v === undefined || v === null) return null;
   const n = typeof v === 'number' ? v : Number(String(v).trim());
   return Number.isInteger(n) && n >= 0 && n <= 99 ? n : null;
+}
+
+/**
+ * Match clock from the feed's status, for the live display. shortDetail is the
+ * human form ("55'", "HT", "45'+2'"); displayClock is the raw fallback. Both
+ * are untrusted feed text, so anything not clock-shaped is dropped.
+ */
+function parseLiveClock(status: EspnCompetition['status']): string | null {
+  const raw = (status?.type?.shortDetail ?? status?.displayClock ?? '').trim();
+  return /^[0-9A-Za-z'’+ ]{1,12}$/.test(raw) ? raw : null;
 }
 
 interface Sides {
@@ -291,6 +306,7 @@ export function planSync(
         liveAway: awayScore,
         firstScorer: goal?.scorer ?? null,
         firstScoringTeam,
+        clock: parseLiveClock(comp.status),
       });
     }
   }

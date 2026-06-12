@@ -6,15 +6,18 @@ import type { PointsBreakdown } from '@/lib/scoring';
 import {
   clearResult,
   enterResult,
+  enterResultAuto,
   recomputeMatch,
   recomputeLeague,
   requireResultsAdmin,
+  setLiveScore,
   setMatchTeams,
   setUnderdog,
 } from '@/lib/services/results';
 import { getLeaderboard } from '@/lib/services/leaderboard';
+import { getLiveBoards } from '@/lib/services/live';
 import { updateLeagueSettings } from '@/lib/services/leagues';
-import { freshDb } from '../helpers/db';
+import { freshDb, withFakeNow } from '../helpers/db';
 
 // ---------------------------------------------------------------------------
 // Fixtures via DIRECT drizzle inserts (never through other agents' services).
@@ -510,6 +513,36 @@ describe('results service', () => {
     expect(pointsFor(db, entry.id, 1)).toBeNull(); // phantom points removed
 
     expectAppError(() => clearResult(db, admin.id, 999), 404);
+  });
+
+  it('a final result clears the live clock, so clearing the result never resurfaces a stale clock', async () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    const league = makeLeague(db, admin.id);
+    makeEntry(db, league.id, admin.id);
+    makeMatch(db, 1); // kicks off 2026-06-11T16:00:00Z
+
+    setLiveScore(db, { matchId: 1, liveHome: 1, liveAway: 0, updatedAtMs: 5, clock: "78'" });
+    const live = db.select().from(schema.matches).where(eq(schema.matches.id, 1)).get();
+    expect(live?.liveClock).toBe("78'");
+
+    const finished = enterResultAuto(db, {
+      matchId: 1,
+      homeScore: 1,
+      awayScore: 0,
+      firstScorer: null,
+      firstScoringTeam: 'home',
+    });
+    expect(finished?.liveClock).toBeNull(); // cleared with the rest of the live state
+
+    // Reverting a mistaken result puts the match back on the live board (it has
+    // kicked off); the frozen clock must not come back with it.
+    clearResult(db, admin.id, 1);
+    await withFakeNow('2026-06-11T17:00:00Z', () => {
+      const [board] = getLiveBoards(db, league.id);
+      expect(board.matchId).toBe(1);
+      expect(board.liveClock).toBeNull();
+    });
   });
 
   it('changing scoring settings via updateLeagueSettings recomputes stored points (unmocked)', async () => {

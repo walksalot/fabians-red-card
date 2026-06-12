@@ -55,7 +55,7 @@ function teamsOf(match: MatchRow, teamMap: Map<number, TeamRow>) {
  * Falls back to the earliest matchday awaiting results, then the last matchday
  * once the tournament is fully finished.
  */
-export function getTodayBoard(db: Db, leagueId: number, entryId: number): TodayBoard {
+function requireLeagueEntry(db: Db, leagueId: number, entryId: number): void {
   const entry = db
     .select()
     .from(schema.entries)
@@ -65,6 +65,45 @@ export function getTodayBoard(db: Db, leagueId: number, entryId: number): TodayB
   if (entry.leagueId !== leagueId) {
     throw new AppError('entry does not belong to this league', 403);
   }
+}
+
+/** The matchday Today should land on by default (see getTodayBoard's doc). */
+export function resolveCurrentMatchday(
+  allMatches: MatchRow[],
+  nowEpochMs: number,
+): string | null {
+  if (allMatches.length === 0) return null;
+  const kickedOff = (m: MatchRow) => nowEpochMs >= Date.parse(m.kickoffUtc);
+  let matchday: string | null = null;
+  for (const m of allMatches) {
+    if (m.status !== 'finished' && !kickedOff(m)) {
+      if (matchday === null || m.matchday < matchday) matchday = m.matchday;
+    }
+  }
+  if (matchday === null) {
+    for (const m of allMatches) {
+      if (m.status !== 'finished' && (matchday === null || m.matchday < matchday)) {
+        matchday = m.matchday;
+      }
+    }
+  }
+  if (matchday === null) {
+    matchday = allMatches.reduce(
+      (max, m) => (m.matchday > max ? m.matchday : max),
+      allMatches[0]!.matchday,
+    );
+  }
+  return matchday;
+}
+
+export function getTodayBoard(
+  db: Db,
+  leagueId: number,
+  entryId: number,
+  /** A specific matchday to view (the day browser); must be >= the current day. */
+  requestedDay?: string,
+): TodayBoard {
+  requireLeagueEntry(db, leagueId, entryId);
 
   const allMatches = db
     .select()
@@ -75,37 +114,24 @@ export function getTodayBoard(db: Db, leagueId: number, entryId: number): TodayB
 
   const nowEpochMs = nowMs();
   const kickedOff = (m: MatchRow) => nowEpochMs >= Date.parse(m.kickoffUtc);
+  const currentDay = resolveCurrentMatchday(allMatches, nowEpochMs)!;
 
-  // Earliest matchday with an actionable (unkicked, unfinished) match …
-  let matchday: string | null = null;
-  for (const m of allMatches) {
-    if (m.status !== 'finished' && !kickedOff(m)) {
-      if (matchday === null || m.matchday < matchday) matchday = m.matchday;
-    }
-  }
-  // … else the earliest matchday still awaiting results …
-  if (matchday === null) {
-    for (const m of allMatches) {
-      if (m.status !== 'finished' && (matchday === null || m.matchday < matchday)) {
-        matchday = m.matchday;
-      }
-    }
-  }
-  // … else (everything finished) the final matchday.
-  if (matchday === null) {
-    matchday = allMatches.reduce(
-      (max, m) => (m.matchday > max ? m.matchday : max),
-      allMatches[0]!.matchday,
-    );
-  }
-
-  const selected = matchday;
+  // Past days belong to History; unknown days fall back to the current one.
+  const validDays = new Set(allMatches.map((m) => m.matchday));
+  const selected =
+    requestedDay !== undefined && validDays.has(requestedDay) && requestedDay >= currentDay
+      ? requestedDay
+      : currentDay;
   // The whole selected day, plus in-progress carryover from earlier days
   // (already in kickoff order thanks to the ordered scan).
   const boardMatches = allMatches.filter(
     (m) =>
       m.matchday === selected ||
-      (m.matchday < selected && m.status !== 'finished' && kickedOff(m)),
+      // in-progress carryover from earlier days — only on the default view
+      (selected === currentDay &&
+        m.matchday < selected &&
+        m.status !== 'finished' &&
+        kickedOff(m)),
   );
 
   const teamMap = teamMapOf(db);
@@ -154,4 +180,89 @@ export function getSchedule(db: Db): ScheduleItem[] {
       const teams = teamsOf(match, teamMap);
       return { match, homeTeam: teams.home, awayTeam: teams.away };
     });
+}
+
+export interface MatchdaySummary {
+  matchday: string;
+  matchCount: number;
+  /** This entry's saved picks on the day. */
+  pickedCount: number;
+  boosterArmed: boolean;
+  firstKickoffUtc: string;
+  /** Every match still lacks a team — picking is impossible (bracket pending). */
+  allTbd: boolean;
+}
+
+export interface MatchdayOverview {
+  /** The day Today lands on by default. */
+  currentDay: string | null;
+  days: MatchdaySummary[];
+  /** True when the matchday after the current one still has unpicked matches. */
+  nextDayHasGaps: boolean;
+}
+
+/**
+ * The day-browser's map: every matchday from the current one forward, with
+ * this entry's pick progress and booster state per day. Past days are
+ * History's territory and are excluded on purpose.
+ */
+export function getMatchdayOverview(
+  db: Db,
+  leagueId: number,
+  entryId: number,
+): MatchdayOverview {
+  requireLeagueEntry(db, leagueId, entryId);
+
+  const allMatches = db
+    .select()
+    .from(schema.matches)
+    .orderBy(asc(schema.matches.kickoffUtc), asc(schema.matches.id))
+    .all();
+  const currentDay = resolveCurrentMatchday(allMatches, nowMs());
+  if (currentDay === null) return { currentDay: null, days: [], nextDayHasGaps: false };
+
+  const picks = new Set(
+    db
+      .select({ matchId: schema.picks.matchId })
+      .from(schema.picks)
+      .where(eq(schema.picks.entryId, entryId))
+      .all()
+      .map((p) => p.matchId),
+  );
+  const boosters = new Set(
+    db
+      .select({ matchday: schema.boosters.matchday })
+      .from(schema.boosters)
+      .where(eq(schema.boosters.entryId, entryId))
+      .all()
+      .map((b) => b.matchday),
+  );
+
+  const byDay = new Map<string, MatchRow[]>();
+  for (const m of allMatches) {
+    if (m.matchday < currentDay) continue;
+    const list = byDay.get(m.matchday) ?? [];
+    list.push(m);
+    byDay.set(m.matchday, list);
+  }
+
+  const days: MatchdaySummary[] = [...byDay.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([matchday, matches]) => ({
+      matchday,
+      matchCount: matches.length,
+      pickedCount: matches.filter((m) => picks.has(m.id)).length,
+      boosterArmed: boosters.has(matchday),
+      firstKickoffUtc: matches[0]!.kickoffUtc,
+      allTbd: matches.every(
+        (m) => m.homeTeamId === null || m.awayTeamId === null,
+      ),
+    }));
+
+  const next = days.find((d) => d.matchday > currentDay);
+  return {
+    currentDay,
+    days,
+    nextDayHasGaps: next !== undefined && next.pickedCount < next.matchCount,
+  };
 }

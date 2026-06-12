@@ -27,6 +27,16 @@ export function formatMatchday(matchday: string): string {
   });
 }
 
+/** Compact matchday ("Thu, Jun 11") for eyebrows where the long form won't fit. */
+export function formatMatchdayShort(matchday: string): string {
+  return new Date(`${matchday}T12:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 /**
  * Wall-clock time in tournament-local (Eastern) time, labelled "ET".
  * Fixed locale + zone: SSR-safe, and every timestamp on a card reads in the

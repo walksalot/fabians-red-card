@@ -26,6 +26,8 @@ function espnEvent(over: {
   name?: string;
   state?: 'pre' | 'in' | 'post';
   completed?: boolean;
+  displayClock?: string;
+  shortDetail?: string;
   home?: { abbr?: string; name?: string; score?: string; id?: string };
   away?: { abbr?: string; name?: string; score?: string; id?: string };
   details?: Array<{
@@ -43,7 +45,12 @@ function espnEvent(over: {
     competitions: [
       {
         status: {
-          type: { completed: over.completed ?? false, state: over.state ?? 'pre' },
+          displayClock: over.displayClock,
+          type: {
+            completed: over.completed ?? false,
+            state: over.state ?? 'pre',
+            shortDetail: over.shortDetail,
+          },
         },
         venue: over.venue ? { fullName: over.venue } : undefined,
         competitors: [
@@ -209,7 +216,44 @@ describe('planSync', () => {
       [espnEvent({ state: 'in', home: { score: '1' }, away: { score: '0' } })],
       [M1],
     );
-    expect(plan.actions).toEqual([{ kind: 'live', matchId: 1, liveHome: 1, liveAway: 0, firstScorer: null, firstScoringTeam: null }]);
+    expect(plan.actions).toEqual([{ kind: 'live', matchId: 1, liveHome: 1, liveAway: 0, firstScorer: null, firstScoringTeam: null, clock: null }]);
+  });
+
+  it('carries the feed clock on live updates, preferring shortDetail (HT) over the raw clock', () => {
+    const running = planSync(
+      [espnEvent({ state: 'in', home: { score: '1' }, away: { score: '0' }, displayClock: "55'", shortDetail: "55'" })],
+      [M1],
+    );
+    expect(running.actions[0]).toMatchObject({ kind: 'live', clock: "55'" });
+
+    // halftime: displayClock parks at "45'" but shortDetail says HT — show HT
+    const halftime = planSync(
+      [espnEvent({ state: 'in', home: { score: '1' }, away: { score: '0' }, displayClock: "45'", shortDetail: 'HT' })],
+      [M1],
+    );
+    expect(halftime.actions[0]).toMatchObject({ kind: 'live', clock: 'HT' });
+
+    // no shortDetail → raw displayClock still serves
+    const fallback = planSync(
+      [espnEvent({ state: 'in', home: { score: '1' }, away: { score: '0' }, displayClock: "90'+3'" })],
+      [M1],
+    );
+    expect(fallback.actions[0]).toMatchObject({ kind: 'live', clock: "90'+3'" });
+  });
+
+  it('drops a clock string that is not clock-shaped (untrusted feed text)', () => {
+    const plan = planSync(
+      [
+        espnEvent({
+          state: 'in',
+          home: { score: '1' },
+          away: { score: '0' },
+          shortDetail: '<img src=x onerror=alert(1)>',
+        }),
+      ],
+      [M1],
+    );
+    expect(plan.actions[0]).toMatchObject({ kind: 'live', clock: null });
   });
 
   it('is idempotent for already-applied auto results', () => {
@@ -290,7 +334,7 @@ describe('planSync', () => {
       ],
       [M1],
     );
-    expect(plan.actions).toEqual([{ kind: 'live', matchId: 1, liveHome: 1, liveAway: 1, firstScorer: null, firstScoringTeam: null }]);
+    expect(plan.actions).toEqual([{ kind: 'live', matchId: 1, liveHome: 1, liveAway: 1, firstScorer: null, firstScoringTeam: null, clock: null }]);
   });
 
   it('handles the real captured ESPN payload for June 11 (pre-game: no actions, no errors)', () => {

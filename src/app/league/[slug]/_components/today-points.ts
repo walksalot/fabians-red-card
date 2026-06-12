@@ -1,8 +1,9 @@
 /**
- * Server-only helper: points each entry has banked on the CURRENT matchday —
- * the latest matchday with any kicked-off match. Feeds the leaderboard's
- * emerald "+N" daily-race delta (table page + polling API), purely additive
- * display data on top of getLeaderboard's season totals.
+ * Server-only helper: points each entry has banked TODAY — on the latest
+ * kicked-off matchday, and only while that matchday is still the current
+ * New York calendar date. Feeds the leaderboard's emerald "+N" daily-race
+ * delta (table page + polling API), purely additive display data on top of
+ * getLeaderboard's season totals.
  *
  * NEVER import this from a 'use client' component (it touches the db).
  */
@@ -10,7 +11,17 @@ import { eq, inArray } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
 import { nowMs } from '@/lib/clock';
 
-/** Map of entryId → points scored on the latest kicked-off matchday. */
+/** YYYY-MM-DD matchday (America/New_York — matchdays are NY dates) for a timestamp. */
+function matchdayOf(ms: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: 'America/New_York',
+  }).format(new Date(ms));
+}
+
+/** Map of entryId → points scored today (empty on days after a matchday). */
 export function getTodayPointsByEntry(
   db: Db,
   leagueId: number,
@@ -41,6 +52,9 @@ export function getTodayPointsByEntry(
     }
   }
   if (latestDay === null) return new Map();
+  // The chip this feeds is titled "Points won today" — yesterday's matchday
+  // must go silent at midnight NY time, not when the next one kicks off.
+  if (latestDay !== matchdayOf(now)) return new Map();
   const dayMatchIds = new Set(
     matches.filter((m) => m.matchday === latestDay).map((m) => m.id),
   );

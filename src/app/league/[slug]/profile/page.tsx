@@ -277,13 +277,23 @@ export default async function ProfilePage({
             },
             {
               label: 'Outcomes',
-              value: String(mine?.outcomeCount ?? 0),
+              // Every match where the result was called right — exact hits
+              // included. The engine's outcomeCount is consolation-only
+              // (never awarded on top of exact), so by itself it shows
+              // "Outcomes 0" beside "Accuracy 100%" after a perfect call.
+              value: String((mine?.outcomeCount ?? 0) + stats.exactCount),
               icon: 'check',
               accent: 'text-emerald-400',
             },
             {
               label: 'Accuracy',
-              value: `${Math.round(stats.accuracyPct)}%`,
+              // "0%" before any of this entry's picks has settled reads as
+              // "wrong so far" — show the same em-dash convention Matches
+              // covered uses until something has actually been scored.
+              value:
+                stats.finishedPicked === 0
+                  ? '—'
+                  : `${Math.round(stats.accuracyPct)}%`,
               icon: 'percent',
               accent: 'text-amber-300',
             },

@@ -55,11 +55,22 @@ function seedEntry(db: Db, leagueId: number, userId: number, label: string) {
 }
 
 function seedMatch(db: Db, id: number, kickoffUtc = KICKOFF_UTC) {
+  // every group match has both teams known — picks on TBD matchups are a
+  // separate 409 path covered in daybrowser.test.ts
+  db.insert(schema.teams)
+    .values([
+      { id: 901, code: 'AAA', name: 'Team Alpha', groupLetter: 'A' },
+      { id: 902, code: 'BBB', name: 'Team Beta', groupLetter: 'A' },
+    ])
+    .onConflictDoNothing()
+    .run();
   return db
     .insert(schema.matches)
     .values({
       id,
       stage: 'group',
+      homeTeamId: 901,
+      awayTeamId: 902,
       kickoffUtc,
       matchday: MATCHDAY,
       venue: 'Test Stadium',

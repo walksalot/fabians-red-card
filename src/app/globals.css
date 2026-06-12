@@ -137,6 +137,21 @@ body {
   color: var(--color-zinc-500);
 }
 
+/* Brand focus ring for form fields that don't bring their own. In @layer base
+   so any `focus:outline-none` + emerald-ring recipe (utilities layer) still
+   wins — this fallback only catches fields without those utilities, where the
+   stock light-blue UA outline was the one blue element in an
+   emerald/amber/red UI. */
+@layer base {
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid
+      color-mix(in oklab, var(--color-accent) 60%, transparent);
+    outline-offset: -1px;
+  }
+}
+
 /* Scores, points and countdowns line up everywhere. Scores are typed, not
    spun — strip the desktop webkit/Firefox spinner chrome from every number
    input (pick scores, admin results, league settings). */

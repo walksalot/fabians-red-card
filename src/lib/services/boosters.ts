@@ -58,6 +58,11 @@ export async function setBooster(
   if (hasKickedOff(match.kickoffUtc)) {
     throw new AppError('Match has already kicked off', 409);
   }
+  // Mirrors the upsertPick guard: the daily booster must not be spendable on
+  // a knockout slot whose teams are still unknown ("Bracket pending").
+  if (match.homeTeamId === null || match.awayTeamId === null) {
+    throw new AppError('Teams for this match are not set yet', 409);
+  }
 
   const existing = db
     .select()

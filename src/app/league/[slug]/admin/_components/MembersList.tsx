@@ -88,12 +88,14 @@ export default function MembersList({ slug, members: initialMembers, currentUser
                 <span className="shrink-0 text-xs text-zinc-500">you</span>
               ) : (
                 <div className="flex shrink-0 items-center gap-2">
+                  {/* min-h-10 lifts every row action to the 40px tap floor —
+                      these sat at 28px beside a destructive neighbor. */}
                   <button
                     type="button"
                     data-testid={`member-reset-${m.username}`}
                     disabled={busyId === m.userId}
                     onClick={() => onResetClick(m)}
-                    className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-400 transition-colors hover:bg-emerald-400/10 hover:text-emerald-300 active:scale-95 disabled:opacity-60"
+                    className="min-h-10 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-400 transition-colors hover:bg-emerald-400/10 hover:text-emerald-300 active:scale-95 disabled:opacity-60"
                   >
                     Reset password
                   </button>
@@ -101,7 +103,7 @@ export default function MembersList({ slug, members: initialMembers, currentUser
                     <button
                       type="button"
                       onClick={() => setConfirmId(null)}
-                      className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300"
+                      className="min-h-10 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300"
                     >
                       Cancel
                     </button>
@@ -111,12 +113,13 @@ export default function MembersList({ slug, members: initialMembers, currentUser
                     data-testid={`member-remove-${m.username}`}
                     disabled={busyId === m.userId}
                     onClick={() => onRemoveClick(m)}
-                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-60 ${
+                    className={`min-h-10 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-60 ${
                       confirming
                         ? 'bg-brand text-white'
-                        : // Quiet at rest — destructive red only appears on
-                          // intent (hover/confirm), not eleven times down a list.
-                          'text-zinc-500 hover:bg-brand/10 hover:text-brand-bright'
+                        : // Destructive red at rest too — it deletes a member's
+                          // picks/points and must never read like its gray
+                          // "Reset password" neighbor. Confirm step stays.
+                          'text-brand-bright/90 hover:bg-brand/10 hover:text-brand-bright'
                     }`}
                   >
                     {busyId === m.userId
@@ -151,7 +154,7 @@ export default function MembersList({ slug, members: initialMembers, currentUser
             <button
               type="button"
               onClick={copyResetLink}
-              className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-zinc-950"
+              className="min-h-10 shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-zinc-950"
             >
               {copied ? 'Copied ✓' : 'Copy'}
             </button>

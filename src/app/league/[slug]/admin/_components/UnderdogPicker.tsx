@@ -101,9 +101,14 @@ function UnderdogRow({ match }: { match: AdminMatch }) {
         <span className="text-[11px] text-zinc-400">Match {match.id} · </span>
         {match.homeName} <span className="text-zinc-500">vs</span> {match.awayName}
       </p>
-      <div className="flex flex-wrap gap-x-4 gap-y-1">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         {options.map((opt) => (
-          <label key={opt.value} className="flex items-center gap-1.5 text-sm text-zinc-300">
+          // min-h-10: the commissioner thumbs through ~104 of these rows on
+          // match night — a bare 20px-tall label is half the mobile tap floor.
+          <label
+            key={opt.value}
+            className="flex min-h-10 cursor-pointer items-center gap-1.5 text-sm text-zinc-300"
+          >
             <input
               type="radio"
               name={`underdog-${match.id}`}
@@ -113,7 +118,10 @@ function UnderdogRow({ match }: { match: AdminMatch }) {
               onChange={() => choose(opt.value)}
               className="h-3.5 w-3.5 accent-emerald-500"
             />
-            <span className="max-w-32 truncate">{opt.label}</span>
+            {/* max-w-56 fits the longest FIFA name ("Bosnia and Herzegovina")
+                — the chip row flex-wraps, so a 128px cap just ellipsized names
+                that had a whole empty row of space to use. */}
+            <span className="max-w-56 truncate">{opt.label}</span>
           </label>
         ))}
         {saving && <span className="text-xs text-zinc-500">Saving…</span>}

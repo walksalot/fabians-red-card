@@ -11,6 +11,7 @@
 import { eq, inArray } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
 import { nowMs } from '@/lib/clock';
+import { canonicalScorer } from '@/lib/scoring';
 import type { BreakdownView, FirstTeam, LockedPickView } from './types';
 
 function parseBreakdown(raw: string): BreakdownView | null {
@@ -66,6 +67,31 @@ export function getLockedPicksByEntry(
     db.select().from(schema.teams).all().map((t) => [t.id, t]),
   );
 
+  // Squads for the day's teams — scorer picks render with the canonical squad
+  // spelling ("Raul Jimenez" → "Raúl Jiménez"), matching the live board's
+  // "First goal:" line directly above these rows.
+  const dayTeamIds = [
+    ...new Set(
+      dayMatches
+        .flatMap((m) => [m.homeTeamId, m.awayTeamId])
+        .filter((id): id is number => id !== null),
+    ),
+  ];
+  const squadByTeam = new Map<number, string[]>();
+  if (dayTeamIds.length > 0) {
+    for (const p of db
+      .select({ teamId: schema.players.teamId, name: schema.players.name })
+      .from(schema.players)
+      .where(inArray(schema.players.teamId, dayTeamIds))
+      .all()) {
+      const list = squadByTeam.get(p.teamId) ?? [];
+      list.push(p.name);
+      squadByTeam.set(p.teamId, list);
+    }
+  }
+  const squadOf = (teamId: number | null) =>
+    teamId !== null ? (squadByTeam.get(teamId) ?? []) : [];
+
   const pickRows = db
     .select()
     .from(schema.picks)
@@ -93,6 +119,7 @@ export function getLockedPicksByEntry(
       const away = m.awayTeamId !== null ? teamById.get(m.awayTeamId) : null;
       return {
         matchId: m.id,
+        matchday: m.matchday,
         homeName: home?.name ?? m.homePlaceholder ?? 'TBD',
         awayName: away?.name ?? m.awayPlaceholder ?? 'TBD',
         homeCode: home?.code ?? null,
@@ -107,7 +134,10 @@ export function getLockedPicksByEntry(
           ? {
               predHome: pick.predHome,
               predAway: pick.predAway,
-              predScorer: pick.predScorer,
+              predScorer: canonicalScorer(pick.predScorer, [
+                ...squadOf(m.homeTeamId),
+                ...squadOf(m.awayTeamId),
+              ]),
               predFirstTeam: (pick.predFirstTeam as FirstTeam | null) ?? null,
             }
           : null,
