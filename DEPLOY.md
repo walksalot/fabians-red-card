@@ -59,6 +59,26 @@ First-run admin credentials print in the container logs. The named volume
 
 ---
 
+## Making the checks gate deploys (one-time, ~3 minutes)
+
+The repo ships automated safety checks ("CI") that run on GitHub for every
+change. Out of the box they *report*; two switches turn them into a *gate* so
+a broken change can never reach the live site:
+
+1. **Railway:** open the service → **Settings** → enable **"Wait for CI"**.
+   Railway will then only deploy a commit after its GitHub checks pass.
+2. **GitHub:** repo → **Settings → Rules → Rulesets → New branch ruleset**:
+   name it anything, target branch `main`, enable **"Require status checks to
+   pass"**, and add the three checks — *Fixtures, typecheck, lint, unit tests,
+   build*, *E2E (mobile journey + gameplay)*, and *Deploy image builds and
+   boots (Dockerfile)*.
+
+Optional but recommended — a live-site watchdog: repo → **Settings → Secrets
+and variables → Actions → Variables → New repository variable**, name
+`BASE_URL`, value your site's address (e.g. `https://your-url.up.railway.app`).
+Every 6 hours GitHub then checks, read-only, that the site is up and serving
+the full schedule, and **emails you if it isn't**.
+
 ## After it's live
 
 - **Automatic results are on by default**: the app fills in final scores and the
