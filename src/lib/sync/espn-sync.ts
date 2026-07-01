@@ -59,9 +59,12 @@ function yyyymmdd(d: Date): string {
  */
 function datesNeedingSync(db: Db): string[] {
   const nowMs = now().getTime();
-  // look back 1 day (late finishes / corrections) and forward 2 days (upcoming
-  // knockout team fills), but only for matches without a final result yet.
-  const fromIso = new Date(nowMs - 24 * 3600_000).toISOString();
+  // look back 3 days (late finishes, delayed/suspended games, corrections —
+  // a result stranded by a delayed kickoff must stay fetchable long enough
+  // to heal) and forward 2 days (upcoming knockout team fills), but only for
+  // matches without a final result yet — so outside match windows this adds
+  // zero network calls.
+  const fromIso = new Date(nowMs - 72 * 3600_000).toISOString();
   const toIso = new Date(nowMs + 48 * 3600_000).toISOString();
   const rows = db
     .select({
