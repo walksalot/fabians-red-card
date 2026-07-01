@@ -94,6 +94,19 @@ export interface SyncPlan {
   notes: string[];
 }
 
+/**
+ * How far the feed's kickoff may drift from the fixture's scheduled one and
+ * still identify the same game (by teams). Delayed starts move ESPN's
+ * `event.date` to the ACTUAL kickoff while our fixture keeps the scheduled
+ * time — without a tolerance a delayed game silently drops out of the sync
+ * (no live scores, no final result, no points), which is exactly what
+ * happened to the 2026-06-30 Mexico–Ecuador R32 game (scheduled 01:00Z,
+ * started 02:00Z). 12h covers any same-night delay yet stays far below the
+ * multi-day gap between two real meetings of the same team pair, so a
+ * team-pair match inside the window can never confuse two fixtures.
+ */
+export const KICKOFF_DRIFT_MAX_MS = 12 * 3600_000;
+
 /** '2026-06-11T19:00Z' / '...T19:00:00Z' / '...T19:00:00.000Z' → '2026-06-11T19:00:00Z' */
 export function normalizeKickoff(date: string): string | null {
   const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2})?(?:\.\d+)?Z$/.exec(date.trim());
@@ -183,8 +196,9 @@ export function planSync(
       notes.push(`skipped unparseable event: ${event.name ?? '(unnamed)'}`);
       continue;
     }
+    // NOTE: candidates may be empty — a delayed game's feed kickoff matches
+    // no fixture instant, and rule 1b below is what still identifies it.
     const candidates = byKickoff.get(when) ?? [];
-    if (candidates.length === 0) continue; // not one of ours (or kickoff moved — admin handles)
 
     // 1. exact team match (orientation-aware)
     let match = candidates.find(
@@ -194,6 +208,35 @@ export function planSync(
         refersTo(sides.home, m.homeCode, m.homeName) &&
         refersTo(sides.away, m.awayCode, m.awayName),
     );
+
+    // 1b. delayed kickoff: no fixture at the feed's instant, so look for THE
+    // fixture with these two teams (same orientation) within the drift
+    // tolerance. Runs BEFORE the placeholder fill so a delayed known-teams
+    // game landing on some TBD slot's kickoff instant can never be mistaken
+    // for that slot. A unique hit is a positive identification; anything
+    // ambiguous is left for the admin, never guessed.
+    if (!match) {
+      const whenMs = Date.parse(when);
+      const drifted = matches.filter(
+        (m) =>
+          m.homeCode &&
+          m.awayCode &&
+          Math.abs(Date.parse(m.kickoffUtc) - whenMs) <= KICKOFF_DRIFT_MAX_MS &&
+          refersTo(sides.home, m.homeCode, m.homeName) &&
+          refersTo(sides.away, m.awayCode, m.awayName),
+      );
+      if (drifted.length === 1) {
+        match = drifted[0];
+        notes.push(
+          `match ${match.id}: kickoff drift — fixture ${match.kickoffUtc}, feed ${when} (delayed start?)`,
+        );
+      } else if (drifted.length > 1) {
+        notes.push(
+          `ambiguous: event "${event.name ?? when}" team-matches ${drifted.length} fixtures near ${when} — enter result in Admin`,
+        );
+        continue;
+      }
+    }
 
     // 2. placeholder fill: a knockout slot at this kickoff with unknown teams
     if (!match) {
@@ -222,7 +265,11 @@ export function planSync(
     }
 
     if (!match) {
-      notes.push(`no fixture for event "${event.name ?? when}" at ${when}`);
+      // an event with fixtures at its instant that matched none of them is
+      // worth a note; an event matching nothing at all is simply not ours
+      if (candidates.length > 0) {
+        notes.push(`no fixture for event "${event.name ?? when}" at ${when}`);
+      }
       continue;
     }
     if (match.resultSource === 'manual') continue; // admin owns this match — hands off

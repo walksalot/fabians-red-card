@@ -110,6 +110,30 @@ describe('runSync (auto-results orchestrator)', () => {
     expect(getAppState(db, 'lastSyncAt')).toBeTruthy();
   });
 
+  // Regression for the delayed 2026-06-30 Mexico–Ecuador game: the feed's
+  // event.date moved to the actual (late) kickoff and the sync dropped the
+  // final on the floor — nobody got their points until this fix.
+  it('banks the final of a delayed game (feed kickoff an hour after the fixture) and scores points', async () => {
+    const db = createTestDb();
+    const { e1, e2 } = seedWorld(db);
+    const delayed = completedEvent();
+    delayed.date = '2026-06-11T20:00Z'; // fixture kickoff is 19:00Z
+    const summary = await runSync(db, async () => [delayed]);
+
+    expect(summary.results).toBe(1);
+    const match = db.select().from(schema.matches).where(eq(schema.matches.id, 1)).get();
+    expect(match?.status).toBe('finished');
+    expect(match?.resultSource).toBe('auto');
+    expect(match?.homeScore).toBe(2);
+    expect(match?.awayScore).toBe(1);
+    expect(match?.firstScorer).toBe('Raul Jimenez');
+
+    const p1 = db.select().from(schema.matchPoints).where(eq(schema.matchPoints.entryId, e1)).get();
+    const p2 = db.select().from(schema.matchPoints).where(eq(schema.matchPoints.entryId, e2)).get();
+    expect(p1?.total).toBe(20); // exact 10 + scorer 8 + first team 2
+    expect(p2?.total).toBe(4); // outcome 2 + first team 2
+  });
+
   it('never overwrites a result an admin typed by hand', async () => {
     const db = createTestDb();
     seedWorld(db);

@@ -337,6 +337,130 @@ describe('planSync', () => {
     expect(plan.actions).toEqual([{ kind: 'live', matchId: 1, liveHome: 1, liveAway: 1, firstScorer: null, firstScoringTeam: null, clock: null }]);
   });
 
+  // Regression: the 2026-06-30 Mexico–Ecuador R32 game kicked off 60 minutes
+  // late; ESPN's event.date moved to the actual start and the exact-kickoff
+  // lookup matched nothing, so the final never registered and nobody's picks
+  // were scored. A unique team match within the drift tolerance must still
+  // identify the fixture.
+  describe('delayed kickoffs (feed date drifts from the fixture)', () => {
+    it('banks the final of a game that started an hour late', () => {
+      const plan = planSync(
+        [
+          espnEvent({
+            date: '2026-06-11T20:00Z', // fixture says 19:00Z — delayed start
+            state: 'post',
+            completed: true,
+            home: { score: '2' },
+            away: { score: '0' },
+            details: [{ clock: 1275, teamId: '100', athlete: 'Julián Quiñones' }],
+          }),
+        ],
+        [M1],
+      );
+      expect(plan.actions).toEqual([
+        {
+          kind: 'result',
+          matchId: 1,
+          homeScore: 2,
+          awayScore: 0,
+          firstScorer: 'Julián Quiñones',
+          firstScoringTeam: 'home',
+        },
+      ]);
+      expect(plan.notes.join(' ')).toMatch(/kickoff drift/);
+    });
+
+    it('keeps live scores flowing while the delayed game is in progress', () => {
+      const plan = planSync(
+        [
+          espnEvent({
+            date: '2026-06-11T20:00Z',
+            state: 'in',
+            home: { score: '1' },
+            away: { score: '0' },
+            shortDetail: "55'",
+          }),
+        ],
+        [M1],
+      );
+      expect(plan.actions).toEqual([
+        { kind: 'live', matchId: 1, liveHome: 1, liveAway: 0, firstScorer: null, firstScoringTeam: null, clock: "55'" },
+      ]);
+    });
+
+    it('ignores a same-teams event beyond the drift tolerance (not our game)', () => {
+      const plan = planSync(
+        [
+          espnEvent({
+            date: '2026-06-12T09:00Z', // 14h after the fixture — outside tolerance
+            state: 'post',
+            completed: true,
+            home: { score: '2' },
+            away: { score: '0' },
+            details: [{ teamId: '100', athlete: 'Somebody' }],
+          }),
+        ],
+        [M1],
+      );
+      expect(plan.actions).toEqual([]);
+      expect(plan.notes).toEqual([]); // silently not ours, same as before
+    });
+
+    it('identifies the delayed game by teams even when a TBD slot sits at the drifted instant', () => {
+      const tbd = snap({
+        id: 99,
+        kickoffUtc: '2026-06-11T20:00:00Z',
+        homeCode: null,
+        awayCode: null,
+        homeName: null,
+        awayName: null,
+      });
+      const plan = planSync(
+        [
+          espnEvent({
+            date: '2026-06-11T20:00Z',
+            state: 'post',
+            completed: true,
+            home: { score: '2' },
+            away: { score: '0' },
+            details: [{ teamId: '100', athlete: 'Julián Quiñones' }],
+          }),
+        ],
+        [M1, tbd],
+      );
+      // the known-teams fixture wins; the placeholder is never touched
+      expect(plan.actions).toEqual([
+        {
+          kind: 'result',
+          matchId: 1,
+          homeScore: 2,
+          awayScore: 0,
+          firstScorer: 'Julián Quiñones',
+          firstScoringTeam: 'home',
+        },
+      ]);
+    });
+
+    it('refuses to guess when two fixtures with the same teams sit inside the tolerance', () => {
+      const rematch = snap({ id: 2, kickoffUtc: '2026-06-11T22:00:00Z' });
+      const plan = planSync(
+        [
+          espnEvent({
+            date: '2026-06-11T20:00Z',
+            state: 'post',
+            completed: true,
+            home: { score: '2' },
+            away: { score: '0' },
+            details: [{ teamId: '100', athlete: 'Somebody' }],
+          }),
+        ],
+        [M1, rematch],
+      );
+      expect(plan.actions).toEqual([]);
+      expect(plan.notes.join(' ')).toMatch(/ambiguous/);
+    });
+  });
+
   it('handles the real captured ESPN payload for June 11 (pre-game: no actions, no errors)', () => {
     const raw = JSON.parse(
       readFileSync('tests/fixtures/espn-scoreboard-20260611.json', 'utf8'),
