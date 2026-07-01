@@ -1,0 +1,127 @@
+# Continuous integration for a LIVE deployment: pushes to main auto-deploy to
+# the real league via Railway. This workflow verifies every PR and every main
+# commit — but a workflow file alone cannot BLOCK a deploy. The gate only
+# truly holds once two dashboard switches are on (see DEPLOY.md, "Making the
+# checks gate deploys"): Railway "Wait for CI" + a GitHub branch ruleset on
+# main requiring these checks. The steps mirror the local dev commands
+# (README "For developers") and the production Dockerfile exactly.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on PRs only. A main run is never "outdated": it is
+# the verification record for a commit Railway has already shipped — two
+# quick merges must not leave the live commit with a cancelled verdict.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Fixtures, typecheck, lint, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # The lockfile is written by npm 11 — npm 10 (Node 22's bundled npm)
+      # rejects it. Same upgrade the production Dockerfile performs.
+      - name: Use npm 11 (lockfile requirement)
+        run: npm install -g npm@11
+      - name: Install dependencies
+        run: npm ci
+      - name: Seed a throwaway DB and validate the fixture schedule
+        run: |
+          node scripts/seed.mjs
+          node scripts/validate-fixtures.mjs
+        env:
+          DB_PATH: .data/ci.db
+          # printed in the public log on first seed — must never look real
+          ADMIN_PASSWORD: ci-throwaway-not-a-secret
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit + integration tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+        env:
+          DB_PATH: .data/ci.db
+
+  e2e:
+    name: E2E (mobile journey + gameplay)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Use npm 11 (lockfile requirement)
+        run: npm install -g npm@11
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      # Two suites, two dev servers (ports 3100/3200) — the configs document
+      # they must never run concurrently, so keep them as sequential steps.
+      # --trace retain-on-failure: without it Playwright captures nothing and
+      # a CI-only failure is undebuggable (the configs leave tracing off for
+      # fast local runs).
+      - name: Journey suite (pre-tournament)
+        run: npm run test:e2e -- --trace retain-on-failure
+      - name: Gameplay suite (mid-tournament)
+        run: npm run test:e2e:gameplay -- --trace retain-on-failure
+      # failure() alone would skip this when the job TIMES OUT (timeout
+      # cancels rather than fails) — exactly the hung-run case where the
+      # already-written traces matter most.
+      - name: Upload Playwright failure traces
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: warn
+
+  docker:
+    name: Deploy image builds and boots (Dockerfile)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # Railway builds this exact Dockerfile on every main push; catching a
+      # broken image here means a red PR instead of a dead deploy.
+      - name: Build the production image
+        run: docker build -t fabians-red-card:ci .
+      # The image's CMD (docker-start.mjs: self-seed, persist session secret,
+      # next start) is the code path Railway actually runs — a build alone
+      # would pass green while the container dies on boot.
+      - name: Boot the container and smoke-check it serves
+        run: |
+          docker run -d --name smoke -p 3000:3000 \
+            -e DB_PATH=/tmp/app.db \
+            -e SESSION_SECRET=ci-smoke-not-a-secret \
+            -e ADMIN_PASSWORD=ci-throwaway-not-a-secret \
+            fabians-red-card:ci
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://localhost:3000/login; then
+              echo "container serves /login"; exit 0
+            fi
+            sleep 2
+          done
+          echo "container never came up — boot log:"; docker logs smoke; exit 1
+      - name: Container boot log (on failure)
+        if: ${{ failure() }}
+        run: docker logs smoke || true

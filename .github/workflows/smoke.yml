@@ -1,0 +1,33 @@
+# Read-only watchdog for the LIVE deployment. CI proves the code; this proves
+# the site is actually up. Runs every 6 hours until the tournament ends (safe
+# to delete this file after 2026-07-19). It only performs unauthenticated GETs
+# — it can never touch league data (do NOT wire scripts/verify-prod.mjs in
+# here: that script mutates the live league and is launch-day-only).
+#
+# Arm it by setting the repository variable BASE_URL to the live site's
+# address (GitHub → Settings → Secrets and variables → Actions → Variables).
+# Unset = every run is skipped. A failing scheduled run emails the repo owner
+# — the alerting channel a solo owner actually reads.
+name: Live site smoke check
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: ${{ vars.BASE_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Login page serves
+        run: curl -fsS -o /dev/null --max-time 30 --retry 3 "${{ vars.BASE_URL }}/login"
+      - name: Calendar feed serves all 104 matches
+        run: |
+          COUNT=$(curl -fsS --max-time 30 --retry 3 "${{ vars.BASE_URL }}/api/calendar" | grep -c 'BEGIN:VEVENT')
+          echo "calendar events: $COUNT"
+          test "$COUNT" -eq 104

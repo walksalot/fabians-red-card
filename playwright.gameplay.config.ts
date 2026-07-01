@@ -14,7 +14,13 @@ export default defineConfig({
   testMatch: /gameplay\.spec\.ts$/,
   fullyParallel: false,
   workers: 1,
+  // NO retries even on CI — mirrors the journey config: retried serial groups
+  // replay writes against a database that is not reseeded between attempts.
   retries: 0,
+  // CI headroom + suite cap: see playwright.config.ts for the reasoning.
+  timeout: process.env.CI ? 60_000 : 30_000,
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
+  globalTimeout: process.env.CI ? 480_000 : 0,
   reporter: 'list',
   globalSetup: './e2e/global-setup.ts',
   projects: [

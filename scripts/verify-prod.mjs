@@ -1,3 +1,9 @@
+// ⚠️ LAUNCH-DAY ONLY — do NOT run against the league once real members exist,
+// and never wire it into CI/automation: it WRITES to the live league (creates
+// a member, round-trips a result on the July final, removes a member) and its
+// final assertion (memberCount == 1) only holds pre-launch. The recurring
+// read-only health check lives in .github/workflows/smoke.yml instead.
+//
 // Production acceptance checks against the LIVE deployment. Non-destructive by
 // design: creates one disposable test user via the real invite link, exercises
 // the full player flow, round-trips a result on match 104 (the July final — no

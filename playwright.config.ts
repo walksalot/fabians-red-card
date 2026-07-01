@@ -16,7 +16,17 @@ export default defineConfig({
   testMatch: /journey\.spec\.ts$/,
   fullyParallel: false,
   workers: 1,
+  // NO retries even on CI: the serial journey re-registers the same username
+  // on a retry against a database that is not reseeded between attempts, so a
+  // retry is guaranteed red — it can never self-recover.
   retries: 0,
+  // CI runners have 2 slow cores: give tests and assertions headroom there
+  // (globalSetup pre-warms route compiles; this is belt-and-braces), and cap
+  // the whole suite so a hang fails WITH artifacts instead of being killed by
+  // the job-level timeout, which would skip the artifact upload.
+  timeout: process.env.CI ? 60_000 : 30_000,
+  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
+  globalTimeout: process.env.CI ? 480_000 : 0,
   reporter: 'list',
   globalSetup: './e2e/global-setup.ts',
   projects: [

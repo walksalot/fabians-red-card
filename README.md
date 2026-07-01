@@ -89,6 +89,11 @@ npm run test:e2e    # full mobile-viewport journey test (Playwright)
 npm run seed        # (re)seed schedule — never overwrites results or users
 ```
 
+> **npm version:** the lockfile needs npm ≥ 11 (Node 22 still bundles npm 10,
+> which fails `npm ci` with a misleading "Missing: esbuild… from lock file").
+> Run `npx npm@11 ci`, or `npm install -g npm@11` first — CI and the
+> production Dockerfile do the same.
+
 Stack: Next.js (App Router) · SQLite (better-sqlite3 + Drizzle) · Tailwind · Vitest ·
 Playwright. Architecture contract in `CONTRACTS.md`. The official 104-match schedule
 lives in `data/fixtures.json` / `data/teams.json` (kickoffs in UTC, verified against
