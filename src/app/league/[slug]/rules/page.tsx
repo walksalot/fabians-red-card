@@ -207,7 +207,7 @@ export default async function RulesPage({
           <li>Most correct outcomes (win/draw/loss)</li>
         </ol>
         <p>
-          Still tied after all four? That&apos;s a genuine tie — tied players
+          Still tied after all three? That&apos;s a genuine tie — tied players
           share the spot and split its prize money. No timestamps, no
           who-clicked-first.
         </p>

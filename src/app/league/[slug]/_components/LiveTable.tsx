@@ -702,12 +702,14 @@ export default function LiveTable({
           })
         )}
         {/* Decoder for the two-letter column heads — the first two
-            tiebreakers; earliest lock-in (the third, per Rules) must be named
-            too or two 0–0 columns can't explain a decided order. 11px
-            zinc-400: 10px zinc-500 sat under the 4.5:1 contrast floor. */}
+            tiebreakers; the third (most correct outcomes, per the engine and
+            Rules) must be named too or two 0–0 columns can't explain a
+            decided order. Save-timing NEVER breaks ties — naming it here
+            once caused a prize-money scare. 11px zinc-400: 10px zinc-500 sat
+            under the 4.5:1 contrast floor. */}
         <p className="border-t border-white/5 px-4 py-2 text-center text-[11px] font-medium text-zinc-400">
-          EX exact scores · GS goalscorer hits · earliest locks — tiebreakers
-          in this order
+          EX exact scores · GS goalscorer hits · correct outcomes —
+          tiebreakers in this order
         </p>
       </div>
     </div>
