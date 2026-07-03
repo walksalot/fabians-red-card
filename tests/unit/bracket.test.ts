@@ -106,7 +106,15 @@ describe('buildBracket', () => {
     // Production behavior: setMatchTeams NULLs home/away placeholders as it
     // fills team ids, which used to orphan the connectors. The fixtures-derived
     // feeder map is the fallback wiring.
-    const feederMap: FeederMap = new Map([[89, [74, 77] as const]]);
+    const feederMap: FeederMap = new Map([
+      [
+        89,
+        [
+          { match: 74, losers: false },
+          { match: 77, losers: false },
+        ] as const,
+      ],
+    ]);
     const nodes = buildBracket(
       [
         row({ id: 74, stage: 'r32', status: 'finished', homeTeamId: 5, awayTeamId: 6, homeScore: 1, awayScore: 1 }),
@@ -133,11 +141,42 @@ describe('buildBracket', () => {
     const map = feederMapFromFixtures([
       { n: 74, home: 'Group E winners', away: '3rd Group A/B/C/D/F' },
       { n: 89, home: 'Winners Match 74', away: 'Winners Match 77' },
+      { n: 103, home: 'Losers Match 101', away: 'Losers Match 102' },
       { n: 104, home: 'Winners Match 101', away: 'Winners Match 102' },
     ]);
     expect(map.get(74)).toBeUndefined(); // group-sourced: no knockout feeders
-    expect(map.get(89)).toEqual([74, 77]);
-    expect(map.get(104)).toEqual([101, 102]);
+    expect(map.get(89)).toEqual([
+      { match: 74, losers: false },
+      { match: 77, losers: false },
+    ]);
+    expect(map.get(103)).toEqual([
+      { match: 101, losers: true },
+      { match: 102, losers: true },
+    ]);
+    expect(map.get(104)).toEqual([
+      { match: 101, losers: false },
+      { match: 102, losers: false },
+    ]);
+  });
+
+  it('third-place (losers) feed never counts as advancement for a tied semifinal', () => {
+    // SF 101 goes to pens; both the final (104) and third-place tie (103) are
+    // auto-filled. Only the FINAL identifies the semifinal winner — the
+    // third-place teams are the losers and must not mark anyone as advanced.
+    const nodes = buildBracket(
+      [
+        row({ id: 101, stage: 'sf', status: 'finished', homeTeamId: 5, awayTeamId: 6, homeScore: 2, awayScore: 2 }),
+        row({ id: 102, stage: 'sf', status: 'finished', homeTeamId: 1, awayTeamId: 3, homeScore: 1, awayScore: 0 }),
+        row({ id: 103, stage: 'third', homeTeamId: 5, awayTeamId: 3, homePlaceholder: 'Losers Match 101', awayPlaceholder: 'Losers Match 102' }),
+        row({ id: 104, stage: 'final', homeTeamId: 6, awayTeamId: 1, homePlaceholder: 'Winners Match 101', awayPlaceholder: 'Winners Match 102' }),
+      ],
+      TEAMS,
+    );
+    const sf = nodes.find((n) => n.matchId === 101)!;
+    expect(sf.decidedOnPens).toBe(true);
+    expect(sf.away.won).toBe(true); // Paraguay reached the final
+    expect(sf.home.lost).toBe(true); // Germany plays the third-place tie
+    expect(sf.home.won).toBe(false);
   });
 
   it('orders by stage then kickoff and marks live matches', () => {
