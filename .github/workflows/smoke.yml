@@ -4,10 +4,11 @@
 # — it can never touch league data (do NOT wire scripts/verify-prod.mjs in
 # here: that script mutates the live league and is launch-day-only).
 #
-# Arm it by setting the repository variable BASE_URL to the live site's
-# address (GitHub → Settings → Secrets and variables → Actions → Variables).
-# Unset = every run is skipped. A failing scheduled run emails the repo owner
-# — the alerting channel a solo owner actually reads.
+# Fully automatic: the production address is built in (it is public anyway —
+# it's the site the whole league visits). The BASE_URL repository variable,
+# if ever set, overrides it (e.g. after a domain change). A failing scheduled
+# run emails the repo owner — the alerting channel a solo owner actually
+# reads.
 name: Live site smoke check
 
 on:
@@ -18,16 +19,18 @@ on:
 permissions:
   contents: read
 
+env:
+  BASE_URL: ${{ vars.BASE_URL != '' && vars.BASE_URL || 'https://fabians-red-card-production.up.railway.app' }}
+
 jobs:
   smoke:
-    if: ${{ vars.BASE_URL != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Login page serves
-        run: curl -fsS -o /dev/null --max-time 30 --retry 3 "${{ vars.BASE_URL }}/login"
+        run: curl -fsS -o /dev/null --max-time 30 --retry 3 "$BASE_URL/login"
       - name: Calendar feed serves all 104 matches
         run: |
-          COUNT=$(curl -fsS --max-time 30 --retry 3 "${{ vars.BASE_URL }}/api/calendar" | grep -c 'BEGIN:VEVENT')
+          COUNT=$(curl -fsS --max-time 30 --retry 3 "$BASE_URL/api/calendar" | grep -c 'BEGIN:VEVENT')
           echo "calendar events: $COUNT"
           test "$COUNT" -eq 104

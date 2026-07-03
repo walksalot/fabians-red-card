@@ -73,11 +73,11 @@ a broken change can never reach the live site:
    build*, *E2E (mobile journey + gameplay)*, and *Deploy image builds and
    boots (Dockerfile)*.
 
-Optional but recommended — a live-site watchdog: repo → **Settings → Secrets
-and variables → Actions → Variables → New repository variable**, name
-`BASE_URL`, value your site's address (e.g. `https://your-url.up.railway.app`).
-Every 6 hours GitHub then checks, read-only, that the site is up and serving
-the full schedule, and **emails you if it isn't**.
+A live-site watchdog is also included and needs no setup: every 6 hours
+GitHub checks, read-only, that the site is up and serving the full schedule,
+and **emails you if it isn't**. (If your site's address ever changes, either
+update it in `.github/workflows/smoke.yml` or set a repository variable named
+`BASE_URL` — the variable overrides the built-in address.)
 
 ## After it's live
 
