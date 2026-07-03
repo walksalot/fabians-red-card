@@ -31,9 +31,23 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
 
   const baseURL = config.projects[0]?.use?.baseURL;
   if (!baseURL) return;
-  // Any token compiles the /join/[token] route — validity is irrelevant here.
-  // Sequential on purpose: parallel compiles thrash a 2-core runner.
-  for (const route of ['/login', '/join/warmup-only', '/league/fabians-red-card/today', '/']) {
+  // Any token compiles the /join/[token] route — validity is irrelevant here,
+  // and auth-gated pages (admin especially — the app's heaviest page, seen
+  // blowing the reset-link test's expect budget on a cold 2-core CI runner)
+  // still compile on an unauthenticated request. Sequential on purpose:
+  // parallel compiles thrash a 2-core runner.
+  const league = '/league/fabians-red-card';
+  for (const route of [
+    '/login',
+    '/join/warmup-only',
+    '/',
+    `${league}/today`,
+    `${league}/table`,
+    `${league}/history`,
+    `${league}/profile`,
+    `${league}/rules`,
+    `${league}/admin`,
+  ]) {
     try {
       await fetch(`${baseURL}${route}`);
     } catch {
