@@ -42,6 +42,7 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     '/join/warmup-only',
     '/',
     `${league}/today`,
+    `${league}/bracket`,
     `${league}/table`,
     `${league}/history`,
     `${league}/profile`,

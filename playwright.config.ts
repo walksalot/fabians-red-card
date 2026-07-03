@@ -24,8 +24,11 @@ export default defineConfig({
   // (globalSetup pre-warms route compiles; this is belt-and-braces), and cap
   // the whole suite so a hang fails WITH artifacts instead of being killed by
   // the job-level timeout, which would skip the artifact upload.
-  timeout: process.env.CI ? 60_000 : 30_000,
-  expect: { timeout: process.env.CI ? 15_000 : 5_000 },
+  // Assertion headroom raised 15s → 30s after two same-shaped CI flakes in
+  // one day (login redirect, reset-link flow): each was a single expect
+  // starving on a cold runner while the test's 60s budget sat mostly unused.
+  timeout: process.env.CI ? 90_000 : 30_000,
+  expect: { timeout: process.env.CI ? 30_000 : 5_000 },
   globalTimeout: process.env.CI ? 480_000 : 0,
   reporter: 'list',
   globalSetup: './e2e/global-setup.ts',
