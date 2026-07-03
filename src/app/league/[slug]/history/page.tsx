@@ -1,6 +1,8 @@
 import { eq, inArray } from 'drizzle-orm';
 import { schema } from '@/db';
 import { canonicalScorer } from '@/lib/scoring';
+import { computeMatchdayWrap } from '@/lib/services/wrap';
+import type { WrapCardView } from '../_components/WrapCard';
 import EntrySwitcher from '../_components/EntrySwitcher';
 import HistoryList from '../_components/HistoryList';
 import {
@@ -26,7 +28,7 @@ export default async function HistoryPage({
   const sp = await searchParams;
   const ctx = await loadLeagueContext(slug);
   if (!ctx.isMember) return null; // layout renders the join prompt
-  const { db, entries } = ctx;
+  const { db, league, entries } = ctx;
 
   const entry = pickSelectedEntry(entries, sp.entry);
   if (!entry) {
@@ -153,6 +155,42 @@ export default async function HistoryPage({
     return { matchday: day, subtotal, items };
   });
 
+  // Matchday Wraps — the whole league's recap per finished day. Fixture
+  // labels ("ENG 2–1 COD") come from the codes already resolved above.
+  const matchById = new Map(finished.map((m) => [m.id, m]));
+  const fixtureLabel = (matchId: number): string => {
+    const m = matchById.get(matchId);
+    if (!m) return `match ${matchId}`;
+    const side = (teamId: number | null, ph: string | null) =>
+      codeOf(teamId) ?? nameOf(teamId, ph);
+    return `${side(m.homeTeamId, m.homePlaceholder)} ${m.homeScore}–${m.awayScore} ${side(m.awayTeamId, m.awayPlaceholder)}`;
+  };
+  const wraps: Record<string, WrapCardView> = {};
+  for (const day of days) {
+    const w = computeMatchdayWrap(db, league.id, day);
+    if (!w) continue;
+    wraps[day] = {
+      matchday: w.matchday,
+      matchCount: w.matchCount,
+      entryCount: w.entryCount,
+      winners: w.dayWinners.map((x) => ({ label: x.label, total: x.total })),
+      biggest: w.biggestHaul
+        ? {
+            label: w.biggestHaul.label,
+            points: w.biggestHaul.points,
+            fixture: fixtureLabel(w.biggestHaul.matchId),
+          }
+        : null,
+      exactCount: w.exactCount,
+      blankedCount: w.blankedCount,
+      soleCalls: w.soleCalls.map((x) => ({
+        label: x.label,
+        fixture: fixtureLabel(x.matchId),
+      })),
+      bars: w.dayTotals.map((t) => t.total),
+    };
+  }
+
   return (
     <div className="space-y-4">
       {entries.length > 1 && (
@@ -161,7 +199,12 @@ export default async function HistoryPage({
           currentId={entry.id}
         />
       )}
-      <HistoryList groups={groups} />
+      <HistoryList
+        groups={groups}
+        slug={slug}
+        myEntryId={entry.id}
+        wraps={wraps}
+      />
     </div>
   );
 }

@@ -119,6 +119,7 @@ export function getLockedPicksByEntry(
       const away = m.awayTeamId !== null ? teamById.get(m.awayTeamId) : null;
       return {
         matchId: m.id,
+        kickoffUtc: m.kickoffUtc,
         matchday: m.matchday,
         homeName: home?.name ?? m.homePlaceholder ?? 'TBD',
         awayName: away?.name ?? m.awayPlaceholder ?? 'TBD',
