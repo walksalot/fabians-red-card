@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { scorerMatches } from '@/lib/scoring';
 import BoosterButton from './BoosterButton';
 import HowItWorksSheet from './HowItWorksSheet';
 import OddsStrip from './OddsStrip';
@@ -51,6 +53,8 @@ interface Props {
   dayNav?: React.ReactNode;
   /** Viewing a day ahead of the current one (drives the odds-coming hint). */
   isFutureDay?: boolean;
+  /** Missing-picks radar: gaps on days OTHER than the one on screen. */
+  missingAhead?: { count: number; firstGapDay: string; href: string } | null;
 }
 
 function formatRemaining(ms: number): string {
@@ -139,6 +143,10 @@ function Countdown({
   // the final 15 minutes — red owns "lock it in now". All three tiers share
   // the same bg+ring chip recipe; the unarmed booster pill beside them is
   // neutral zinc, so amber here always means urgency, never a second control.
+  // Inside 5 minutes the chip breathes (motion-safe): the last theatrical
+  // escalation before the lock — the ticking m:ss format is already active
+  // under an hour, so drama here is purely the pulse.
+  const finalMinutes = remaining <= 5 * 60_000;
   const tone =
     remaining <= 15 * 60_000
       ? 'bg-brand/10 text-brand-bright ring-brand/30'
@@ -146,9 +154,87 @@ function Countdown({
         ? 'bg-amber-400/10 text-amber-300 ring-amber-400/25'
         : 'bg-emerald-400/10 text-emerald-300 ring-emerald-400/25';
   return (
-    <span className={`chip ring-1 ring-inset transition-colors duration-700 ${tone}`}>
+    <span
+      className={`chip ring-1 ring-inset transition-colors duration-700 ${tone} ${
+        finalMinutes ? 'motion-safe:animate-pulse' : ''
+      }`}
+    >
       <ClockIcon />
       Locks in {formatRemaining(remaining)}
+    </span>
+  );
+}
+
+/**
+ * Final-five-minutes alarm ring: a breathing red halo over a card that is
+ * about to lock WITHOUT a pick. Self-ticking (the card itself doesn't), and
+ * strictly decorative — the server's lock check is the only authority.
+ */
+function LockAlarmRing({
+  kickoffUtc,
+  serverNowMs,
+  active,
+}: {
+  kickoffUtc: string;
+  serverNowMs: number;
+  active: boolean;
+}) {
+  const [nowVal, setNowVal] = useState<number | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const offset = Date.now() - serverNowMs;
+    const tick = () => setNowVal(Date.now() - offset);
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [active, serverNowMs]);
+  if (!active || nowVal === null) return null;
+  const remaining = new Date(kickoffUtc).getTime() - nowVal;
+  if (remaining <= 0 || remaining > 5 * 60_000) return null;
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="lock-alarm"
+      className="pointer-events-none absolute inset-0 rounded-2xl animate-lock-glow"
+    />
+  );
+}
+
+/**
+ * "updated 40s ago" stamp for live cards — a frozen feed must never read as
+ * a real 0-0. Amber past three minutes: old enough to distrust.
+ */
+function FeedAge({
+  liveUpdatedAt,
+  serverNowMs,
+}: {
+  liveUpdatedAt: number | null;
+  serverNowMs: number;
+}) {
+  const [nowVal, setNowVal] = useState<number | null>(null);
+  useEffect(() => {
+    const offset = Date.now() - serverNowMs;
+    const tick = () => setNowVal(Date.now() - offset);
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
+  }, [serverNowMs]);
+  if (liveUpdatedAt === null || nowVal === null) return null;
+  const age = Math.max(0, nowVal - liveUpdatedAt);
+  const stale = age > 3 * 60_000;
+  // Seconds cap at 55 — 57.5s+ would otherwise round to "60s" instead of
+  // rolling into the minutes branch.
+  const label =
+    age < 60_000
+      ? `${Math.min(55, Math.max(5, Math.round(age / 5000) * 5))}s`
+      : `${Math.round(age / 60_000)}m`;
+  return (
+    <span
+      className={`text-[9px] font-medium tabular-nums ${
+        stale ? 'text-amber-300' : 'text-zinc-500'
+      }`}
+    >
+      updated {label} ago
     </span>
   );
 }
@@ -170,10 +256,13 @@ function TeamSide({
   name,
   code,
   align,
+  underdogPts = null,
 }: {
   name: string;
   code: string | null;
   align: 'left' | 'right';
+  /** Non-null = this side is the flagged underdog; value is the bonus. */
+  underdogPts?: number | null;
 }) {
   const flag = codeToFlagEmoji(code);
   const alignCls = align === 'left' ? 'items-start text-left' : 'items-end text-right';
@@ -199,12 +288,56 @@ function TeamSide({
           {code}
         </span>
       ) : null}
+      {/* The dare, right where picks are made: amber outline (informational,
+          like the odds strip), never brand red — this is a tip, not urgency.
+          Only rendered while the card is open; the flag freezes with picks. */}
+      {underdogPts !== null ? (
+        <span
+          data-testid="underdog-chip"
+          className="mt-0.5 inline-flex items-center whitespace-nowrap rounded-full border border-amber-400/40 bg-amber-400/10 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-amber-300"
+        >
+          Underdog +{underdogPts}
+        </span>
+      ) : null}
     </div>
   );
 }
 
+/**
+ * Live score with the GOAL celebration: when a poll raises the goal total the
+ * digits jump (goal-pop) once. The key remount restarts the animation per
+ * goal; first paint never animates (prev starts at the current total).
+ */
+function LiveScore({ item }: { item: TodayMatchView }) {
+  const total = (item.liveHome ?? 0) + (item.liveAway ?? 0);
+  const prev = useRef(total);
+  const [goalKey, setGoalKey] = useState(0);
+  useEffect(() => {
+    if (total > prev.current) setGoalKey((k) => k + 1);
+    prev.current = total;
+  }, [total]);
+  return (
+    <span
+      key={goalKey}
+      className={`font-display text-2xl font-bold tabular-nums tracking-tight text-brand-bright ${
+        goalKey > 0 ? 'animate-goal-pop' : ''
+      }`}
+    >
+      {item.liveHome ?? 0}–{item.liveAway ?? 0}
+    </span>
+  );
+}
+
 /** Center column of the fixture row: final score, live score, or kickoff time. */
-function FixtureCenter({ item, stale }: { item: TodayMatchView; stale: boolean }) {
+function FixtureCenter({
+  item,
+  stale,
+  serverNowMs,
+}: {
+  item: TodayMatchView;
+  stale: boolean;
+  serverNowMs: number;
+}) {
   if (item.status === 'finished') {
     return (
       <div className="flex flex-col items-center">
@@ -220,9 +353,7 @@ function FixtureCenter({ item, stale }: { item: TodayMatchView; stale: boolean }
   if (item.liveStatus === 'in') {
     return (
       <div className="flex flex-col items-center">
-        <span className="font-display text-2xl font-bold tabular-nums tracking-tight text-brand-bright">
-          {item.liveHome ?? 0}–{item.liveAway ?? 0}
-        </span>
+        <LiveScore item={item} />
         <span className="flex items-center gap-1">
           <LiveDot size="h-1.5 w-1.5" pulse />
           <span className="text-[10px] font-semibold uppercase tracking-widest text-brand-bright/80">
@@ -230,6 +361,7 @@ function FixtureCenter({ item, stale }: { item: TodayMatchView; stale: boolean }
             {item.liveClock ?? 'Live'}
           </span>
         </span>
+        <FeedAge liveUpdatedAt={item.liveUpdatedAt} serverNowMs={serverNowMs} />
       </div>
     );
   }
@@ -339,6 +471,41 @@ function PickSummary({ item }: { item: TodayMatchView }) {
           </span>
         ) : null}
       </div>
+      {/* Scorer sweat line — the most emotional pick on the card, surfaced
+          the moment a first goal exists (or is still possible). The verdict
+          runs the engine's own scorerMatches on the RAW stored strings — the
+          exact comparison that banks points at full time — so "your scorer!"
+          always agrees with the FT breakdown; canonical spellings are for
+          display only. */}
+      {live && p.predScorer ? (
+        item.liveFirstScorer ? (
+          scorerMatches(
+            p.predScorerRaw ?? p.predScorer,
+            item.liveFirstScorerRaw ?? item.liveFirstScorer,
+          ) ? (
+            <p className="mt-1.5 text-xs font-semibold text-emerald-400">
+              First goal: {item.liveFirstScorer} — your scorer! 🎯
+            </p>
+          ) : (
+            <p className="mt-1.5 text-xs text-zinc-400">
+              First goal: {item.liveFirstScorer} — your {p.predScorer} pick
+              missed it
+            </p>
+          )
+        ) : (item.liveHome ?? 0) + (item.liveAway ?? 0) > 0 ? (
+          // Goals on the board but no first scorer: own goals don't count for
+          // the market (the feed mapper leaves the scorer null), so "no goal
+          // yet" next to a visible 1–0 would read as a broken feed.
+          <p className="mt-1.5 text-xs text-amber-300/90">
+            First goal was an own goal — doesn&apos;t count; {p.predScorer} can
+            still land it
+          </p>
+        ) : (
+          <p className="mt-1.5 text-xs text-amber-300/90">
+            No goal yet — {p.predScorer} can still land it
+          </p>
+        )
+      ) : null}
       {quality ? (
         // Provisional "if it holds" chips — the shared CHIP_TONES system at
         // reduced opacity so a live forecast never reads as banked points.
@@ -401,6 +568,7 @@ export default function TodayBoard({
   underdogPctMax,
   dayNav = null,
   isFutureDay = false,
+  missingAhead = null,
 }: Props) {
   const router = useRouter();
   // Picks saved this session (server data only updates on refresh) — merged
@@ -565,6 +733,28 @@ export default function TodayBoard({
           );
         })()}
       </div>
+      {/* Missing-picks radar: gaps hiding on OTHER days (this day's own count
+          lives in the header above). A quiet amber banner, not a red alarm —
+          it deep-links to the first day with a gap. */}
+      {missingAhead ? (
+        <Link
+          href={missingAhead.href}
+          data-testid="missing-picks-banner"
+          className="flex items-center gap-2 rounded-xl bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-300 ring-1 ring-inset ring-amber-400/25 transition-colors hover:bg-amber-400/15 active:scale-[0.99]"
+        >
+          <span
+            aria-hidden="true"
+            className="inline-flex h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300"
+          />
+          <span className="min-w-0 flex-1 truncate">
+            {missingAhead.count} pick{missingAhead.count === 1 ? '' : 's'}{' '}
+            missing · next gap {formatMatchday(missingAhead.firstGapDay)}
+          </span>
+          <span className="shrink-0 text-amber-300/80">
+            Fill {missingAhead.count === 1 ? 'it' : 'them'} →
+          </span>
+        </Link>
+      ) : null}
       {/* zinc-500, not 600 — this line answers "where are the odds?", so it
           matches the readable caption tone used inside the cards. Shown on ANY
           day whose open cards all lack odds (not just future days): users who
@@ -591,7 +781,7 @@ export default function TodayBoard({
         <div
           key={m.matchId}
           data-testid={`pick-form-${m.matchId}`}
-          className={`card animate-fade-slide-in scroll-mt-24 p-4 ${
+          className={`card relative animate-fade-slide-in scroll-mt-24 p-4 ${
             isLive && !stale
               ? 'shadow-[0_0_0_1px_rgba(229,72,77,0.5),0_0_28px_-6px_rgba(229,72,77,0.45)]'
               : m.boosted
@@ -600,6 +790,15 @@ export default function TodayBoard({
           }`}
           style={{ animationDelay: `${Math.min(i, 6) * 60}ms` }}
         >
+          {/* Final-minutes red halo — only over an OPEN card still needing a
+              pick; the picked card keeps its calm countdown chip. */}
+          <LockAlarmRing
+            kickoffUtc={m.kickoffUtc}
+            serverNowMs={serverNowMs}
+            active={
+              !picked && !m.locked && m.status !== 'finished' && !m.teamsTbd
+            }
+          />
           {/* Header: stage caption (mixed-stage days only) + pick state + booster + status.
               flex-wrap (and no min-w-0 on the left span): when large text zoom
               makes the chips outgrow the row, the right group drops to a second
@@ -684,9 +883,19 @@ export default function TodayBoard({
               380px to hand the team-name columns the width they lose on small
               Androids (pairs with the name's font step-down). */}
           <div className="mt-2.5 grid grid-cols-[1fr_auto_1fr] items-center gap-3 max-[379px]:gap-2">
-            <TeamSide name={m.homeName} code={m.homeCode} align="left" />
-            <FixtureCenter item={m} stale={stale} />
-            <TeamSide name={m.awayName} code={m.awayCode} align="right" />
+            <TeamSide
+              name={m.homeName}
+              code={m.homeCode}
+              align="left"
+              underdogPts={m.underdogSide === 'home' ? points.underdog : null}
+            />
+            <FixtureCenter item={m} stale={stale} serverNowMs={serverNowMs} />
+            <TeamSide
+              name={m.awayName}
+              code={m.awayCode}
+              align="right"
+              underdogPts={m.underdogSide === 'away' ? points.underdog : null}
+            />
           </div>
 
           {/* Venue caption — official FIFA match number trails, demoted. */}

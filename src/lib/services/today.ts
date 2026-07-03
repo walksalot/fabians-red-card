@@ -185,6 +185,9 @@ export function getSchedule(db: Db): ScheduleItem[] {
 export interface MatchdaySummary {
   matchday: string;
   matchCount: number;
+  /** OPEN matches (teams known, unfinished, kickoff still ahead) without this
+      entry's pick — the radar only ever counts gaps that can still be filled. */
+  missingPickCount: number;
   /** This entry's saved picks on the day. */
   pickedCount: number;
   boosterArmed: boolean;
@@ -218,7 +221,8 @@ export function getMatchdayOverview(
     .from(schema.matches)
     .orderBy(asc(schema.matches.kickoffUtc), asc(schema.matches.id))
     .all();
-  const currentDay = resolveCurrentMatchday(allMatches, nowMs());
+  const nowEpochMs = nowMs();
+  const currentDay = resolveCurrentMatchday(allMatches, nowEpochMs);
   if (currentDay === null) return { currentDay: null, days: [], nextDayHasGaps: false };
 
   const picks = new Set(
@@ -246,11 +250,24 @@ export function getMatchdayOverview(
     byDay.set(m.matchday, list);
   }
 
+  // A gap only counts while it can still be filled: both teams known AND the
+  // match still open (picks hard-lock at kickoff, so a missed pick on a
+  // kicked-off or finished match is unfixable — nagging about it would only
+  // teach users to ignore the radar).
+  const stillOpen = (m: MatchRow) =>
+    m.homeTeamId !== null &&
+    m.awayTeamId !== null &&
+    m.status !== 'finished' &&
+    nowEpochMs < Date.parse(m.kickoffUtc);
+
   const days: MatchdaySummary[] = [...byDay.entries()]
     .sort(([a], [b]) => (a < b ? -1 : 1))
     .map(([matchday, matches]) => ({
       matchday,
       matchCount: matches.length,
+      missingPickCount: matches.filter(
+        (m) => stillOpen(m) && !picks.has(m.id),
+      ).length,
       pickedCount: matches.filter((m) => picks.has(m.id)).length,
       boosterArmed: boosters.has(matchday),
       firstKickoffUtc: matches[0]!.kickoffUtc,

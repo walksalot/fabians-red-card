@@ -8,6 +8,7 @@ import { getEntryStats, getLeaderboard } from '@/lib/services/leaderboard';
 import EntrySwitcher from '../_components/EntrySwitcher';
 import LogoutButton from '../_components/LogoutButton';
 import ChangePassword from '../_components/ChangePassword';
+import CalendarCard from '../_components/CalendarCard';
 import { MEDAL_TONES, formatPoints, ordinal } from '../_components/format';
 import {
   loadLeagueContext,
@@ -398,6 +399,8 @@ export default async function ProfilePage({
           </p>
         )}
       </div>
+
+      <CalendarCard />
 
       <ChangePassword />
       <LogoutButton />

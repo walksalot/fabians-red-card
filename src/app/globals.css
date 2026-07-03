@@ -32,6 +32,12 @@
   /* Page-level entrance: a short opacity-only fade every tab change shares
      (league template.tsx) — per-card staggers layer fine underneath it. */
   --animate-page-fade: page-fade 0.18s ease-out both;
+  /* Fun-pack (display-only): goal celebration, red-card theatrics, lock alarm. */
+  --animate-goal-pop: goal-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 1;
+  --animate-goal-flash: goal-flash 1.6s ease-out 1;
+  --animate-card-pull: card-pull 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  --animate-card-wobble: card-wobble 0.5s ease-in-out 1;
+  --animate-lock-glow: lock-glow 1.6s ease-in-out infinite;
 
   @keyframes page-fade {
     from {
@@ -80,6 +86,74 @@
     }
     100% {
       background-color: transparent;
+    }
+  }
+
+  /* GOAL: the live score digits jump when a poll brings a new goal. */
+  @keyframes goal-pop {
+    0% {
+      transform: scale(1);
+    }
+    35% {
+      transform: scale(1.35);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  /* Card-level companion to goal-pop: one brand-red wash, then gone. */
+  @keyframes goal-flash {
+    0% {
+      background-color: rgba(229, 72, 77, 0.16);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+
+  /* The referee pulls the card from the pocket (last place, Table). The card
+     carries a static `rotate-6` (the independent `rotate` property) for its
+     resting tilt, and these transform rotations ADD to it — every angle here
+     is 6deg less than the visual one, and both animations end at the resting
+     tilt so nothing snaps when they finish (or never run: reduced motion). */
+  @keyframes card-pull {
+    0% {
+      opacity: 0;
+      transform: translateY(5px) rotate(-30deg); /* visual -24deg */
+    }
+    60% {
+      opacity: 1;
+      transform: translateY(-1px) rotate(6deg); /* visual 12deg */
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) rotate(0deg); /* visual 6deg — resting tilt */
+    }
+  }
+
+  /* Tap response on the red card — a scolding little waggle. */
+  @keyframes card-wobble {
+    0%,
+    100% {
+      transform: rotate(0deg); /* visual 6deg — resting tilt */
+    }
+    25% {
+      transform: rotate(-20deg) scale(1.25); /* visual -14deg */
+    }
+    60% {
+      transform: rotate(12deg) scale(1.15); /* visual 18deg */
+    }
+  }
+
+  /* Final-minutes lock alarm: a soft red ring breathing on the card. */
+  @keyframes lock-glow {
+    0%,
+    100% {
+      box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.55), 0 0 18px -6px rgba(229, 72, 77, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 2px rgba(229, 72, 77, 0.85), 0 0 26px -4px rgba(229, 72, 77, 0.65);
     }
   }
 }
@@ -168,14 +242,26 @@ input[type='number']::-webkit-inner-spin-button {
 }
 
 /* Motion-sensitive users: kill the custom animations. Entrance animations use
-   `both` fill, so animation:none simply shows their resting (visible) state.
+   `both` fill, so animation:none simply shows their resting (visible) state —
+   but any visual that lives ONLY in keyframes needs a static stand-in below.
    (animate-ping uses Tailwind's motion-safe: variant at the call site.) */
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-slide-in,
   .animate-pulse-glow,
   .animate-pop-in,
   .animate-row-flash,
-  .animate-page-fade {
+  .animate-page-fade,
+  .animate-goal-pop,
+  .animate-goal-flash,
+  .animate-card-pull,
+  .animate-card-wobble,
+  .animate-lock-glow {
     animation: none;
+  }
+  /* The lock alarm's ring exists only in its keyframes' box-shadow — without
+     this, reduced-motion users would get NO final-five-minutes signal at all.
+     A steady ring keeps the information, minus the breathing. */
+  .animate-lock-glow {
+    box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.55), 0 0 18px -6px rgba(229, 72, 77, 0.4);
   }
 }

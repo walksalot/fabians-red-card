@@ -207,6 +207,27 @@ export default async function TodayPage({
       liveAway: match.liveAway,
       liveStatus: match.liveStatus,
       liveClock: match.liveClock,
+      // Same canonical spelling as the result/pick scorers above.
+      liveFirstScorer: canonicalScorer(match.liveFirstScorer, [
+        ...(squadOf(match.homeTeamId) ?? []),
+        ...(squadOf(match.awayTeamId) ?? []),
+      ]),
+      // Raw feed spelling too: the sweat line's hit/miss verdict must run the
+      // engine's own scorerMatches on the same raw strings scoring will see
+      // at full time — the canonical name above is for display only.
+      liveFirstScorerRaw: match.liveFirstScorer,
+      liveFirstScoringTeam: match.liveFirstScoringTeam as FirstTeam | null,
+      liveUpdatedAt: match.liveUpdatedAt,
+      // Display-only underdog flag, and only while the card is open — the
+      // odds strip's payload-hygiene rule applies to the flag too.
+      underdogSide:
+        hideOdds || match.underdogTeamId === null
+          ? null
+          : match.underdogTeamId === match.homeTeamId
+            ? 'home'
+            : match.underdogTeamId === match.awayTeamId
+              ? 'away'
+              : null,
       homeSquad: squadOf(match.homeTeamId),
       awaySquad: squadOf(match.awayTeamId),
       teamsTbd,
@@ -223,6 +244,9 @@ export default async function TodayPage({
               ...(squadOf(match.homeTeamId) ?? []),
               ...(squadOf(match.awayTeamId) ?? []),
             ]),
+            // As stored — the engine scores the raw pick, so the sweat line
+            // must judge the raw pick too (see liveFirstScorerRaw above).
+            predScorerRaw: myPick.predScorer,
             predFirstTeam: myPick.predFirstTeam as FirstTeam | null,
           }
         : null,
@@ -262,9 +286,32 @@ export default async function TodayPage({
 
   const liveBoards = getLiveBoards(db, league.id);
 
+  // Missing-picks radar: gaps on pickable days OTHER than the one on screen
+  // (the header's "n/m picked" already owns the visible day). Deep-links to
+  // the first day with a gap, preserving ?entry= for multi-entry users.
+  const gapDays = overview.days.filter(
+    (d) => d.matchday !== boardMatchday && d.missingPickCount > 0,
+  );
+  const missingCount = gapDays.reduce(
+    (sum, d) => sum + d.missingPickCount,
+    0,
+  );
+  const rawEntry = Array.isArray(sp.entry) ? sp.entry[0] : sp.entry;
+  const gapParams = new URLSearchParams();
+  if (rawEntry) gapParams.set('entry', rawEntry);
+  if (gapDays.length > 0) gapParams.set('day', gapDays[0].matchday);
+  const missingAhead =
+    missingCount > 0
+      ? {
+          count: missingCount,
+          firstGapDay: gapDays[0].matchday,
+          href: `/league/${slug}/today?${gapParams.toString()}`,
+        }
+      : null;
+
   return (
     <div className="space-y-4">
-      <LiveNow slug={slug} initial={liveBoards} />
+      <LiveNow slug={slug} initial={liveBoards} serverNowMs={nowMs()} />
       {entries.length > 1 && (
         <EntrySwitcher
           entries={entries.map((e) => ({ id: e.id, label: e.label }))}
@@ -299,6 +346,7 @@ export default async function TodayPage({
           boosterArmed={headerBooster !== undefined}
           points={scoringPoints}
           underdogPctMax={Math.round(UNDERDOG_PROB_MAX * 100)}
+          missingAhead={missingAhead}
         />
       ) : (
         <EmptyState

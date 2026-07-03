@@ -10,6 +10,10 @@ export interface PickView {
   predHome: number;
   predAway: number;
   predScorer: string | null;
+  /** The pick as stored (pre-canonicalization) — what the scoring engine will
+      actually compare at full time. Only serialized where a live hit/miss
+      verdict is rendered (Today's sweat line); display uses predScorer. */
+  predScorerRaw?: string | null;
   predFirstTeam: FirstTeam | null;
 }
 
@@ -49,6 +53,19 @@ export interface TodayMatchView {
   liveStatus: string | null;
   /** Feed's match clock ("55'", "HT") — minutes accrued, soccer counts up. */
   liveClock: string | null;
+  /** First-goal facts as they stand mid-match (canonical squad spelling). */
+  liveFirstScorer: string | null;
+  /** The feed's raw spelling — the string the engine will score against at
+      full time; the sweat line's verdict compares raw vs raw. */
+  liveFirstScorerRaw: string | null;
+  liveFirstScoringTeam: FirstTeam | null;
+  /** Epoch ms of the last live-feed write — drives the freshness stamp. */
+  liveUpdatedAt: number | null;
+  /**
+   * Which side is the flagged underdog (display-only; null = no flag). Only
+   * serialized while the card is open — the flag freezes with the picks.
+   */
+  underdogSide: 'home' | 'away' | null;
   /**
    * Squad names for the scorer picker. `null` = team unknown (knockout TBD —
    * the server rejects picks on such matches outright with a 409);

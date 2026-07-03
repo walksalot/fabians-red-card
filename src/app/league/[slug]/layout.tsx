@@ -3,9 +3,11 @@ import Link from 'next/link';
 import { RedCardMark } from '@/components/Brand';
 import TabBar from '@/components/TabBar';
 import { getLeaderboard } from '@/lib/services/leaderboard';
+import { getMatchdayOverview } from '@/lib/services/today';
 import JoinPrompt from './_components/JoinPrompt';
 import PasswordJoinForm from './_components/PasswordJoinForm';
 import { MEDAL_TEXT_TONES, formatPoints, ordinal } from './_components/format';
+import { lastPlaceRank } from './_components/standings-display';
 import { loadLeagueContext } from './_components/league-data';
 
 export default async function LeagueLayout({
@@ -22,11 +24,34 @@ export default async function LeagueLayout({
   // Glanceable identity for the header's right half: the member's rank +
   // points on every screen (first entry — the common single-entry case).
   const myEntryId = entries[0]?.id;
+  const rows = isMember && myEntryId !== undefined ? getLeaderboard(db, league.id) : [];
   const mine =
     isMember && myEntryId !== undefined
-      ? (getLeaderboard(db, league.id).find((r) => r.entryId === myEntryId) ??
-        null)
+      ? (rows.find((r) => r.entryId === myEntryId) ?? null)
       : null;
+  // The red card follows last place onto every screen (the app's namesake
+  // joke) — only when the table has a genuine last (ties handled upstream).
+  const holdsRedCard = mine !== null && mine.rank === lastPlaceRank(rows);
+  // Missing-picks radar dot on the Today tab: any still-open match without a
+  // pick, on ANY day from the current one forward, across ALL of the user's
+  // entries (the Today page's banner is entry-aware; the dot just says "some
+  // entry has a fillable gap"). Display only. Computed at layout render —
+  // layouts don't re-render on tab navigation, which is an accepted trade-off:
+  // router.refresh() after every pick save and the 30s live-window polls keep
+  // the dot honest in the flows that matter.
+  let missingPicks = 0;
+  if (isMember) {
+    try {
+      for (const e of entries) {
+        missingPicks += getMatchdayOverview(db, league.id, e.id).days.reduce(
+          (sum, d) => sum + d.missingPickCount,
+          0,
+        );
+      }
+    } catch {
+      // display-only nicety — never let it break the shell
+    }
+  }
 
   // Two-tone wordmark treatment: first word muted, the rest bright — the same
   // logo feel the auth screens use ("Fabian's" + "Red Card").
@@ -65,6 +90,13 @@ export default async function LeagueLayout({
               <span className={MEDAL_TEXT_TONES[mine.rank] ?? 'text-zinc-300'}>
                 {ordinal(mine.rank)}
               </span>
+              {holdsRedCard ? (
+                <span
+                  aria-hidden="true"
+                  title="Holding the red card"
+                  className="inline-block h-2.5 w-2 shrink-0 rotate-6 rounded-[1.5px] bg-gradient-to-br from-brand-bright to-brand-deep"
+                />
+              ) : null}
               <span aria-hidden="true" className="text-zinc-400">
                 ·
               </span>
@@ -113,7 +145,7 @@ export default async function LeagueLayout({
           <JoinPrompt slug={slug} leagueName={league.name} />
         )}
       </main>
-      <TabBar />
+      <TabBar todayAlert={missingPicks > 0} />
     </div>
   );
 }
