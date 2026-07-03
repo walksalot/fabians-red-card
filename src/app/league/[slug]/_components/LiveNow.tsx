@@ -16,9 +16,12 @@ const POLL_MS = 20_000;
 export default function LiveNow({
   slug,
   initial,
+  serverNowMs,
 }: {
   slug: string;
   initial: LiveBoard[];
+  /** clock.now() on the server at render time — anchors the freshness stamp. */
+  serverNowMs: number;
 }) {
   const [boards, setBoards] = useState<LiveBoard[]>(initial);
   const [open, setOpen] = useState<Record<number, boolean>>({});
@@ -30,15 +33,19 @@ export default function LiveNow({
     new Map(initial.map((b) => [b.matchId, b.liveHome + b.liveAway])),
   );
   const [goalFlash, setGoalFlash] = useState<Record<number, number>>({});
-  // Client clock for the freshness stamp — ticking state keeps render pure
-  // (and hydration-safe: the stamp only appears after mount).
+  // Ticking clock for the freshness stamp — anchored to the server clock
+  // (TodayBoard's FeedAge pattern) so a skewed phone clock or a pinned
+  // FAKE_NOW never shifts the age; liveUpdatedAt is a server-written epoch.
+  // Ticking state keeps render pure (and hydration-safe: the stamp only
+  // appears after mount).
   const [nowVal, setNowVal] = useState<number | null>(null);
   useEffect(() => {
-    const tick = () => setNowVal(Date.now());
+    const offset = Date.now() - serverNowMs;
+    const tick = () => setNowVal(Date.now() - offset);
     tick();
     const id = setInterval(tick, 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [serverNowMs]);
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
@@ -109,11 +116,13 @@ export default function LiveNow({
           b.liveUpdatedAt !== null && nowVal !== null
             ? Math.max(0, nowVal - b.liveUpdatedAt)
             : null;
+        // Seconds cap at 55 — 57.5s+ would otherwise round to "60s ago"
+        // instead of rolling into the minutes branch.
         const feedAgeLabel =
           feedAgeMs === null
             ? null
             : feedAgeMs < 60_000
-              ? `${Math.max(5, Math.round(feedAgeMs / 5000) * 5)}s ago`
+              ? `${Math.min(55, Math.max(5, Math.round(feedAgeMs / 5000) * 5))}s ago`
               : `${Math.round(feedAgeMs / 60_000)}m ago`;
         return (
           <div
@@ -125,12 +134,18 @@ export default function LiveNow({
               data-testid={`live-now-toggle-${b.matchId}`}
               aria-expanded={expanded}
               onClick={() => setOpen((o) => ({ ...o, [b.matchId]: !expanded }))}
-              // key restarts the brand-red goal wash each time a goal lands
-              key={`hdr-${flashKey}`}
-              className={`flex min-h-12 w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors hover:bg-zinc-800/60 ${
-                flashKey > 0 ? 'animate-goal-flash' : ''
-              }`}
+              className="relative flex min-h-12 w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors hover:bg-zinc-800/60"
             >
+              {/* Brand-red goal wash on its own keyed overlay — re-keying the
+                  button itself would remount the control and drop keyboard
+                  focus every time a background poll lands a goal. */}
+              {flashKey > 0 ? (
+                <span
+                  key={`flash-${flashKey}`}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 animate-goal-flash"
+                />
+              ) : null}
               <span className="relative flex h-2 w-2 shrink-0">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-75" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-brand" />

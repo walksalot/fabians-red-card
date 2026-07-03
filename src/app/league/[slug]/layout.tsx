@@ -32,15 +32,22 @@ export default async function LeagueLayout({
   // The red card follows last place onto every screen (the app's namesake
   // joke) — only when the table has a genuine last (ties handled upstream).
   const holdsRedCard = mine !== null && mine.rank === lastPlaceRank(rows);
-  // Missing-picks radar dot on the Today tab: any pickable upcoming match
-  // without a pick, on ANY day from the current one forward. Display only.
+  // Missing-picks radar dot on the Today tab: any still-open match without a
+  // pick, on ANY day from the current one forward, across ALL of the user's
+  // entries (the Today page's banner is entry-aware; the dot just says "some
+  // entry has a fillable gap"). Display only. Computed at layout render —
+  // layouts don't re-render on tab navigation, which is an accepted trade-off:
+  // router.refresh() after every pick save and the 30s live-window polls keep
+  // the dot honest in the flows that matter.
   let missingPicks = 0;
-  if (isMember && myEntryId !== undefined) {
+  if (isMember) {
     try {
-      missingPicks = getMatchdayOverview(db, league.id, myEntryId).days.reduce(
-        (sum, d) => sum + Math.max(0, d.pickableCount - d.pickedCount),
-        0,
-      );
+      for (const e of entries) {
+        missingPicks += getMatchdayOverview(db, league.id, e.id).days.reduce(
+          (sum, d) => sum + d.missingPickCount,
+          0,
+        );
+      }
     } catch {
       // display-only nicety — never let it break the shell
     }

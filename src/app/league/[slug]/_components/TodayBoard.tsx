@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { normalizeName } from '@/lib/scoring';
+import { scorerMatches } from '@/lib/scoring';
 import BoosterButton from './BoosterButton';
 import HowItWorksSheet from './HowItWorksSheet';
 import OddsStrip from './OddsStrip';
@@ -222,9 +222,11 @@ function FeedAge({
   if (liveUpdatedAt === null || nowVal === null) return null;
   const age = Math.max(0, nowVal - liveUpdatedAt);
   const stale = age > 3 * 60_000;
+  // Seconds cap at 55 — 57.5s+ would otherwise round to "60s" instead of
+  // rolling into the minutes branch.
   const label =
     age < 60_000
-      ? `${Math.max(5, Math.round(age / 5000) * 5)}s`
+      ? `${Math.min(55, Math.max(5, Math.round(age / 5000) * 5))}s`
       : `${Math.round(age / 60_000)}m`;
   return (
     <span
@@ -470,12 +472,17 @@ function PickSummary({ item }: { item: TodayMatchView }) {
         ) : null}
       </div>
       {/* Scorer sweat line — the most emotional pick on the card, surfaced
-          the moment a first goal exists (or is still possible). normalizeName
-          matches the engine's own comparison, so "your scorer!" here always
-          agrees with the points that bank at full time. */}
+          the moment a first goal exists (or is still possible). The verdict
+          runs the engine's own scorerMatches on the RAW stored strings — the
+          exact comparison that banks points at full time — so "your scorer!"
+          always agrees with the FT breakdown; canonical spellings are for
+          display only. */}
       {live && p.predScorer ? (
         item.liveFirstScorer ? (
-          normalizeName(item.liveFirstScorer) === normalizeName(p.predScorer) ? (
+          scorerMatches(
+            p.predScorerRaw ?? p.predScorer,
+            item.liveFirstScorerRaw ?? item.liveFirstScorer,
+          ) ? (
             <p className="mt-1.5 text-xs font-semibold text-emerald-400">
               First goal: {item.liveFirstScorer} — your scorer! 🎯
             </p>
@@ -485,6 +492,14 @@ function PickSummary({ item }: { item: TodayMatchView }) {
               missed it
             </p>
           )
+        ) : (item.liveHome ?? 0) + (item.liveAway ?? 0) > 0 ? (
+          // Goals on the board but no first scorer: own goals don't count for
+          // the market (the feed mapper leaves the scorer null), so "no goal
+          // yet" next to a visible 1–0 would read as a broken feed.
+          <p className="mt-1.5 text-xs text-amber-300/90">
+            First goal was an own goal — doesn&apos;t count; {p.predScorer} can
+            still land it
+          </p>
         ) : (
           <p className="mt-1.5 text-xs text-amber-300/90">
             No goal yet — {p.predScorer} can still land it

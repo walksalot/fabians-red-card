@@ -212,6 +212,10 @@ export default async function TodayPage({
         ...(squadOf(match.homeTeamId) ?? []),
         ...(squadOf(match.awayTeamId) ?? []),
       ]),
+      // Raw feed spelling too: the sweat line's hit/miss verdict must run the
+      // engine's own scorerMatches on the same raw strings scoring will see
+      // at full time — the canonical name above is for display only.
+      liveFirstScorerRaw: match.liveFirstScorer,
       liveFirstScoringTeam: match.liveFirstScoringTeam as FirstTeam | null,
       liveUpdatedAt: match.liveUpdatedAt,
       // Display-only underdog flag, and only while the card is open — the
@@ -240,6 +244,9 @@ export default async function TodayPage({
               ...(squadOf(match.homeTeamId) ?? []),
               ...(squadOf(match.awayTeamId) ?? []),
             ]),
+            // As stored — the engine scores the raw pick, so the sweat line
+            // must judge the raw pick too (see liveFirstScorerRaw above).
+            predScorerRaw: myPick.predScorer,
             predFirstTeam: myPick.predFirstTeam as FirstTeam | null,
           }
         : null,
@@ -283,11 +290,10 @@ export default async function TodayPage({
   // (the header's "n/m picked" already owns the visible day). Deep-links to
   // the first day with a gap, preserving ?entry= for multi-entry users.
   const gapDays = overview.days.filter(
-    (d) =>
-      d.matchday !== boardMatchday && d.pickedCount < d.pickableCount,
+    (d) => d.matchday !== boardMatchday && d.missingPickCount > 0,
   );
   const missingCount = gapDays.reduce(
-    (sum, d) => sum + (d.pickableCount - d.pickedCount),
+    (sum, d) => sum + d.missingPickCount,
     0,
   );
   const rawEntry = Array.isArray(sp.entry) ? sp.entry[0] : sp.entry;
@@ -305,7 +311,7 @@ export default async function TodayPage({
 
   return (
     <div className="space-y-4">
-      <LiveNow slug={slug} initial={liveBoards} />
+      <LiveNow slug={slug} initial={liveBoards} serverNowMs={nowMs()} />
       {entries.length > 1 && (
         <EntrySwitcher
           entries={entries.map((e) => ({ id: e.id, label: e.label }))}

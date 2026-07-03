@@ -329,42 +329,45 @@ function LockedPicksPanel({
  * after. Pure theatrics: a span-based tooltip, no layout shift, no data.
  */
 function LastPlaceCard() {
-  const [jab, setJab] = useState(0);
+  // Monotonic tap counter: re-keying on it restarts the wobble per tap, and
+  // because it never returns to 0 the pocket-pull ENTRANCE plays exactly once
+  // per mount — the tooltip's own timeout (`jabbing`) never remounts the card.
+  const [taps, setTaps] = useState(0);
+  const [jabbing, setJabbing] = useState(false);
   useEffect(() => {
-    if (jab === 0) return;
-    const id = setTimeout(() => setJab(0), 1800);
+    if (!jabbing) return;
+    const id = setTimeout(() => setJabbing(false), 1800);
     return () => clearTimeout(id);
-  }, [jab]);
-  // The whole row behind this is already a <button> (expand/collapse), so
-  // the card must NOT be a nested button — a focusable span keeps the HTML
-  // valid while stopPropagation keeps the jab from toggling the picks panel.
+  }, [jabbing, taps]);
+  // The whole row behind this is already a <button> (expand/collapse), and
+  // the HTML content model forbids focusable/interactive descendants inside
+  // it — so the jab is a pointer-only decoration (aria-hidden keeps it out of
+  // the row's accessible name) and the row stays the single tab stop;
+  // stopPropagation keeps the jab from toggling the picks panel.
   const poke = (e: React.SyntheticEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    setJab((j) => j + 1);
+    setTaps((t) => t + 1);
+    setJabbing(true);
   };
   return (
-    <span className="relative inline-flex shrink-0">
+    <span aria-hidden="true" className="relative inline-flex shrink-0">
       <span
-        role="button"
-        tabIndex={0}
         data-testid="red-card-jab"
-        aria-label="Holding the red card — don't be that guy"
+        title="Holding the red card — don't be that guy"
         onClick={poke}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') poke(e);
-        }}
         // key restarts the wobble on every repeat tap
-        key={`card-${jab}`}
-        className={`ml-1 inline-block h-3 w-2.5 origin-bottom cursor-pointer rounded-[2px] bg-gradient-to-br from-brand-bright to-brand-deep focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 ${
-          jab > 0 ? 'animate-card-wobble' : 'animate-card-pull'
+        key={`card-${taps}`}
+        // Static rotate-6 (the `rotate` property, like the header pill) owns
+        // the resting tilt — it holds after the wobble ends and survives the
+        // reduced-motion animation:none kill switch; the keyframes compose
+        // their transform rotations on top of it.
+        className={`ml-1 inline-block h-3 w-2.5 origin-bottom rotate-6 cursor-pointer rounded-[2px] bg-gradient-to-br from-brand-bright to-brand-deep ${
+          taps > 0 ? 'animate-card-wobble' : 'animate-card-pull'
         }`}
       />
-      {jab > 0 ? (
-        <span
-          role="status"
-          className="absolute -top-8 right-0 z-10 whitespace-nowrap rounded-lg bg-zinc-950 px-2 py-1 text-[10px] font-bold text-brand-bright shadow-lg ring-1 ring-inset ring-brand/40 animate-pop-in"
-        >
+      {jabbing ? (
+        <span className="absolute -top-8 right-0 z-10 whitespace-nowrap rounded-lg bg-zinc-950 px-2 py-1 text-[10px] font-bold text-brand-bright shadow-lg ring-1 ring-inset ring-brand/40 animate-pop-in">
           Don&apos;t be that guy 🟥
         </span>
       ) : null}

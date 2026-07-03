@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { schema } from '@/db';
+import { nowMs } from '@/lib/clock';
 import { getLeaderboard } from '@/lib/services/leaderboard';
 import { prizePool } from '@/lib/services/leagues';
 import LiveTable from '../_components/LiveTable';
@@ -47,7 +48,7 @@ export default async function TablePage({
 
   return (
     <div className="space-y-4">
-      <LiveNow slug={slug} initial={liveBoards} />
+      <LiveNow slug={slug} initial={liveBoards} serverNowMs={nowMs()} />
       <LiveTable
         slug={slug}
         initialRows={rows}
