@@ -20,7 +20,7 @@ export default defineConfig({
   // CI headroom + suite cap: see playwright.config.ts for the reasoning.
   timeout: process.env.CI ? 90_000 : 30_000,
   expect: { timeout: process.env.CI ? 30_000 : 5_000 },
-  globalTimeout: process.env.CI ? 480_000 : 0,
+  globalTimeout: process.env.CI ? 720_000 : 0,
   reporter: 'list',
   globalSetup: './e2e/global-setup.ts',
   projects: [

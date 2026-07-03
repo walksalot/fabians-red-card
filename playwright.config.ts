@@ -27,9 +27,12 @@ export default defineConfig({
   // Assertion headroom raised 15s → 30s after two same-shaped CI flakes in
   // one day (login redirect, reset-link flow): each was a single expect
   // starving on a cold runner while the test's 60s budget sat mostly unused.
+  // The suite cap covers every test maxing its 90s budget plus server boot
+  // and seeding — headroom must stay reachable — while the two suites' caps
+  // together still fit the CI job's timeout-minutes with margin for installs.
   timeout: process.env.CI ? 90_000 : 30_000,
   expect: { timeout: process.env.CI ? 30_000 : 5_000 },
-  globalTimeout: process.env.CI ? 480_000 : 0,
+  globalTimeout: process.env.CI ? 720_000 : 0,
   reporter: 'list',
   globalSetup: './e2e/global-setup.ts',
   projects: [
