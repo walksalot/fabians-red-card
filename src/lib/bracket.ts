@@ -71,6 +71,26 @@ function parseFeeder(placeholder: string | null): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/** Per-match feeder ids in [home, away] order (null = group-sourced slot). */
+export type FeederMap = Map<number, readonly [number | null, number | null]>;
+
+/**
+ * Derive the immutable bracket wiring from the seeded fixtures file. The DB
+ * placeholders are erased when a slot fills with a real team, so the tree
+ * must come from a source results can't touch. Match ids equal fixture `n`.
+ */
+export function feederMapFromFixtures(
+  rows: Array<{ n: number; home: string; away: string }>,
+): FeederMap {
+  const map: FeederMap = new Map();
+  for (const r of rows) {
+    const home = parseFeeder(r.home);
+    const away = parseFeeder(r.away);
+    if (home !== null || away !== null) map.set(r.n, [home, away]);
+  }
+  return map;
+}
+
 /**
  * Build display nodes for the given stages (kickoff-ordered within stage).
  * Winner inference for finished ties: score margin when there is one;
@@ -82,15 +102,25 @@ export function buildBracket(
   matches: BracketMatchRow[],
   teams: Map<number, BracketTeamRef>,
   stages: string[] = ['r32', 'r16', 'qf', 'sf', 'final'],
+  feederMap?: FeederMap,
 ): BracketNode[] {
   const byId = new Map(matches.map((m) => [m.id, m]));
+
+  // Placeholders are the primary wiring, but they're NULLed once a slot
+  // fills with a real team — the fixtures-derived map keeps the tree whole.
+  const feedersFor = (m: BracketMatchRow): readonly [number | null, number | null] => {
+    const fallback = feederMap?.get(m.id);
+    return [
+      parseFeeder(m.homePlaceholder) ?? fallback?.[0] ?? null,
+      parseFeeder(m.awayPlaceholder) ?? fallback?.[1] ?? null,
+    ];
+  };
 
   // Which team ids appear in the child that a finished feeder flows into —
   // the penalties winner inference.
   const childTeamIds = new Map<number, Set<number>>(); // feederId -> child's team ids
   for (const m of matches) {
-    for (const ph of [m.homePlaceholder, m.awayPlaceholder]) {
-      const feeder = parseFeeder(ph);
+    for (const feeder of feedersFor(m)) {
       if (feeder === null) continue;
       const set = childTeamIds.get(feeder) ?? new Set<number>();
       if (m.homeTeamId !== null) set.add(m.homeTeamId);
@@ -105,24 +135,22 @@ export function buildBracket(
     if (cached) return cached;
     const m = byId.get(id);
     if (!m) return [];
-    let codes: string[] = [];
-    if (m.homeTeamId !== null && m.awayTeamId !== null) {
-      codes = [m.homeTeamId, m.awayTeamId]
-        .map((t) => teams.get(t)?.code)
-        .filter((c): c is string => !!c);
-    } else {
-      const feeders = [parseFeeder(m.homePlaceholder), parseFeeder(m.awayPlaceholder)];
-      const set = new Set<string>();
-      // A known side of a half-filled tie still counts.
-      for (const t of [m.homeTeamId, m.awayTeamId]) {
-        const code = t !== null ? teams.get(t)?.code : undefined;
+    // Per side: a known team pins the slot to that code alone; only an
+    // unfilled slot falls back to everything its feeder could send up.
+    const [homeFeeder, awayFeeder] = feedersFor(m);
+    const set = new Set<string>();
+    for (const [teamId, feeder] of [
+      [m.homeTeamId, homeFeeder],
+      [m.awayTeamId, awayFeeder],
+    ] as const) {
+      if (teamId !== null) {
+        const code = teams.get(teamId)?.code;
         if (code) set.add(code);
+      } else if (feeder !== null) {
+        for (const c of possibleOf(feeder)) set.add(c);
       }
-      for (const f of feeders) {
-        if (f !== null) for (const c of possibleOf(f)) set.add(c);
-      }
-      codes = [...set];
     }
+    const codes = [...set];
     possibleCache.set(id, codes);
     return codes;
   };
@@ -131,11 +159,11 @@ export function buildBracket(
     m: BracketMatchRow,
     teamId: number | null,
     placeholder: string | null,
+    feeder: number | null,
     score: number | null,
     otherScore: number | null,
   ): BracketSide => {
     const team = teamId !== null ? (teams.get(teamId) ?? null) : null;
-    const feeder = parseFeeder(placeholder);
     const possibleCodes =
       team !== null ? [team.code] : feeder !== null ? possibleOf(feeder) : [];
     let won = false;
@@ -171,11 +199,10 @@ export function buildBracket(
         a.id - b.id,
     )
     .map((m) => {
-      const home = sideOf(m, m.homeTeamId, m.homePlaceholder, m.homeScore, m.awayScore);
-      const away = sideOf(m, m.awayTeamId, m.awayPlaceholder, m.awayScore, m.homeScore);
-      const feeders = [parseFeeder(m.homePlaceholder), parseFeeder(m.awayPlaceholder)].filter(
-        (f): f is number => f !== null,
-      );
+      const [homeFeeder, awayFeeder] = feedersFor(m);
+      const home = sideOf(m, m.homeTeamId, m.homePlaceholder, homeFeeder, m.homeScore, m.awayScore);
+      const away = sideOf(m, m.awayTeamId, m.awayPlaceholder, awayFeeder, m.awayScore, m.homeScore);
+      const feeders = [homeFeeder, awayFeeder].filter((f): f is number => f !== null);
       return {
         matchId: m.id,
         stage: m.stage,

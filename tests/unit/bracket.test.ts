@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildBracket, type BracketMatchRow, type BracketTeamRef } from '@/lib/bracket';
+import {
+  buildBracket,
+  feederMapFromFixtures,
+  type BracketMatchRow,
+  type BracketTeamRef,
+  type FeederMap,
+} from '@/lib/bracket';
 
 const TEAMS = new Map<number, BracketTeamRef>([
   [1, { id: 1, code: 'MEX', name: 'Mexico' }],
@@ -94,6 +100,44 @@ describe('buildBracket', () => {
     expect(tie.home.lost).toBe(false);
     expect(tie.away.won).toBe(false);
     expect(tie.away.lost).toBe(false);
+  });
+
+  it('keeps feeders and pens inference when auto-fill erased the placeholders', () => {
+    // Production behavior: setMatchTeams NULLs home/away placeholders as it
+    // fills team ids, which used to orphan the connectors. The fixtures-derived
+    // feeder map is the fallback wiring.
+    const feederMap: FeederMap = new Map([[89, [74, 77] as const]]);
+    const nodes = buildBracket(
+      [
+        row({ id: 74, stage: 'r32', status: 'finished', homeTeamId: 5, awayTeamId: 6, homeScore: 1, awayScore: 1 }),
+        row({ id: 77, stage: 'r32', status: 'finished', homeTeamId: 1, awayTeamId: 2, homeScore: 2, awayScore: 0 }),
+        // Both slots filled, both placeholders gone — the broken-in-prod shape.
+        row({ id: 89, stage: 'r16', homeTeamId: 6, awayTeamId: 1 }),
+      ],
+      TEAMS,
+      undefined,
+      feederMap,
+    );
+    const child = nodes.find((n) => n.matchId === 89)!;
+    expect(child.feeders).toEqual([74, 77]);
+    // Filled slots pin possible codes to the actual teams, not the feeders' losers.
+    expect([...child.possibleCodes].sort()).toEqual(['MEX', 'PAR']);
+    // Pens winner still inferred through the map: Paraguay advanced, Germany out.
+    const tie = nodes.find((n) => n.matchId === 74)!;
+    expect(tie.decidedOnPens).toBe(true);
+    expect(tie.away.won).toBe(true);
+    expect(tie.home.lost).toBe(true);
+  });
+
+  it('derives the feeder map from fixtures rows', () => {
+    const map = feederMapFromFixtures([
+      { n: 74, home: 'Group E winners', away: '3rd Group A/B/C/D/F' },
+      { n: 89, home: 'Winners Match 74', away: 'Winners Match 77' },
+      { n: 104, home: 'Winners Match 101', away: 'Winners Match 102' },
+    ]);
+    expect(map.get(74)).toBeUndefined(); // group-sourced: no knockout feeders
+    expect(map.get(89)).toEqual([74, 77]);
+    expect(map.get(104)).toEqual([101, 102]);
   });
 
   it('orders by stage then kickoff and marks live matches', () => {
