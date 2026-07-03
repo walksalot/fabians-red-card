@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { scorerMatches } from '@/lib/scoring';
 import BoosterButton from './BoosterButton';
+import LeaguePicksReveal from './LeaguePicksReveal';
 import HowItWorksSheet from './HowItWorksSheet';
 import OddsStrip from './OddsStrip';
 import PickForm from './PickForm';
@@ -32,6 +33,8 @@ const POLL_MS = 30_000;
 const STALE_LIVE_MS = 6 * 60 * 60 * 1000;
 
 interface Props {
+  /** League slug — the reveal panel's fetch needs it. */
+  slug: string;
   entryId: number;
   /** clock.now() on the server at render time — keeps countdowns honest under FAKE_NOW. */
   serverNowMs: number;
@@ -556,6 +559,7 @@ function LockIcon() {
 }
 
 export default function TodayBoard({
+  slug,
   entryId,
   serverNowMs,
   boosterMultiplier,
@@ -940,6 +944,7 @@ export default function TodayBoard({
                   <NoPointsChip />
                 </div>
               )}
+              <LeaguePicksReveal slug={slug} matchId={m.matchId} myEntryId={entryId} />
             </div>
           ) : m.locked ? (
             <div className="mt-3 border-t border-white/5 pt-3">
@@ -948,6 +953,7 @@ export default function TodayBoard({
                 <LockIcon />
                 Picks are locked for this match.
               </p>
+              <LeaguePicksReveal slug={slug} matchId={m.matchId} myEntryId={entryId} />
             </div>
           ) : m.teamsTbd ? (
             <p className="mt-3 rounded-lg bg-zinc-950/50 px-3 py-2.5 text-xs text-zinc-500 ring-1 ring-inset ring-white/5">

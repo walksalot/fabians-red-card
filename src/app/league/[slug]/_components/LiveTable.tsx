@@ -2,6 +2,8 @@
 
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { RedCardMark } from '@/components/Brand';
+import AnimatedTotal from './AnimatedTotal';
+import { burstConfetti } from './confetti';
 import EmptyState from '@/components/EmptyState';
 import Monogram from '@/components/Monogram';
 import { CHIP_TONES, breakdownChips } from './breakdown-chips';
@@ -430,6 +432,94 @@ export default function LiveTable({
       // Storage unavailable (private mode/quota) — arrows just stay session-only.
     }
   }, [rows, storageKey]);
+  // Jackpot arrival: totals from the user's PREVIOUS visit. Inside the
+  // freshness window after a final whistle (~the same evening), the table
+  // replays the roll-up from those totals; past the window numbers load
+  // settled — next-morning history must not pretend to move live.
+  const FRESH_MS = 4 * 3600_000; // kickoff + ~FT (incl. extra time) + ~1h
+  const totalsKey = `frc:totals:${slug}`;
+  const [seedTotals, setSeedTotals] = useState<Map<number, number> | null>(null);
+  useEffect(() => {
+    const adoptStoredTotals = () => {
+      try {
+        const raw = localStorage.getItem(totalsKey);
+        if (!raw) return;
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return;
+        const fresh = initialRows.some((r) =>
+          (r.lockedPicks ?? []).some(
+            (lp) =>
+              lp.status === 'finished' &&
+              Date.now() < Date.parse(lp.kickoffUtc) + FRESH_MS,
+          ),
+        );
+        if (!fresh) return;
+        const next = new Map<number, number>();
+        for (const r of initialRows) {
+          const v = (parsed as Record<string, unknown>)[String(r.entryId)];
+          if (typeof v === 'number' && Number.isFinite(v) && v < r.total) {
+            next.set(r.entryId, v);
+          }
+        }
+        if (next.size > 0) setSeedTotals(next);
+      } catch {
+        // unreadable snapshot — totals simply load settled
+      }
+    };
+    adoptStoredTotals();
+    // mount-only: initialRows is the server snapshot
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalsKey]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        totalsKey,
+        JSON.stringify(Object.fromEntries(rows.map((r) => [r.entryId, r.total]))),
+      );
+    } catch {
+      // storage unavailable — the arrival replay just won't happen next visit
+    }
+  }, [rows, totalsKey]);
+  // Own-exact celebration: one confetti burst per match per phone, whenever
+  // this user's exact score is first seen banked here — fresh or not (you
+  // earned it while asleep; you still get it once). Marker set is per league.
+  useEffect(() => {
+    const key = `frc:celebrated:${slug}`;
+    let seen: Set<number>;
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? '[]');
+      seen = new Set(Array.isArray(parsed) ? parsed.filter((n) => Number.isInteger(n)) : []);
+    } catch {
+      seen = new Set();
+    }
+    let fired = false;
+    const newlySeen: number[] = [];
+    for (const r of rows) {
+      if (r.userId !== meUserId) continue;
+      for (const lp of r.lockedPicks ?? []) {
+        if (
+          lp.status === 'finished' &&
+          lp.points?.breakdown &&
+          lp.points.breakdown.exact > 0 &&
+          !seen.has(lp.matchId)
+        ) {
+          newlySeen.push(lp.matchId);
+          if (!fired) {
+            burstConfetti();
+            fired = true;
+          }
+        }
+      }
+    }
+    if (newlySeen.length > 0) {
+      for (const id of newlySeen) seen.add(id);
+      try {
+        localStorage.setItem(key, JSON.stringify([...seen]));
+      } catch {
+        // storage unavailable — worst case the burst repeats next visit
+      }
+    }
+  }, [rows, slug, meUserId]);
   // Last seen totals — a change on a poll re-keys the row to flash it.
   const prevTotals = useRef<Map<number, number>>(
     new Map(initialRows.map((r) => [r.entryId, r.total])),
@@ -700,13 +790,14 @@ export default function LiveTable({
                     {/* One metric, one color: neutral zinc for everyone (the
                         medal system lives in the rank badge + row tint), with
                         emerald reserved for the signed-in user's own total. */}
-                    <span
-                      data-testid="row-total"
-                      className={`text-right text-base font-extrabold tabular-nums tracking-tight ${
-                        isMe ? 'text-emerald-400' : 'text-zinc-200'
-                      }`}
-                    >
-                      {formatPoints(r.total)}
+                    <span data-testid="row-total" className="inline-flex justify-end">
+                      <AnimatedTotal
+                        value={r.total}
+                        seedFrom={seedTotals?.get(r.entryId) ?? null}
+                        className={`text-right text-base font-extrabold tabular-nums tracking-tight ${
+                          isMe ? 'text-emerald-400' : 'text-zinc-200'
+                        }`}
+                      />
                     </span>
                     {/* Today's story under the season total: an emerald "+N"
                         while a matchday is live/scoring, silent on dead days —

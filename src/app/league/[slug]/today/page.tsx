@@ -4,6 +4,7 @@ import { nowMs } from '@/lib/clock';
 import { oddsForDisplay } from '@/lib/odds';
 import { canonicalScorer } from '@/lib/scoring';
 import { getMatchdayOverview, getTodayBoard } from '@/lib/services/today';
+import { computeMatchdayWrap, latestWrappableMatchday } from '@/lib/services/wrap';
 import { getLiveBoards } from '@/lib/services/live';
 import { squadDisplayNames } from '@/lib/services/squads';
 import { UNDERDOG_PROB_MAX } from '@/lib/sync/espn-sync';
@@ -18,6 +19,9 @@ import {
   pickSelectedEntry,
 } from '../_components/league-data';
 import CommissionerCard from '../_components/CommissionerCard';
+import WrapBanner from '../_components/WrapBanner';
+import Link from 'next/link';
+import { ne, or, isNotNull } from 'drizzle-orm';
 import type {
   BreakdownView,
   FirstTeam,
@@ -286,6 +290,45 @@ export default async function TodayPage({
 
   const liveBoards = getLiveBoards(db, league.id);
 
+  // Yesterday's wrap headline (current-day view only): the most recent fully
+  // finished day strictly before today, dismissible client-side per phone.
+  let wrapBanner: {
+    matchday: string;
+    winnerLabels: string[];
+    winnerPoints: number;
+  } | null = null;
+  if (overview.currentDay !== null && boardMatchday === overview.currentDay) {
+    const wrapDay = latestWrappableMatchday(db, overview.currentDay);
+    if (wrapDay !== null) {
+      const w = computeMatchdayWrap(db, league.id, wrapDay);
+      if (w && w.dayWinners.length > 0) {
+        wrapBanner = {
+          matchday: wrapDay,
+          winnerLabels: w.dayWinners.map((x) => x.label),
+          winnerPoints: w.dayWinners[0].total,
+        };
+      }
+    }
+  }
+
+  // "Road to the Final" entry point — once the bracket has anything to show
+  // (a knockout slot filled or a knockout result banked).
+  const showBracket =
+    db
+      .select({ id: schema.matches.id })
+      .from(schema.matches)
+      .where(
+        and(
+          ne(schema.matches.stage, 'group'),
+          or(
+            isNotNull(schema.matches.homeTeamId),
+            eq(schema.matches.status, 'finished'),
+          ),
+        ),
+      )
+      .limit(1)
+      .get() !== undefined;
+
   // Missing-picks radar: gaps on pickable days OTHER than the one on screen
   // (the header's "n/m picked" already owns the visible day). Deep-links to
   // the first day with a gap, preserving ?entry= for multi-entry users.
@@ -312,6 +355,27 @@ export default async function TodayPage({
   return (
     <div className="space-y-4">
       <LiveNow slug={slug} initial={liveBoards} serverNowMs={nowMs()} />
+      {wrapBanner ? (
+        <WrapBanner
+          slug={slug}
+          matchday={wrapBanner.matchday}
+          winnerLabels={wrapBanner.winnerLabels}
+          winnerPoints={wrapBanner.winnerPoints}
+        />
+      ) : null}
+      {showBracket ? (
+        <Link
+          href={`/league/${slug}/bracket`}
+          data-testid="bracket-link"
+          className="flex items-center justify-between gap-2 rounded-2xl border border-white/5 bg-zinc-900 px-3.5 py-2.5 text-[13px] font-bold text-zinc-200 transition-colors hover:bg-zinc-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span aria-hidden="true" className="text-base leading-none">🏆</span>
+            <span className="truncate">Road to the Final</span>
+          </span>
+          <span aria-hidden="true" className="shrink-0 text-zinc-500">→</span>
+        </Link>
+      ) : null}
       {entries.length > 1 && (
         <EntrySwitcher
           entries={entries.map((e) => ({ id: e.id, label: e.label }))}
@@ -320,6 +384,7 @@ export default async function TodayPage({
       )}
       {boardMatchday !== null && items.length > 0 ? (
         <TodayBoard
+          slug={slug}
           entryId={entry.id}
           dayNav={
             overview.currentDay !== null && boardMatchday !== null ? (

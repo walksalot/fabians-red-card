@@ -93,6 +93,8 @@ export interface TodayMatchView {
  */
 export interface LockedPickView {
   matchId: number;
+  /** Kickoff instant — drives the jackpot freshness window client-side. */
+  kickoffUtc: string;
   /** YYYY-MM-DD — names the matchday in the reveal header (it is often
       yesterday's, so "today's picks" would be a lie the morning after). */
   matchday: string;

@@ -1,0 +1,64 @@
+import { describe, expect, it } from 'vitest';
+import { createTestDb, schema, type Db } from '@/db';
+import { computeMatchdayWrap, latestWrappableMatchday } from '@/lib/services/wrap';
+
+/** Two finished matches on one day, three entries with varied outcomes. */
+function seed(db: Db) {
+  db.insert(schema.teams).values([
+    { id: 1, code: 'MEX', name: 'Mexico', groupLetter: 'A' },
+    { id: 2, code: 'ECU', name: 'Ecuador', groupLetter: 'F' },
+  ]).run();
+  db.insert(schema.matches).values([
+    { id: 1, stage: 'group', homeTeamId: 1, awayTeamId: 2, kickoffUtc: '2026-06-11T19:00:00Z', matchday: '2026-06-11', venue: 'V', city: 'C', status: 'finished', homeScore: 2, awayScore: 0 },
+    { id: 2, stage: 'group', homeTeamId: 2, awayTeamId: 1, kickoffUtc: '2026-06-11T22:00:00Z', matchday: '2026-06-11', venue: 'V', city: 'C', status: 'finished', homeScore: 1, awayScore: 1 },
+    { id: 3, stage: 'group', homeTeamId: 1, awayTeamId: 2, kickoffUtc: '2026-06-12T19:00:00Z', matchday: '2026-06-12', venue: 'V', city: 'C', status: 'scheduled' },
+  ]).run();
+  const userId = Number(db.insert(schema.users).values({ username: 'u', displayName: 'U', passwordHash: 'x', createdAt: 1 }).run().lastInsertRowid);
+  const leagueId = Number(db.insert(schema.leagues).values({ name: 'L', slug: 'l', inviteToken: 't', adminUserId: userId, createdAt: 1 }).run().lastInsertRowid);
+  const mk = (label: string) => Number(db.insert(schema.entries).values({ leagueId, userId, label, createdAt: 1 }).run().lastInsertRowid);
+  const a = mk('Ada'); const b = mk('Ben'); const c = mk('Cy');
+  const bd = (exact: number, outcome: number, total: number) =>
+    JSON.stringify({ exact, outcome, scorer: 0, firstTeam: 0, underdog: 0, base: exact + outcome, roundMultiplier: 1, boosterMultiplier: 1, total });
+  db.insert(schema.matchPoints).values([
+    // match 1: Ada exact (12), Ben outcome (2), Cy zero
+    { entryId: a, matchId: 1, breakdown: bd(10, 0, 12), total: 12 },
+    { entryId: b, matchId: 1, breakdown: bd(0, 2, 2), total: 2 },
+    { entryId: c, matchId: 1, breakdown: bd(0, 0, 0), total: 0 },
+    // match 2: only Ben called it (sole caller)
+    { entryId: a, matchId: 2, breakdown: bd(0, 0, 0), total: 0 },
+    { entryId: b, matchId: 2, breakdown: bd(0, 2, 2), total: 2 },
+    { entryId: c, matchId: 2, breakdown: bd(0, 0, 0), total: 0 },
+  ]).run();
+  return { leagueId, a, b, c };
+}
+
+describe('computeMatchdayWrap', () => {
+  it('crowns the day winner, finds the biggest haul, blanks and sole calls', () => {
+    const db = createTestDb();
+    const { leagueId, a, b, c } = seed(db);
+    const wrap = computeMatchdayWrap(db, leagueId, '2026-06-11')!;
+    expect(wrap.matchCount).toBe(2);
+    expect(wrap.dayWinners.map((w) => w.entryId)).toEqual([a]); // 12 pts
+    expect(wrap.biggestHaul).toMatchObject({ entryId: a, points: 12, matchId: 1 });
+    expect(wrap.blankedCount).toBe(1); // Cy
+    expect(wrap.exactCount).toBe(1);
+    expect(wrap.soleCalls).toEqual([
+      expect.objectContaining({ entryId: b, matchId: 2 }),
+    ]);
+    expect(wrap.dayTotals[0]).toMatchObject({ entryId: a, total: 12 });
+    void c;
+  });
+
+  it('returns null for a day with no finished matches', () => {
+    const db = createTestDb();
+    const { leagueId } = seed(db);
+    expect(computeMatchdayWrap(db, leagueId, '2026-06-12')).toBeNull();
+  });
+
+  it('latestWrappableMatchday skips partially-finished days and days at/after the cutoff', () => {
+    const db = createTestDb();
+    seed(db);
+    expect(latestWrappableMatchday(db, '2026-06-12')).toBe('2026-06-11');
+    expect(latestWrappableMatchday(db, '2026-06-11')).toBeNull();
+  });
+});

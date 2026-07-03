@@ -1,4 +1,6 @@
 import EmptyState from '@/components/EmptyState';
+import LeaguePicksReveal from './LeaguePicksReveal';
+import WrapCard, { type WrapCardView } from './WrapCard';
 import { BreakdownChips, breakdownChips } from './breakdown-chips';
 import { codeToFlagEmoji, shortTeamName } from './flags';
 import { STAGE_LABELS, formatMatchday, formatPoints } from './format';
@@ -57,7 +59,15 @@ function HistoryTeam({
   );
 }
 
-function HistoryItem({ item }: { item: HistoryItemView }) {
+function HistoryItem({
+  item,
+  slug,
+  myEntryId,
+}: {
+  item: HistoryItemView;
+  slug: string;
+  myEntryId: number;
+}) {
   const chips = item.breakdown ? breakdownChips(item.breakdown) : null;
   const first = firstTeamLabel(item);
   const scored = item.total !== null && item.total > 0;
@@ -132,11 +142,25 @@ function HistoryItem({ item }: { item: HistoryItemView }) {
           <BreakdownChips breakdown={item.breakdown} />
         </div>
       )}
+
+      {/* "Who picked what" — same reveal Today's kicked-off cards carry. */}
+      <LeaguePicksReveal slug={slug} matchId={item.matchId} myEntryId={myEntryId} />
     </div>
   );
 }
 
-export default function HistoryList({ groups }: { groups: HistoryDayView[] }) {
+export default function HistoryList({
+  groups,
+  slug,
+  myEntryId,
+  wraps = {},
+}: {
+  groups: HistoryDayView[];
+  slug: string;
+  myEntryId: number;
+  /** Matchday Wrap per day (keyed YYYY-MM-DD) — rendered atop its group. */
+  wraps?: Record<string, WrapCardView>;
+}) {
   if (groups.length === 0) {
     return (
       <EmptyState
@@ -179,8 +203,16 @@ export default function HistoryList({ groups }: { groups: HistoryDayView[] }) {
               </span>
             </div>
             <div className="space-y-3">
+              {wraps[group.matchday] ? (
+                <WrapCard wrap={wraps[group.matchday]} />
+              ) : null}
               {group.items.map((item) => (
-                <HistoryItem key={item.matchId} item={item} />
+                <HistoryItem
+                  key={item.matchId}
+                  item={item}
+                  slug={slug}
+                  myEntryId={myEntryId}
+                />
               ))}
             </div>
           </section>
