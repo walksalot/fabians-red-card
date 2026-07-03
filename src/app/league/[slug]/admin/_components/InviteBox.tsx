@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useSyncExternalStore } from 'react';
+import CalendarCard from '../../_components/CalendarCard';
 
 interface Props {
   inviteToken: string;
@@ -60,6 +61,11 @@ export default function InviteBox({ inviteToken, memberCount }: Props) {
         <span className="font-semibold text-zinc-100">{memberCount}</span>{' '}
         {memberCount === 1 ? 'member' : 'members'} in this league
       </p>
+      {/* Kickoff-reminder feed, group-chat-paste flavor — the calendar has
+          existed since launch; this is its first link in the UI. */}
+      <div className="border-t border-white/5 pt-3">
+        <CalendarCard compact />
+      </div>
     </div>
   );
 }

@@ -185,6 +185,8 @@ export function getSchedule(db: Db): ScheduleItem[] {
 export interface MatchdaySummary {
   matchday: string;
   matchCount: number;
+  /** Matches whose teams are both known — the only ones a pick can exist on. */
+  pickableCount: number;
   /** This entry's saved picks on the day. */
   pickedCount: number;
   boosterArmed: boolean;
@@ -251,6 +253,9 @@ export function getMatchdayOverview(
     .map(([matchday, matches]) => ({
       matchday,
       matchCount: matches.length,
+      pickableCount: matches.filter(
+        (m) => m.homeTeamId !== null && m.awayTeamId !== null,
+      ).length,
       pickedCount: matches.filter((m) => picks.has(m.id)).length,
       boosterArmed: boosters.has(matchday),
       firstKickoffUtc: matches[0]!.kickoffUtc,

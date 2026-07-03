@@ -323,14 +323,52 @@ function LockedPicksPanel({
   );
 }
 
-/** Friendly easter egg: the league's red card sits with last place. */
+/**
+ * The league's red card sits with last place — now pulled from the referee's
+ * pocket (entrance animation) and tappable for the jab the app is named
+ * after. Pure theatrics: a span-based tooltip, no layout shift, no data.
+ */
 function LastPlaceCard() {
+  const [jab, setJab] = useState(0);
+  useEffect(() => {
+    if (jab === 0) return;
+    const id = setTimeout(() => setJab(0), 1800);
+    return () => clearTimeout(id);
+  }, [jab]);
+  // The whole row behind this is already a <button> (expand/collapse), so
+  // the card must NOT be a nested button — a focusable span keeps the HTML
+  // valid while stopPropagation keeps the jab from toggling the picks panel.
+  const poke = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setJab((j) => j + 1);
+  };
   return (
-    <span
-      aria-hidden="true"
-      title="Holding the red card"
-      className="ml-1 inline-block h-3 w-2.5 shrink-0 rotate-6 rounded-[2px] bg-gradient-to-br from-brand-bright to-brand-deep"
-    />
+    <span className="relative inline-flex shrink-0">
+      <span
+        role="button"
+        tabIndex={0}
+        data-testid="red-card-jab"
+        aria-label="Holding the red card — don't be that guy"
+        onClick={poke}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') poke(e);
+        }}
+        // key restarts the wobble on every repeat tap
+        key={`card-${jab}`}
+        className={`ml-1 inline-block h-3 w-2.5 origin-bottom cursor-pointer rounded-[2px] bg-gradient-to-br from-brand-bright to-brand-deep focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 ${
+          jab > 0 ? 'animate-card-wobble' : 'animate-card-pull'
+        }`}
+      />
+      {jab > 0 ? (
+        <span
+          role="status"
+          className="absolute -top-8 right-0 z-10 whitespace-nowrap rounded-lg bg-zinc-950 px-2 py-1 text-[10px] font-bold text-brand-bright shadow-lg ring-1 ring-inset ring-brand/40 animate-pop-in"
+        >
+          Don&apos;t be that guy 🟥
+        </span>
+      ) : null}
+    </span>
   );
 }
 

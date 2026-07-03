@@ -72,9 +72,13 @@ function TabIcon({ tab, active }: { tab: TabKey; active: boolean }) {
 /**
  * Fixed bottom navigation for league pages. Pair with `pb-24` on the page content.
  * `slug` is optional — when omitted it is derived from the current
- * `/league/<slug>/...` pathname.
+ * `/league/<slug>/...` pathname. `todayAlert` puts a small amber dot on the
+ * Today tab (missing-picks radar) — display only, computed server-side.
  */
-export function TabBar({ slug: slugProp }: { slug?: string } = {}) {
+export function TabBar({
+  slug: slugProp,
+  todayAlert = false,
+}: { slug?: string; todayAlert?: boolean } = {}) {
   const pathname = usePathname();
   const slug = slugProp ?? /^\/league\/([^/]+)/.exec(pathname)?.[1];
   if (!slug) return null;
@@ -104,8 +108,17 @@ export function TabBar({ slug: slugProp }: { slug?: string } = {}) {
                   active ? 'opacity-100' : 'opacity-0'
                 }`}
               />
-              <span className="transition-transform duration-150 group-active:scale-90">
+              <span className="relative transition-transform duration-150 group-active:scale-90">
                 <TabIcon tab={tab.key} active={active} />
+                {/* Missing-picks nag — amber (urgency), never emerald (the
+                    active-tab color) so the dot can't read as selection. */}
+                {tab.key === 'today' && todayAlert ? (
+                  <span
+                    data-testid="today-alert-dot"
+                    aria-label="You have unpicked matches"
+                    className="absolute -right-1 -top-0.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-zinc-950"
+                  />
+                ) : null}
               </span>
               <span className={active ? 'font-semibold' : ''}>{tab.label}</span>
             </Link>

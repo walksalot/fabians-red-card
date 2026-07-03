@@ -23,7 +23,22 @@ export default function LiveNow({
   const [boards, setBoards] = useState<LiveBoard[]>(initial);
   const [open, setOpen] = useState<Record<number, boolean>>({});
   const failures = useRef(0);
-
+  // GOAL detection: previous poll's goal totals per match. A poll that raises
+  // a total bumps the flash counter, which re-keys the score span so the
+  // goal-pop/goal-flash animations restart. First render never animates.
+  const prevTotals = useRef<Map<number, number>>(
+    new Map(initial.map((b) => [b.matchId, b.liveHome + b.liveAway])),
+  );
+  const [goalFlash, setGoalFlash] = useState<Record<number, number>>({});
+  // Client clock for the freshness stamp — ticking state keeps render pure
+  // (and hydration-safe: the stamp only appears after mount).
+  const [nowVal, setNowVal] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = () => setNowVal(Date.now());
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
@@ -36,7 +51,22 @@ export default function LiveNow({
           .json()
           .catch(() => null);
         if (!cancelled && json?.ok && json.data) {
-          setBoards(json.data.boards);
+          const fresh = json.data.boards;
+          const bumps: number[] = [];
+          for (const b of fresh) {
+            const total = b.liveHome + b.liveAway;
+            const prev = prevTotals.current.get(b.matchId);
+            if (prev !== undefined && total > prev) bumps.push(b.matchId);
+            prevTotals.current.set(b.matchId, total);
+          }
+          if (bumps.length > 0) {
+            setGoalFlash((f) => {
+              const next = { ...f };
+              for (const id of bumps) next[id] = (next[id] ?? 0) + 1;
+              return next;
+            });
+          }
+          setBoards(fresh);
           failures.current = 0;
         }
       } catch {
@@ -73,6 +103,18 @@ export default function LiveNow({
     <div className="space-y-2" data-testid="live-now">
       {boards.map((b) => {
         const expanded = open[b.matchId] ?? false;
+        const flashKey = goalFlash[b.matchId] ?? 0;
+        // Feed freshness for the caption line. Amber past ~3 minutes.
+        const feedAgeMs =
+          b.liveUpdatedAt !== null && nowVal !== null
+            ? Math.max(0, nowVal - b.liveUpdatedAt)
+            : null;
+        const feedAgeLabel =
+          feedAgeMs === null
+            ? null
+            : feedAgeMs < 60_000
+              ? `${Math.max(5, Math.round(feedAgeMs / 5000) * 5)}s ago`
+              : `${Math.round(feedAgeMs / 60_000)}m ago`;
         return (
           <div
             key={b.matchId}
@@ -83,7 +125,11 @@ export default function LiveNow({
               data-testid={`live-now-toggle-${b.matchId}`}
               aria-expanded={expanded}
               onClick={() => setOpen((o) => ({ ...o, [b.matchId]: !expanded }))}
-              className="flex min-h-12 w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors hover:bg-zinc-800/60"
+              // key restarts the brand-red goal wash each time a goal lands
+              key={`hdr-${flashKey}`}
+              className={`flex min-h-12 w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors hover:bg-zinc-800/60 ${
+                flashKey > 0 ? 'animate-goal-flash' : ''
+              }`}
             >
               <span className="relative flex h-2 w-2 shrink-0">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-75" />
@@ -93,7 +139,12 @@ export default function LiveNow({
                 <span className="block truncate text-sm font-semibold text-zinc-100">
                   <span aria-hidden="true">{codeToFlagEmoji(b.homeCode) ?? ''}</span>{' '}
                   {b.homeCode ?? b.homeName}{' '}
-                  <span className="font-display font-bold text-brand-bright tabular-nums">
+                  <span
+                    key={`score-${flashKey}`}
+                    className={`inline-block font-display font-bold text-brand-bright tabular-nums ${
+                      flashKey > 0 ? 'animate-goal-pop' : ''
+                    }`}
+                  >
                     {b.hasLiveData ? `${b.liveHome}–${b.liveAway}` : 'LIVE'}
                   </span>{' '}
                   {b.awayCode ?? b.awayName}{' '}
@@ -111,6 +162,20 @@ export default function LiveNow({
                 </span>
                 <span className="block text-[11px] font-medium text-zinc-500">
                   Who&apos;s scoring right now — if it ended now
+                  {feedAgeLabel ? (
+                    <>
+                      {' · '}
+                      <span
+                        className={
+                          feedAgeMs !== null && feedAgeMs > 3 * 60_000
+                            ? 'text-amber-300'
+                            : undefined
+                        }
+                      >
+                        updated {feedAgeLabel}
+                      </span>
+                    </>
+                  ) : null}
                 </span>
               </span>
               <svg
