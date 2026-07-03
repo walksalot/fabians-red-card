@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildBracket, type BracketMatchRow, type BracketTeamRef } from '@/lib/bracket';
+import {
+  buildBracket,
+  feederMapFromFixtures,
+  type BracketMatchRow,
+  type BracketTeamRef,
+  type FeederMap,
+} from '@/lib/bracket';
 
 const TEAMS = new Map<number, BracketTeamRef>([
   [1, { id: 1, code: 'MEX', name: 'Mexico' }],
@@ -94,6 +100,83 @@ describe('buildBracket', () => {
     expect(tie.home.lost).toBe(false);
     expect(tie.away.won).toBe(false);
     expect(tie.away.lost).toBe(false);
+  });
+
+  it('keeps feeders and pens inference when auto-fill erased the placeholders', () => {
+    // Production behavior: setMatchTeams NULLs home/away placeholders as it
+    // fills team ids, which used to orphan the connectors. The fixtures-derived
+    // feeder map is the fallback wiring.
+    const feederMap: FeederMap = new Map([
+      [
+        89,
+        [
+          { match: 74, losers: false },
+          { match: 77, losers: false },
+        ] as const,
+      ],
+    ]);
+    const nodes = buildBracket(
+      [
+        row({ id: 74, stage: 'r32', status: 'finished', homeTeamId: 5, awayTeamId: 6, homeScore: 1, awayScore: 1 }),
+        row({ id: 77, stage: 'r32', status: 'finished', homeTeamId: 1, awayTeamId: 2, homeScore: 2, awayScore: 0 }),
+        // Both slots filled, both placeholders gone — the broken-in-prod shape.
+        row({ id: 89, stage: 'r16', homeTeamId: 6, awayTeamId: 1 }),
+      ],
+      TEAMS,
+      undefined,
+      feederMap,
+    );
+    const child = nodes.find((n) => n.matchId === 89)!;
+    expect(child.feeders).toEqual([74, 77]);
+    // Filled slots pin possible codes to the actual teams, not the feeders' losers.
+    expect([...child.possibleCodes].sort()).toEqual(['MEX', 'PAR']);
+    // Pens winner still inferred through the map: Paraguay advanced, Germany out.
+    const tie = nodes.find((n) => n.matchId === 74)!;
+    expect(tie.decidedOnPens).toBe(true);
+    expect(tie.away.won).toBe(true);
+    expect(tie.home.lost).toBe(true);
+  });
+
+  it('derives the feeder map from fixtures rows', () => {
+    const map = feederMapFromFixtures([
+      { n: 74, home: 'Group E winners', away: '3rd Group A/B/C/D/F' },
+      { n: 89, home: 'Winners Match 74', away: 'Winners Match 77' },
+      { n: 103, home: 'Losers Match 101', away: 'Losers Match 102' },
+      { n: 104, home: 'Winners Match 101', away: 'Winners Match 102' },
+    ]);
+    expect(map.get(74)).toBeUndefined(); // group-sourced: no knockout feeders
+    expect(map.get(89)).toEqual([
+      { match: 74, losers: false },
+      { match: 77, losers: false },
+    ]);
+    expect(map.get(103)).toEqual([
+      { match: 101, losers: true },
+      { match: 102, losers: true },
+    ]);
+    expect(map.get(104)).toEqual([
+      { match: 101, losers: false },
+      { match: 102, losers: false },
+    ]);
+  });
+
+  it('third-place (losers) feed never counts as advancement for a tied semifinal', () => {
+    // SF 101 goes to pens; both the final (104) and third-place tie (103) are
+    // auto-filled. Only the FINAL identifies the semifinal winner — the
+    // third-place teams are the losers and must not mark anyone as advanced.
+    const nodes = buildBracket(
+      [
+        row({ id: 101, stage: 'sf', status: 'finished', homeTeamId: 5, awayTeamId: 6, homeScore: 2, awayScore: 2 }),
+        row({ id: 102, stage: 'sf', status: 'finished', homeTeamId: 1, awayTeamId: 3, homeScore: 1, awayScore: 0 }),
+        row({ id: 103, stage: 'third', homeTeamId: 5, awayTeamId: 3, homePlaceholder: 'Losers Match 101', awayPlaceholder: 'Losers Match 102' }),
+        row({ id: 104, stage: 'final', homeTeamId: 6, awayTeamId: 1, homePlaceholder: 'Winners Match 101', awayPlaceholder: 'Winners Match 102' }),
+      ],
+      TEAMS,
+    );
+    const sf = nodes.find((n) => n.matchId === 101)!;
+    expect(sf.decidedOnPens).toBe(true);
+    expect(sf.away.won).toBe(true); // Paraguay reached the final
+    expect(sf.home.lost).toBe(true); // Germany plays the third-place tie
+    expect(sf.home.won).toBe(false);
   });
 
   it('orders by stage then kickoff and marks live matches', () => {

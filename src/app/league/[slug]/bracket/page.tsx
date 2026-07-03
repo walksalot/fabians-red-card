@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { schema } from '@/db';
 import { nowMs } from '@/lib/clock';
-import { buildBracket, type BracketTeamRef } from '@/lib/bracket';
+import { buildBracket, feederMapFromFixtures, type BracketTeamRef } from '@/lib/bracket';
+import fixtures from '../../../../../data/fixtures.json';
 import { resolveCurrentMatchday } from '@/lib/services/today';
 import { loadLeagueContext } from '../_components/league-data';
 import BracketTree from '../_components/BracketTree';
@@ -29,7 +30,9 @@ export default async function BracketPage({
       .all()
       .map((t) => [t.id, t]),
   );
-  const nodes = buildBracket(all, teams);
+  // The DB erases "Winners Match N" placeholders as slots fill; the fixtures
+  // file is the immutable wiring, so connectors survive team auto-fill.
+  const nodes = buildBracket(all, teams, undefined, feederMapFromFixtures(fixtures));
   const currentDay = resolveCurrentMatchday(all, nowMs());
 
   return (

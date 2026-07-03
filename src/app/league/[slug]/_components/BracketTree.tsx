@@ -185,6 +185,8 @@ export default function BracketTree({
     return code;
   };
 
+  const followedName = followed !== null ? nameOf(followed) : null;
+
   return (
     <div>
       {chips.length > 1 ? (
@@ -194,8 +196,12 @@ export default function BracketTree({
             <span className="font-bold text-zinc-200">Tap a team</span> to light
             up their road to the final.
           </p>
-          <div className="mb-4 grid grid-cols-2 gap-1.5">
-            {chips.slice(0, 16).map((code) => {
+          <div
+            className="-mx-4 mb-1 flex gap-1.5 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            role="group"
+            aria-label="Follow a team"
+          >
+            {chips.map((code) => {
               const on = followed === code;
               return (
                 <button
@@ -203,19 +209,30 @@ export default function BracketTree({
                   type="button"
                   data-testid={`follow-${code}`}
                   aria-pressed={on}
+                  aria-label={`Follow ${nameOf(code)}`}
                   onClick={() => setFollowed(on ? null : code)}
-                  className={`flex min-h-10 items-center justify-center gap-1.5 rounded-full border px-2 text-xs font-bold transition-colors ${
+                  className={`flex min-h-10 flex-none items-center gap-1.5 rounded-full border px-3 text-xs font-bold transition-colors ${
                     on
                       ? 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300'
                       : 'border-white/[0.07] bg-zinc-900 text-zinc-300 hover:bg-zinc-800/70'
                   } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60`}
                 >
-                  <span aria-hidden="true">{codeToFlagEmoji(code) ?? ''}</span>
-                  <span className="truncate">{nameOf(code)}</span>
+                  <span aria-hidden="true" className="text-sm leading-none">
+                    {codeToFlagEmoji(code) ?? ''}
+                  </span>
+                  <span>{code}</span>
                 </button>
               );
             })}
           </div>
+          <p
+            className="mb-3 min-h-4 text-[11px] font-semibold text-emerald-300/90"
+            aria-live="polite"
+          >
+            {followedName !== null
+              ? `Following ${followedName} — tap again to clear`
+              : ' '}
+          </p>
         </>
       ) : null}
 
@@ -238,6 +255,19 @@ export default function BracketTree({
                   .filter((n): n is BracketNode => n !== undefined);
                 const childHit =
                   followed !== null && child.possibleCodes.includes(followed);
+                // No resolvable feeders (data gap): render the game alone
+                // rather than an empty column with a dangling connector.
+                if (feeders.length === 0) {
+                  return (
+                    <NodeCard
+                      key={child.matchId}
+                      node={child}
+                      slug={slug}
+                      currentDay={currentDay}
+                      followed={followed}
+                    />
+                  );
+                }
                 return (
                   <div
                     key={child.matchId}
