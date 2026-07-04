@@ -42,7 +42,21 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev -- --port 3100',
+    // CI runs the PRODUCTION server against the bundle built by a prior
+    // workflow step: `next dev`'s router can come up poisoned on loaded
+    // runners — a deep API route 404ing (Next's own HTML page) for the
+    // server's whole life; trace-verified across five red runs. The built
+    // server's static route table makes that impossible, and CI then tests
+    // the same artifact Railway ships. Locally, dev keeps iteration fast.
+    // Seeding must precede `next start`: the boot hook opens and CACHES the
+    // SQLite handle (instrumentation heal step), and the seed scripts DELETE
+    // the db files — reseeding after boot would leave the server serving the
+    // unlinked pre-seed file. global-setup skips its reseed on CI for the
+    // same reason. Dev is unaffected: instrumentation compiles lazily there,
+    // after global-setup has seeded.
+    command: process.env.CI
+      ? 'node scripts/seed-e2e.mjs && node scripts/seed-e2e2.mjs && npm run start -- --port 3100'
+      : 'npm run dev -- --port 3100',
     port: 3100,
     reuseExistingServer: false,
     timeout: 120_000,
