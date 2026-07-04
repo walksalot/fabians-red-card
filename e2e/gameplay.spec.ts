@@ -25,8 +25,15 @@ async function login(page: Page, username: string, password: string) {
   await page.goto('/login');
   await page.getByTestId('auth-username').fill(username);
   await page.getByTestId('auth-password').fill(password);
-  await page.getByTestId('auth-submit').click();
-  await expect(page).toHaveURL(/\/league\/fabians-red-card\/today/);
+  // Retry the submit: `next dev` under CI load can transiently answer an API
+  // POST with its router 404 page even for a compiled route (trace-verified
+  // — text/html "This page could not be found", session valid). Production
+  // runs a built server with a static route table and cannot do this, so
+  // the retry mirrors what a human does: tap the button again.
+  await expect(async () => {
+    await page.getByTestId('auth-submit').click();
+    await expect(page).toHaveURL(/\/league\/fabians-red-card\/today/, { timeout: 10_000 });
+  }).toPass({ timeout: 60_000 });
 }
 
 test.describe('mid-tournament gameplay (mobile dark)', () => {
@@ -220,9 +227,14 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     const admin = await adminContext.newPage();
     await login(admin, 'admin', 'e2e-admin-pass');
     await admin.goto('/league/fabians-red-card/admin');
-    await admin.getByTestId('member-reset-victor').click();
     const linkBox = admin.getByTestId('reset-link-box');
-    await expect(linkBox).toBeVisible();
+    // Same dev-router-404 retry as login() — this exact POST drew the Next
+    // dev 404 page four times on loaded CI runners. Re-clicking issues a
+    // fresh one-time link, which is exactly what an admin would do.
+    await expect(async () => {
+      await admin.getByTestId('member-reset-victor').click();
+      await expect(linkBox).toBeVisible({ timeout: 10_000 });
+    }).toPass({ timeout: 60_000 });
     const url = await linkBox.locator('input').inputValue();
     expect(url).toContain('/reset/');
     await adminContext.close();
