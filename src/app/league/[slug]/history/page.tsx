@@ -176,7 +176,11 @@ export default async function HistoryPage({
       winners: w.dayWinners.map((x) => ({ label: x.label, total: x.total })),
       biggest: w.biggestHaul
         ? {
-            labels: w.biggestHaul.holders.map((h) => h.label),
+            // Dedupe by entry: one entry can top MULTIPLE matches in a day
+            // (holders is per entry/match pair) and must be named once.
+            labels: [
+              ...new Map(w.biggestHaul.holders.map((h) => [h.entryId, h.label])).values(),
+            ],
             points: w.biggestHaul.points,
             fixtures: [...new Set(w.biggestHaul.holders.map((h) => h.matchId))].map(
               fixtureLabel,
