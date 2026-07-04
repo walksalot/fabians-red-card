@@ -61,7 +61,10 @@ jobs:
   e2e:
     name: E2E (mobile journey + gameplay)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Must exceed both suites' globalTimeout (12 min each, worst case) plus
+    # installs/browser download, so Playwright's cap — which preserves failure
+    # traces — always fires before the job-level kill, which would not.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
