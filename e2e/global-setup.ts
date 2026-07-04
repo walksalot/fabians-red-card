@@ -48,6 +48,11 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     `${league}/profile`,
     `${league}/rules`,
     `${league}/admin`,
+    // API route modules compile on first request too — and a POST-only route
+    // still compiles from a GET (it 405s AFTER compiling). The reset-link
+    // route's first-ever hit lands mid-suite and flaked 404 three times on
+    // loaded CI runners (dev server race on cold dynamic API routes).
+    '/api/leagues/fabians-red-card/members/1/reset-link',
   ]) {
     try {
       await fetch(`${baseURL}${route}`);

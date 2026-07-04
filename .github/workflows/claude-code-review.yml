@@ -11,12 +11,18 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    # ready_for_review: draft-first PRs get their review when marked ready
+    # (the job guard skips drafts, so opened/synchronize alone would leave
+    # them permanently unreviewed).
+    types: [opened, synchronize, ready_for_review]
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
+  # The action's default GitHub App auth exchanges a GitHub OIDC token;
+  # without id-token the exchange fails (and continue-on-error would hide it).
+  id-token: write
 
 concurrency:
   group: claude-review-${{ github.ref }}
