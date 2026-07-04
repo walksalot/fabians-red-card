@@ -22,8 +22,16 @@ export interface MatchdayWrap {
   dayTotals: WrapEntryDay[];
   /** Highest day total (may be shared). */
   dayWinners: WrapEntryDay[];
-  /** Biggest single-match haul of the day. */
-  biggestHaul: { entryId: number; label: string; points: number; matchId: number } | null;
+  /**
+   * Biggest single-match haul of the day — EVERY entry/match pair that hit
+   * the top number, not an arbitrary first-seen one. Ties are the norm here
+   * (a popular exact score pays everyone the same), so crediting one entry
+   * would invent a winner. Holders sorted by entryId then matchId.
+   */
+  biggestHaul: {
+    points: number;
+    holders: Array<{ entryId: number; label: string; matchId: number }>;
+  } | null;
   /** Entries that banked zero across the whole day (only when they had picks to make). */
   blankedCount: number;
   exactCount: number;
@@ -74,20 +82,24 @@ export function computeMatchdayWrap(
     .all();
 
   const totals = new Map<number, number>(entries.map((e) => [e.id, 0]));
-  let biggest: MatchdayWrap['biggestHaul'] = null;
+  let bestPoints = 0;
+  let bestHolders: Array<{ entryId: number; label: string; matchId: number }> = [];
   let exactCount = 0;
   /** matchId -> entryIds that got the result right (exact or outcome). */
   const callers = new Map<number, number[]>();
 
   for (const p of points) {
     totals.set(p.entryId, (totals.get(p.entryId) ?? 0) + p.total);
-    if (biggest === null || p.total > biggest.points) {
-      biggest = {
+    if (p.total > 0 && p.total >= bestPoints) {
+      if (p.total > bestPoints) {
+        bestPoints = p.total;
+        bestHolders = [];
+      }
+      bestHolders.push({
         entryId: p.entryId,
         label: labelOf.get(p.entryId) ?? '?',
-        points: p.total,
         matchId: p.matchId,
-      };
+      });
     }
     let bd: PointsBreakdown | null = null;
     try {
@@ -125,6 +137,7 @@ export function computeMatchdayWrap(
     }
   }
   soleCalls.sort((a, b) => a.matchId - b.matchId);
+  bestHolders.sort((a, b) => a.entryId - b.entryId || a.matchId - b.matchId);
 
   return {
     matchday,
@@ -132,7 +145,7 @@ export function computeMatchdayWrap(
     entryCount: entries.length,
     dayTotals,
     dayWinners,
-    biggestHaul: biggest && biggest.points > 0 ? biggest : null,
+    biggestHaul: bestHolders.length > 0 ? { points: bestPoints, holders: bestHolders } : null,
     blankedCount,
     exactCount,
     soleCalls,
