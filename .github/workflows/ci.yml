@@ -77,7 +77,12 @@ jobs:
         run: npm ci
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
-      # Two suites, two dev servers (ports 3100/3200) — the configs document
+      # On CI the Playwright configs boot `next start` from this build —
+      # the production artifact, with a static route table (see the webServer
+      # comment in playwright.config.ts for the dev-router failure history).
+      - name: Build production bundle for the e2e servers
+        run: npm run build
+      # Two suites, two servers (ports 3100/3200) — the configs document
       # they must never run concurrently, so keep them as sequential steps.
       # --trace retain-on-failure: without it Playwright captures nothing and
       # a CI-only failure is undebuggable (the configs leave tracing off for

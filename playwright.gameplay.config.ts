@@ -30,7 +30,10 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev -- --port 3200',
+    // Production server on CI, dev locally — see playwright.config.ts.
+    command: process.env.CI
+      ? 'npm run start -- --port 3200'
+      : 'npm run dev -- --port 3200',
     port: 3200,
     reuseExistingServer: false,
     timeout: 120_000,

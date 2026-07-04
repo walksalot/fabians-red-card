@@ -42,7 +42,15 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npm run dev -- --port 3100',
+    // CI runs the PRODUCTION server against the bundle built by a prior
+    // workflow step: `next dev`'s router can come up poisoned on loaded
+    // runners — a deep API route 404ing (Next's own HTML page) for the
+    // server's whole life; trace-verified across five red runs. The built
+    // server's static route table makes that impossible, and CI then tests
+    // the same artifact Railway ships. Locally, dev keeps iteration fast.
+    command: process.env.CI
+      ? 'npm run start -- --port 3100'
+      : 'npm run dev -- --port 3100',
     port: 3100,
     reuseExistingServer: false,
     timeout: 120_000,
