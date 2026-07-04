@@ -1,0 +1,68 @@
+# Automatic PR review by Claude (pinned to Fable 5) — the league's preferred
+# reviewer. Advisory by design: it can never block a merge or a deploy.
+#
+#   - Requires the ANTHROPIC_API_KEY repository secret (Settings → Secrets and
+#     variables → Actions). Until it exists, every step below SKIPS and the
+#     check stays green — no red X, no blocked Railway deploy.
+#   - Forked PRs don't receive secrets (GitHub safeguard), so those skip too.
+#   - continue-on-error keeps an API blip from ever failing the check: this
+#     job is a reviewer, not a gate. The three ci.yml checks remain the gate.
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: claude-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  claude-review:
+    name: Review by Claude (Fable 5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ !github.event.pull_request.draft }}
+    steps:
+      # secrets aren't readable in a job-level `if`, so surface presence here
+      # and gate the real steps on it — absence means skip, never fail.
+      - name: Check for ANTHROPIC_API_KEY
+        id: key
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: echo "present=$HAS_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: steps.key.outputs.present == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Claude review
+        if: steps.key.outputs.present == 'true'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this pull request as a senior engineer on a LIVE World Cup
+            prediction-pool app with real wagers riding on it. Read CLAUDE.md /
+            AGENTS.md first and honor them. Priorities, in order:
+            1. Correctness bugs — especially anything that could alter scoring,
+               points, standings, picks, or stored league data. Feature work is
+               expected to be display-only; flag ANY write-path or schema drift.
+            2. Data-integrity and concurrency hazards (SQLite, the 60s ESPN
+               auto-sync tick, server actions).
+            3. Security issues (auth, session handling, injection, secrets).
+            4. Test gaps for the specific change; flaky-test risk on slow CI.
+            5. Mobile UX regressions (the league plays on phones) and
+               accessibility, including prefers-reduced-motion parity.
+            Be concrete: cite file:line, describe the failure scenario, and
+            keep style nitpicks out unless they hide a bug. If everything is
+            sound, say so briefly.
+          claude_args: --model claude-fable-5
