@@ -11,7 +11,8 @@ export interface WrapCardView {
   matchCount: number;
   entryCount: number;
   winners: Array<{ label: string; total: number }>;
-  biggest: { label: string; points: number; fixture: string } | null;
+  /** Top single-match haul: every holder (ties are common), 1+ fixtures. */
+  biggest: { labels: string[]; points: number; fixtures: string[] } | null;
   exactCount: number;
   blankedCount: number;
   soleCalls: Array<{ label: string; fixture: string }>;
@@ -103,8 +104,21 @@ export default function WrapCard({ wrap }: { wrap: WrapCardView }) {
               <RowIcon kind="burst" />
             </span>
             <span className="min-w-0 flex-1 truncate text-zinc-400">
-              Biggest haul — <span className="font-semibold text-zinc-100">{wrap.biggest.label}</span>{' '}
-              on <span className="score-token">{wrap.biggest.fixture}</span>
+              Biggest haul —{' '}
+              <span className="font-semibold text-zinc-100">
+                {/* Ties are the norm (a popular exact score pays everyone the
+                    same), so name one, name two, or count the crowd — echoing
+                    the hero line's "shared the day" voice. */}
+                {wrap.biggest.labels.length <= 2
+                  ? wrap.biggest.labels.join(' & ')
+                  : `shared by ${wrap.biggest.labels.length}`}
+              </span>{' '}
+              on{' '}
+              {wrap.biggest.fixtures.length === 1 ? (
+                <span className="score-token">{wrap.biggest.fixtures[0]}</span>
+              ) : (
+                `${wrap.biggest.fixtures.length} games`
+              )}
             </span>
             <span className="shrink-0 font-bold tabular-nums text-zinc-200">
               +{formatPoints(wrap.biggest.points)}

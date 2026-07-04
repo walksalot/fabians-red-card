@@ -39,7 +39,10 @@ describe('computeMatchdayWrap', () => {
     const wrap = computeMatchdayWrap(db, leagueId, '2026-06-11')!;
     expect(wrap.matchCount).toBe(2);
     expect(wrap.dayWinners.map((w) => w.entryId)).toEqual([a]); // 12 pts
-    expect(wrap.biggestHaul).toMatchObject({ entryId: a, points: 12, matchId: 1 });
+    expect(wrap.biggestHaul).toEqual({
+      points: 12,
+      holders: [expect.objectContaining({ entryId: a, matchId: 1 })],
+    });
     expect(wrap.blankedCount).toBe(1); // Cy
     expect(wrap.exactCount).toBe(1);
     expect(wrap.soleCalls).toEqual([
@@ -47,6 +50,52 @@ describe('computeMatchdayWrap', () => {
     ]);
     expect(wrap.dayTotals[0]).toMatchObject({ entryId: a, total: 12 });
     void c;
+  });
+
+  it('a tied biggest haul credits EVERY holder, not the first row scanned', () => {
+    // The live-league bug: ~10 entries hit the same top haul on one match and
+    // the wrap named a single arbitrary entry. All holders must be reported.
+    const db = createTestDb();
+    const { leagueId, a, b, c } = seed(db);
+    db.delete(schema.matchPoints).run();
+    const bd = JSON.stringify({ exact: 10, outcome: 0, scorer: 0, firstTeam: 0, underdog: 0, base: 10, roundMultiplier: 1, boosterMultiplier: 1, total: 12 });
+    db.insert(schema.matchPoints).values([
+      // Same top haul on the same match for all three entries.
+      { entryId: a, matchId: 1, breakdown: bd, total: 12 },
+      { entryId: b, matchId: 1, breakdown: bd, total: 12 },
+      { entryId: c, matchId: 1, breakdown: bd, total: 12 },
+      { entryId: a, matchId: 2, breakdown: bd, total: 3 },
+    ]).run();
+    const wrap = computeMatchdayWrap(db, leagueId, '2026-06-11')!;
+    expect(wrap.biggestHaul!.points).toBe(12);
+    expect(wrap.biggestHaul!.holders.map((h) => h.entryId)).toEqual([a, b, c]);
+    expect(new Set(wrap.biggestHaul!.holders.map((h) => h.matchId))).toEqual(new Set([1]));
+  });
+
+  it('a biggest-haul tie can span different matches', () => {
+    const db = createTestDb();
+    const { leagueId, a, b } = seed(db);
+    db.delete(schema.matchPoints).run();
+    const bd = JSON.stringify({ exact: 10, outcome: 0, scorer: 0, firstTeam: 0, underdog: 0, base: 10, roundMultiplier: 1, boosterMultiplier: 1, total: 12 });
+    db.insert(schema.matchPoints).values([
+      { entryId: a, matchId: 1, breakdown: bd, total: 12 },
+      { entryId: b, matchId: 2, breakdown: bd, total: 12 },
+    ]).run();
+    const wrap = computeMatchdayWrap(db, leagueId, '2026-06-11')!;
+    expect(wrap.biggestHaul!.holders).toHaveLength(2);
+    expect(new Set(wrap.biggestHaul!.holders.map((h) => h.matchId))).toEqual(new Set([1, 2]));
+  });
+
+  it('an all-zero day has no biggest haul', () => {
+    const db = createTestDb();
+    const { leagueId } = seed(db);
+    db.delete(schema.matchPoints).run();
+    const bd = JSON.stringify({ exact: 0, outcome: 0, scorer: 0, firstTeam: 0, underdog: 0, base: 0, roundMultiplier: 1, boosterMultiplier: 1, total: 0 });
+    db.insert(schema.matchPoints).values([
+      { entryId: 1, matchId: 1, breakdown: bd, total: 0 },
+    ]).run();
+    const wrap = computeMatchdayWrap(db, leagueId, '2026-06-11')!;
+    expect(wrap.biggestHaul).toBeNull();
   });
 
   it('returns null for a day with no finished matches', () => {

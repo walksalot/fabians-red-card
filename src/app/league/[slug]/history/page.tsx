@@ -176,9 +176,11 @@ export default async function HistoryPage({
       winners: w.dayWinners.map((x) => ({ label: x.label, total: x.total })),
       biggest: w.biggestHaul
         ? {
-            label: w.biggestHaul.label,
+            labels: w.biggestHaul.holders.map((h) => h.label),
             points: w.biggestHaul.points,
-            fixture: fixtureLabel(w.biggestHaul.matchId),
+            fixtures: [...new Set(w.biggestHaul.holders.map((h) => h.matchId))].map(
+              fixtureLabel,
+            ),
           }
         : null,
       exactCount: w.exactCount,
