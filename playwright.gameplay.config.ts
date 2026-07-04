@@ -30,9 +30,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // Production server on CI, dev locally — see playwright.config.ts.
+    // Production server on CI, dev locally; seeds run BEFORE the server
+    // boots so its cached db handle points at the seeded file — see
+    // playwright.config.ts.
     command: process.env.CI
-      ? 'npm run start -- --port 3200'
+      ? 'node scripts/seed-e2e.mjs && node scripts/seed-e2e2.mjs && npm run start -- --port 3200'
       : 'npm run dev -- --port 3200',
     port: 3200,
     reuseExistingServer: false,
