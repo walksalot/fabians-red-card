@@ -76,6 +76,7 @@ function NodeCard({
   serverNowMs,
   picked = false,
   compact = false,
+  entryQuery = '',
 }: {
   node: BracketNode;
   slug: string;
@@ -86,6 +87,8 @@ function NodeCard({
   /** This entry already has a pick on the node's match (display-only). */
   picked?: boolean;
   compact?: boolean;
+  /** "&entry=N" when a non-default entry is selected — deep links keep it. */
+  entryQuery?: string;
 }) {
   const hit = followed !== null && node.possibleCodes.includes(followed);
   const dim = followed !== null && !hit;
@@ -161,7 +164,7 @@ function NodeCard({
   if (linkable) {
     return (
       <Link
-        href={`/league/${slug}/today?day=${node.matchday}`}
+        href={`/league/${slug}/today?day=${node.matchday}${entryQuery}`}
         data-testid={`bracket-node-${node.matchId}`}
         className={`${cls} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60`}
       >
@@ -228,6 +231,7 @@ export default function BracketTree({
   currentDay,
   serverNowMs,
   pickedMatchIds = [],
+  entryParam = null,
 }: {
   slug: string;
   nodes: BracketNode[];
@@ -236,10 +240,13 @@ export default function BracketTree({
   serverNowMs: number;
   /** Matches this entry already picked (drives "picked — tap to change"). */
   pickedMatchIds?: number[];
+  /** Selected ?entry= value (multi-entry users) — deep links preserve it. */
+  entryParam?: string | null;
 }) {
   const [followed, setFollowed] = useState<string | null>(null);
   const byId = new Map(nodes.map((n) => [n.matchId, n]));
   const picked = new Set(pickedMatchIds);
+  const entryQuery = entryParam ? `&entry=${encodeURIComponent(entryParam)}` : '';
 
   // Follow chips: teams still alive (possible in any unfinished node),
   // alphabetical by code. Falls back to every knockout team pre-results.
@@ -339,6 +346,7 @@ export default function BracketTree({
                       followed={followed}
                       serverNowMs={serverNowMs}
                       picked={picked.has(child.matchId)}
+                      entryQuery={entryQuery}
                     />
                   );
                 }
@@ -362,6 +370,7 @@ export default function BracketTree({
                           followed={followed}
                           serverNowMs={serverNowMs}
                           picked={picked.has(f.matchId)}
+                          entryQuery={entryQuery}
                           compact
                         />
                       ))}
@@ -378,6 +387,7 @@ export default function BracketTree({
                       followed={followed}
                       serverNowMs={serverNowMs}
                       picked={picked.has(child.matchId)}
+                      entryQuery={entryQuery}
                     />
                   </div>
                 );

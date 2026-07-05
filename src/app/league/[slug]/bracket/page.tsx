@@ -15,10 +15,13 @@ import BracketTree from '../_components/BracketTree';
  */
 export default async function BracketPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ entry?: string | string[] }>;
 }) {
   const { slug } = await params;
+  const sp = await searchParams;
   const ctx = await loadLeagueContext(slug);
   if (!ctx.isMember) return null; // layout renders the join prompt
   const { db } = ctx;
@@ -36,9 +39,12 @@ export default async function BracketPage({
   const nodes = buildBracket(all, teams, undefined, feederMapFromFixtures(fixtures));
   const currentDay = resolveCurrentMatchday(all, nowMs());
 
-  // Display-only pick marks for "picked — tap to change" captions (read the
-  // signed-in entry's existing picks; same default entry the layout shows).
-  const entry = pickSelectedEntry(ctx.entries, undefined);
+  // Display-only pick marks for "picked — tap to change" captions. Honors
+  // ?entry= like every other league page, so multi-entry users see (and
+  // deep-link into) the entry they actually have selected.
+  const entry = pickSelectedEntry(ctx.entries, sp.entry);
+  const rawEntry = Array.isArray(sp.entry) ? sp.entry[0] : sp.entry;
+  const entryParam = rawEntry && entry && Number(rawEntry) === entry.id ? rawEntry : null;
   const pickedMatchIds = entry
     ? db
         .select({ matchId: schema.picks.matchId })
@@ -60,7 +66,7 @@ export default async function BracketPage({
           </h2>
         </div>
         <Link
-          href={`/league/${slug}/today`}
+          href={`/league/${slug}/today${entryParam ? `?entry=${encodeURIComponent(entryParam)}` : ''}`}
           className="chip relative shrink-0 bg-zinc-800/80 text-zinc-300 ring-1 ring-inset ring-white/10 before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
         >
           ← Today
@@ -72,6 +78,7 @@ export default async function BracketPage({
         currentDay={currentDay}
         serverNowMs={nowMs()}
         pickedMatchIds={pickedMatchIds}
+        entryParam={entryParam}
       />
     </div>
   );
