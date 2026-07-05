@@ -365,7 +365,7 @@ export default async function TodayPage({
       ) : null}
       {showBracket ? (
         <Link
-          href={`/league/${slug}/bracket`}
+          href={`/league/${slug}/bracket${rawEntry ? `?entry=${encodeURIComponent(rawEntry)}` : ''}`}
           data-testid="bracket-link"
           className="flex items-center justify-between gap-2 rounded-2xl border border-white/5 bg-zinc-900 px-3.5 py-2.5 text-[13px] font-bold text-zinc-200 transition-colors hover:bg-zinc-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
         >
