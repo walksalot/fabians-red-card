@@ -190,6 +190,11 @@ export interface MatchdaySummary {
   missingPickCount: number;
   /** This entry's saved picks on the day. */
   pickedCount: number;
+  /** Matches with both teams known — the honest denominator for pick
+      progress (nobody can pick a bracket placeholder). */
+  pickableCount: number;
+  /** Matches still missing a team (bracket pending). */
+  tbdCount: number;
   boosterArmed: boolean;
   firstKickoffUtc: string;
   /** Every match still lacks a team — picking is impossible (bracket pending). */
@@ -253,11 +258,13 @@ export function getMatchdayOverview(
   // A gap only counts while it can still be filled: both teams known AND the
   // match still open (picks hard-lock at kickoff, so a missed pick on a
   // kicked-off or finished match is unfixable — nagging about it would only
-  // teach users to ignore the radar).
+  // teach users to ignore the radar). Feed-live counts as kicked off too:
+  // the feed saying the ball is rolling is just as unfixable.
   const stillOpen = (m: MatchRow) =>
     m.homeTeamId !== null &&
     m.awayTeamId !== null &&
     m.status !== 'finished' &&
+    m.liveStatus !== 'in' &&
     nowEpochMs < Date.parse(m.kickoffUtc);
 
   const days: MatchdaySummary[] = [...byDay.entries()]
@@ -269,6 +276,12 @@ export function getMatchdayOverview(
         (m) => stillOpen(m) && !picks.has(m.id),
       ).length,
       pickedCount: matches.filter((m) => picks.has(m.id)).length,
+      pickableCount: matches.filter(
+        (m) => m.homeTeamId !== null && m.awayTeamId !== null,
+      ).length,
+      tbdCount: matches.filter(
+        (m) => m.homeTeamId === null || m.awayTeamId === null,
+      ).length,
       boosterArmed: boosters.has(matchday),
       firstKickoffUtc: matches[0]!.kickoffUtc,
       allTbd: matches.every(
@@ -280,6 +293,8 @@ export function getMatchdayOverview(
   return {
     currentDay,
     days,
-    nextDayHasGaps: next !== undefined && next.pickedCount < next.matchCount,
+    // Fillable gaps only (same stillOpen philosophy as missingPickCount) —
+    // a day whose only unpicked match is bracket-pending must not glow amber.
+    nextDayHasGaps: next !== undefined && next.missingPickCount > 0,
   };
 }

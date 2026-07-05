@@ -23,6 +23,8 @@ export interface BracketMatchRow {
   liveHome: number | null;
   liveAway: number | null;
   liveClock: string | null;
+  /** Feed's last-write epoch (ms) — drives the stale-feed demotion. */
+  liveUpdatedAt?: number | null;
 }
 
 export interface BracketTeamRef {
@@ -53,6 +55,8 @@ export interface BracketNode {
   status: string;
   live: boolean;
   liveClock: string | null;
+  /** Feed's last-write epoch (ms) for live nodes; null when unknown. */
+  liveUpdatedAt: number | null;
   home: BracketSide;
   away: BracketSide;
   /** Feeder match ids parsed from the placeholders (empty for R32). */
@@ -209,9 +213,16 @@ export function buildBracket(
         a.id - b.id,
     )
     .map((m) => {
+      const live = m.status !== 'finished' && m.liveStatus === 'in';
+      // In-play nodes carry the running score in their side slots — final
+      // scores only exist at FT, so mid-match the sides would read blank.
+      // won/lost stay finished-only inside sideOf, so a live level score
+      // never dims anyone.
+      const homeScore = live ? m.liveHome : m.homeScore;
+      const awayScore = live ? m.liveAway : m.awayScore;
       const [homeFeeder, awayFeeder] = feedersFor(m);
-      const home = sideOf(m, m.homeTeamId, m.homePlaceholder, homeFeeder, m.homeScore, m.awayScore);
-      const away = sideOf(m, m.awayTeamId, m.awayPlaceholder, awayFeeder, m.awayScore, m.homeScore);
+      const home = sideOf(m, m.homeTeamId, m.homePlaceholder, homeFeeder, homeScore, awayScore);
+      const away = sideOf(m, m.awayTeamId, m.awayPlaceholder, awayFeeder, awayScore, homeScore);
       const feeders = [homeFeeder, awayFeeder]
         .filter((f): f is FeederSlot => f !== null)
         .map((f) => f.match);
@@ -223,8 +234,9 @@ export function buildBracket(
         venue: m.venue,
         city: m.city,
         status: m.status,
-        live: m.status !== 'finished' && m.liveStatus === 'in',
+        live,
         liveClock: m.liveClock,
+        liveUpdatedAt: m.liveUpdatedAt ?? null,
         home,
         away,
         feeders,

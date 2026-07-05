@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiSend, type AdminMember } from './shared';
 
 interface Props {
@@ -17,6 +17,15 @@ export default function MembersList({ slug, members: initialMembers, currentUser
   /** Freshly generated one-time reset link, shown once per request. */
   const [resetLink, setResetLink] = useState<{ userId: number; url: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  // The link box renders below the whole member list — tapping "Reset" beside
+  // a top-of-list member must produce visible feedback, not a box hidden
+  // under the fixed tab bar (ChangePassword's error-scroll recipe).
+  const resetBoxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (resetLink) {
+      resetBoxRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [resetLink]);
 
   async function onResetClick(member: AdminMember) {
     setError(null);
@@ -70,7 +79,7 @@ export default function MembersList({ slug, members: initialMembers, currentUser
           const isYou = m.userId === currentUserId;
           const confirming = confirmId === m.userId;
           return (
-            <li key={m.userId} className="flex items-center gap-3 py-2.5">
+            <li key={m.userId} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-zinc-100">
                   {m.displayName}
@@ -89,7 +98,10 @@ export default function MembersList({ slug, members: initialMembers, currentUser
               ) : (
                 <div className="flex shrink-0 items-center gap-2">
                   {/* min-h-10 lifts every row action to the 40px tap floor —
-                      these sat at 28px beside a destructive neighbor. */}
+                      these sat at 28px beside a destructive neighbor.
+                      "Reset", not "Reset password": the helper text below the
+                      list already explains it, and the shorter label keeps the
+                      "@username · N entries" line alive at 375-390px. */}
                   <button
                     type="button"
                     data-testid={`member-reset-${m.username}`}
@@ -97,36 +109,44 @@ export default function MembersList({ slug, members: initialMembers, currentUser
                     onClick={() => onResetClick(m)}
                     className="min-h-10 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-400 transition-colors hover:bg-emerald-400/10 hover:text-emerald-300 active:scale-95 disabled:opacity-60"
                   >
-                    Reset password
+                    Reset
                   </button>
-                  {confirming && (
+                  {!confirming && (
                     <button
                       type="button"
-                      onClick={() => setConfirmId(null)}
-                      className="min-h-10 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300"
+                      data-testid={`member-remove-${m.username}`}
+                      disabled={busyId === m.userId}
+                      onClick={() => onRemoveClick(m)}
+                      // Destructive red at rest too — it deletes a member's
+                      // picks/points and must never read like its gray
+                      // "Reset" neighbor. Confirm step stays.
+                      className="min-h-10 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-brand-bright/90 transition-colors hover:bg-brand/10 hover:text-brand-bright active:scale-95 disabled:opacity-60"
                     >
-                      Cancel
+                      Remove
                     </button>
                   )}
+                </div>
+              )}
+              {confirming && (
+                // Confirm step on its own full-width row: the name column
+                // keeps its width and the red button stays inside the card.
+                // The destructive action names its target.
+                <div className="flex w-full items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmId(null)}
+                    className="min-h-10 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-300"
+                  >
+                    Cancel
+                  </button>
                   <button
                     type="button"
                     data-testid={`member-remove-${m.username}`}
                     disabled={busyId === m.userId}
                     onClick={() => onRemoveClick(m)}
-                    className={`min-h-10 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-60 ${
-                      confirming
-                        ? 'bg-brand text-white'
-                        : // Destructive red at rest too — it deletes a member's
-                          // picks/points and must never read like its gray
-                          // "Reset password" neighbor. Confirm step stays.
-                          'text-brand-bright/90 hover:bg-brand/10 hover:text-brand-bright'
-                    }`}
+                    className="min-h-10 rounded-lg bg-brand px-2.5 py-1.5 text-xs font-semibold text-white transition-colors active:scale-95 disabled:opacity-60"
                   >
-                    {busyId === m.userId
-                      ? 'Removing…'
-                      : confirming
-                        ? 'Confirm remove'
-                        : 'Remove'}
+                    {busyId === m.userId ? 'Removing…' : `Remove ${m.displayName}?`}
                   </button>
                 </div>
               )}
@@ -136,8 +156,9 @@ export default function MembersList({ slug, members: initialMembers, currentUser
       </ul>
       {resetLink ? (
         <div
+          ref={resetBoxRef}
           data-testid="reset-link-box"
-          className="rounded-xl border border-emerald-400/25 bg-emerald-400/5 p-3"
+          className="scroll-mb-24 rounded-xl border border-emerald-400/25 bg-emerald-400/5 p-3"
         >
           <p className="text-xs font-semibold text-emerald-300">
             One-time reset link for @

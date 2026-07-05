@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSheetFocus } from './useSheetFocus';
 
 interface Points {
   exact: number;
@@ -29,6 +30,10 @@ export default function HowItWorksSheet({
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  // aria-modal's other half: focus moves into the sheet on open and Tab
+  // cycles inside it while open.
+  useSheetFocus(open, sheetRef);
 
   // Escape closes the sheet and hands focus back to the trigger — the dialog
   // declares aria-modal, so keyboard users rightly expect it.
@@ -90,7 +95,14 @@ export default function HowItWorksSheet({
           client, so the portal target always exists. */}
       {open ? (
         createPortal(
-        <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="How scoring works">
+        <div
+          ref={sheetRef}
+          tabIndex={-1}
+          className="fixed inset-0 z-[60] focus:outline-none"
+          role="dialog"
+          aria-modal="true"
+          aria-label="How scoring works"
+        >
           <button
             type="button"
             aria-label="Close"

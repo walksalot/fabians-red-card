@@ -240,7 +240,7 @@ function LockedPickLine({ lp }: { lp: LockedPickView }) {
             {lp.pick.predHome}–{lp.pick.predAway}
           </span>
         ) : (
-          <span className="shrink-0 text-[11px] font-medium text-zinc-500">
+          <span className="shrink-0 text-[11px] font-medium text-zinc-400">
             No pick
           </span>
         )}
@@ -288,10 +288,14 @@ function LockedPicksPanel({
   open,
   label,
   picks,
+  outcomeCount,
 }: {
   open: boolean;
   label: string;
   picks: LockedPickView[];
+  /** Correct outcomes this cup — the third tiebreaker, invisible in the
+      column grid, so tied-looking rows explain their order here. */
+  outcomeCount: number;
 }) {
   return (
     <div
@@ -307,6 +311,10 @@ function LockedPicksPanel({
           <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
             {label} · locked picks
             {picks.length > 0 ? ` · ${formatMatchdayShort(picks[0].matchday)}` : ''}
+          </p>
+          <p className="mt-0.5 text-[10px] font-medium text-zinc-400">
+            {outcomeCount} correct outcome{outcomeCount === 1 ? '' : 's'} this
+            cup — the third tiebreaker
           </p>
           {picks.length === 0 ? (
             <p className="py-2 text-xs text-zinc-500">
@@ -722,8 +730,11 @@ export default function LiveTable({
             // zone before the first non-podium row.
             const podiumBreak = i > 0 && r.rank > 3 && rows[i - 1].rank <= 3;
             return (
-              // Re-keying on a points change restarts the flash animation.
-              <Fragment key={`${r.entryId}:${flashes}`}>
+              // Stable key: the flash restarts via its own keyed overlay
+              // below — re-keying the row here would remount AnimatedTotal
+              // (skipping the roll + "+N" float) and drop keyboard focus on
+              // every background poll that lands points.
+              <Fragment key={r.entryId}>
                 {podiumBreak ? (
                   <div
                     aria-hidden="true"
@@ -738,18 +749,28 @@ export default function LiveTable({
                   onClick={() =>
                     setOpenRows((s) => ({ ...s, [r.entryId]: !open }))
                   }
-                  className={`${ROW_GRID} min-h-11 w-full px-4 py-2.5 text-left text-sm transition-colors hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400/60 ${
+                  className={`${ROW_GRID} relative min-h-11 w-full px-4 py-2.5 text-left text-sm transition-colors hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400/60 ${
                     // The hairline moves to the panel when open; the final
                     // row's edge is the card edge (the panel is :last-child).
                     open || i === rows.length - 1
                       ? ''
                       : 'border-b border-white/5'
-                  } ${flashes > 0 ? 'animate-row-flash' : ''} ${
+                  } ${
                     isMe
                       ? 'bg-emerald-400/5 shadow-[inset_2px_0_0_0_var(--color-accent)]'
                       : (PODIUM_ROW_TONES[r.rank] ?? '')
                   }`}
                 >
+                  {/* Emerald poll-flash on its own keyed overlay (LiveNow's
+                      goal-wash pattern) — restarts per points change without
+                      remounting the row. */}
+                  {flashes > 0 ? (
+                    <span
+                      key={`flash-${flashes}`}
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0 animate-row-flash"
+                    />
+                  ) : null}
                   <span className="flex items-center gap-1">
                     <RankBadge rank={r.rank} />
                     <RankDelta delta={delta} />
@@ -828,6 +849,7 @@ export default function LiveTable({
                   open={open}
                   label={r.label}
                   picks={r.lockedPicks ?? []}
+                  outcomeCount={r.outcomeCount}
                 />
               </Fragment>
             );

@@ -62,6 +62,13 @@ export function JoinLeagueClient({
 
   return (
     <div className="space-y-6">
+      {/* Mode-aware helper (register/sign-in is client state, so the server
+          page can't render this line correctly). */}
+      <p className="text-sm text-zinc-400">
+        {mode === 'register'
+          ? 'Create an account to lock in your spot — it takes 20 seconds.'
+          : 'Welcome back — sign in and you’re in.'}
+      </p>
       <AuthForm
         mode={mode}
         submitLabel={
@@ -77,7 +84,9 @@ export function JoinLeagueClient({
             setMode(mode === 'register' ? 'login' : 'register');
             setError(null);
           }}
-          className="rounded font-semibold text-emerald-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+          // Padding + negative margin: ~44px tap surface without moving the
+          // 17px-tall text line (AuthPageClient's toggle recipe).
+          className="-mx-2 -my-3 inline-block rounded px-2 py-3 font-semibold text-emerald-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
         >
           {mode === 'register' ? 'Sign in' : 'Create an account'}
         </button>

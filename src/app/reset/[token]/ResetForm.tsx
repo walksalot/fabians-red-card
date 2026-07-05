@@ -56,6 +56,11 @@ export default function ResetForm({ token }: { token: string }) {
           className="h-12 w-full rounded-xl border border-zinc-700 bg-zinc-950/60 px-4 text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
         />
       </label>
+      {/* Always-rendered slot ABOVE the button (AuthForm's recipe) — an error
+          popping in below the CTA can hide off-screen at the moment of the tap. */}
+      <p aria-live="polite" className="min-h-5 text-sm text-brand-bright">
+        {error}
+      </p>
       <button
         data-testid="reset-submit"
         type="submit"
@@ -64,11 +69,6 @@ export default function ResetForm({ token }: { token: string }) {
       >
         {busy ? 'Saving…' : 'Set password & sign in'}
       </button>
-      {error && (
-        <p className="text-sm text-red-400" role="alert">
-          {error}
-        </p>
-      )}
     </form>
   );
 }

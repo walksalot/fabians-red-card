@@ -79,7 +79,10 @@ export default function AnimatedTotal({
         <span
           key={float.key}
           aria-hidden="true"
-          className="pointer-events-none absolute -top-4 right-0 text-xs font-extrabold tabular-nums text-emerald-400 animate-float-up"
+          // -top-1 + the keyframes' short travel keep the float inside its
+          // own row — it must never hover under the row above's total or the
+          // PTS header.
+          className="pointer-events-none absolute -top-1 right-0 text-xs font-extrabold tabular-nums text-emerald-400 animate-float-up"
         >
           +{formatPoints(float.delta)}
         </span>

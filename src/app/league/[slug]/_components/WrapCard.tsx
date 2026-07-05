@@ -80,12 +80,18 @@ export default function WrapCard({ wrap }: { wrap: WrapCardView }) {
             🏆
           </span>
           <div className="min-w-0 flex-1">
+            {/* 3+ winners collapse to a count (the biggest-haul row's rule
+                below) — ten truncating names can clip the emerald points. */}
             <p className="truncate text-[15px] font-extrabold text-zinc-50">
-              {wrap.winners.map((w) => w.label).join(' & ')}
+              {wrap.winners.length <= 2
+                ? wrap.winners.map((w) => w.label).join(' & ')
+                : `${wrap.winners.length} shared the day`}
             </p>
-            <p className="text-xs text-zinc-400">
-              {wrap.winners.length > 1 ? 'shared the day' : 'won the day'}
-            </p>
+            {wrap.winners.length <= 2 ? (
+              <p className="text-xs text-zinc-400">
+                {wrap.winners.length > 1 ? 'shared the day' : 'won the day'}
+              </p>
+            ) : null}
           </div>
           <p className="shrink-0 font-display text-xl font-bold tabular-nums text-emerald-400">
             +{formatPoints(wrap.winners[0].total)}
@@ -99,11 +105,13 @@ export default function WrapCard({ wrap }: { wrap: WrapCardView }) {
 
       <div className="space-y-0.5 pt-1">
         {wrap.biggest ? (
-          <div className="flex items-center gap-2.5 py-1.5 text-[13px]">
-            <span className="w-5 shrink-0 text-center text-zinc-400">
+          <div className="flex items-start gap-2.5 py-1.5 text-[13px]">
+            <span className="mt-0.5 w-5 shrink-0 text-center text-zinc-400">
               <RowIcon kind="burst" />
             </span>
-            <span className="min-w-0 flex-1 truncate text-zinc-400">
+            {/* Names + points must always be visible; the tail may wrap to a
+                second line rather than truncate names away at 375-390px. */}
+            <span className="min-w-0 flex-1 text-zinc-400">
               Biggest haul —{' '}
               <span className="font-semibold text-zinc-100">
                 {/* Ties are the norm (a popular exact score pays everyone the
@@ -112,12 +120,13 @@ export default function WrapCard({ wrap }: { wrap: WrapCardView }) {
                 {wrap.biggest.labels.length <= 2
                   ? wrap.biggest.labels.join(' & ')
                   : `shared by ${wrap.biggest.labels.length}`}
-              </span>{' '}
-              on{' '}
+              </span>
               {wrap.biggest.fixtures.length === 1 ? (
-                <span className="score-token">{wrap.biggest.fixtures[0]}</span>
+                <>
+                  {' '}on <span className="score-token">{wrap.biggest.fixtures[0]}</span>
+                </>
               ) : (
-                `${wrap.biggest.fixtures.length} games`
+                <> · {wrap.biggest.fixtures.length} games</>
               )}
             </span>
             <span className="shrink-0 font-bold tabular-nums text-zinc-200">
@@ -173,7 +182,7 @@ export default function WrapCard({ wrap }: { wrap: WrapCardView }) {
               />
             ))}
           </div>
-          <p className="mt-1 text-center text-[10px] text-zinc-500">
+          <p className="mt-1 text-center text-[10px] text-zinc-400">
             everyone&apos;s day, best → quietest
           </p>
         </>

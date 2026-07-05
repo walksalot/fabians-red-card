@@ -2,6 +2,12 @@ import { eq, inArray } from 'drizzle-orm';
 import { schema } from '@/db';
 import { canonicalScorer } from '@/lib/scoring';
 import { computeMatchdayWrap } from '@/lib/services/wrap';
+import {
+  buildBracket,
+  feederMapFromFixtures,
+  type BracketTeamRef,
+} from '@/lib/bracket';
+import fixtures from '../../../../../data/fixtures.json';
 import type { WrapCardView } from '../_components/WrapCard';
 import EntrySwitcher from '../_components/EntrySwitcher';
 import HistoryList from '../_components/HistoryList';
@@ -57,6 +63,20 @@ export default async function HistoryPage({
   const pickByMatch = new Map(myPicks.map((p) => [p.matchId, p]));
   const pointByMatch = new Map(myPoints.map((p) => [p.matchId, p]));
   const teamMap = new Map(teamRows.map((t) => [t.id, t]));
+
+  // Penalties context: reuse the bracket's decidedOnPens/advancer inference
+  // (bracket.ts) — level knockout scores read as unfinished without it. Needs
+  // ALL matches (the advancer shows up in the next round's slot).
+  const bracketTeams = new Map<number, BracketTeamRef>(
+    teamRows.map((t) => [t.id, { id: t.id, code: t.code, name: t.name }]),
+  );
+  const bracketNodes = buildBracket(
+    db.select().from(schema.matches).all(),
+    bracketTeams,
+    undefined,
+    feederMapFromFixtures(fixtures),
+  );
+  const nodeById = new Map(bracketNodes.map((n) => [n.matchId, n]));
   const nameOf = (teamId: number | null, placeholder: string | null) =>
     teamId !== null
       ? (teamMap.get(teamId)?.name ?? 'TBD')
@@ -121,10 +141,20 @@ export default async function HistoryPage({
           breakdown = null;
         }
       }
+      const node = nodeById.get(m.id);
+      const decidedOnPens = node?.decidedOnPens ?? false;
       return {
         matchId: m.id,
         stage: m.stage,
         kickoffUtc: m.kickoffUtc,
+        decidedOnPens,
+        pensAdvancer: decidedOnPens
+          ? node?.home.won
+            ? (node.home.team?.name ?? null)
+            : node?.away.won
+              ? (node.away.team?.name ?? null)
+              : null
+          : null,
         homeName: nameOf(m.homeTeamId, m.homePlaceholder),
         awayName: nameOf(m.awayTeamId, m.awayPlaceholder),
         homeCode: codeOf(m.homeTeamId),
@@ -163,7 +193,9 @@ export default async function HistoryPage({
     if (!m) return `match ${matchId}`;
     const side = (teamId: number | null, ph: string | null) =>
       codeOf(teamId) ?? nameOf(teamId, ph);
-    return `${side(m.homeTeamId, m.homePlaceholder)} ${m.homeScore}–${m.awayScore} ${side(m.awayTeamId, m.awayPlaceholder)}`;
+    // "(pens)" keeps a level knockout score from reading as a typo in prose.
+    const pens = nodeById.get(m.id)?.decidedOnPens ? ' (pens)' : '';
+    return `${side(m.homeTeamId, m.homePlaceholder)} ${m.homeScore}–${m.awayScore} ${side(m.awayTeamId, m.awayPlaceholder)}${pens}`;
   };
   const wraps: Record<string, WrapCardView> = {};
   for (const day of days) {

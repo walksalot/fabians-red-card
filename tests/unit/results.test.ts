@@ -520,7 +520,10 @@ describe('results service', () => {
     const admin = makeUser(db);
     const league = makeLeague(db, admin.id);
     makeEntry(db, league.id, admin.id);
-    makeMatch(db, 1); // kicks off 2026-06-11T16:00:00Z
+    // Real teams: the live board skips slots still missing a team.
+    makeTeam(db, 1, 'MEX');
+    makeTeam(db, 2, 'ECU');
+    makeMatch(db, 1, { homeTeamId: 1, awayTeamId: 2 }); // kicks off 2026-06-11T16:00:00Z
 
     setLiveScore(db, { matchId: 1, liveHome: 1, liveAway: 0, updatedAtMs: 5, clock: "78'" });
     const live = db.select().from(schema.matches).where(eq(schema.matches.id, 1)).get();

@@ -3,7 +3,12 @@ import LeaguePicksReveal from './LeaguePicksReveal';
 import WrapCard, { type WrapCardView } from './WrapCard';
 import { BreakdownChips, breakdownChips } from './breakdown-chips';
 import { codeToFlagEmoji, shortTeamName } from './flags';
-import { STAGE_LABELS, formatMatchday, formatPoints } from './format';
+import {
+  STAGE_LABELS,
+  formatMatchday,
+  formatMatchdayShort,
+  formatPoints,
+} from './format';
 import type { HistoryDayView, HistoryItemView } from './types';
 
 /**
@@ -92,6 +97,16 @@ function HistoryItem({
         </span>
         <HistoryTeam name={item.awayName} code={item.awayCode} align="right" />
       </div>
+      {/* A level knockout score reads as unfinished without this — same
+          wording the bracket uses for its decidedOnPens caption. */}
+      {item.decidedOnPens ? (
+        <p className="mt-1 text-center text-[11px] text-zinc-400">
+          Decided on penalties
+          {item.pensAdvancer
+            ? ` · ${shortTeamName(item.pensAdvancer)} advance`
+            : ''}
+        </p>
+      ) : null}
 
       {/* Meta row: stage + first scorer on the left, points on the right. */}
       <div className="mt-1.5 flex items-center justify-between gap-2">
@@ -169,8 +184,43 @@ export default function HistoryList({
       />
     );
   }
+  // Day headers stick under the app header (52px) plus the chip strip's 45px
+  // when it renders — a lone day has no strip and no gap.
+  const hasDayIndex = groups.length > 1;
+  const dayHeaderTop = hasDayIndex ? 'top-[97px]' : 'top-[52px]';
   return (
     <div className="space-y-6">
+      {/* Day index for a scroll that spans weeks: date chips pinned under the
+          app header (the admin sticky-nav recipe), anchor-jumping to each
+          day's section below. */}
+      {hasDayIndex ? (
+        <nav
+          aria-label="Finished matchdays"
+          className="sticky top-[52px] z-10 -mx-4 border-b border-white/5 bg-zinc-950/85 px-4 py-2 backdrop-blur-xl"
+        >
+          {/* Hidden scrollbar → the right-edge fade is the "more off-screen"
+              affordance; pr-8 lets the last chip scroll clear of the mask. */}
+          <div className="relative">
+            <div className="flex gap-1.5 overflow-x-auto pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {groups.map((g) => (
+                <a
+                  key={g.matchday}
+                  href={`#day-${g.matchday}`}
+                  // before: pseudo-element lifts the 28px chip to the ~44px
+                  // tap floor without growing the visual.
+                  className="relative shrink-0 whitespace-nowrap rounded-full bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 ring-1 ring-inset ring-white/10 transition-colors before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+                >
+                  {formatMatchdayShort(g.matchday)}
+                </a>
+              ))}
+            </div>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-zinc-950"
+            />
+          </div>
+        </nav>
+      ) : null}
       {groups.map((group) => {
         // Same day-header recipe as Today: tiny uppercase eyebrow over a bold
         // date, subtotal chip right-aligned at the baseline — one typographic
@@ -180,8 +230,17 @@ export default function HistoryList({
           stages.length === 1 ? (STAGE_LABELS[stages[0]] ?? stages[0]) : 'Matchday';
         const count = group.items.length;
         return (
-          <section key={group.matchday}>
-            <div className="mb-2 flex items-end justify-between gap-2">
+          // scroll-mt clears the app header + the day-chip strip above.
+          <section
+            key={group.matchday}
+            id={`day-${group.matchday}`}
+            className="scroll-mt-28"
+          >
+            {/* Sticky day header so the date context survives a mid-flick
+                stop; pb replaces the old mb so the zinc-950 mask has no gap. */}
+            <div
+              className={`sticky ${dayHeaderTop} z-[5] -mx-4 flex items-end justify-between gap-2 bg-zinc-950 px-4 pb-2 pt-1`}
+            >
               <div className="min-w-0">
                 <p className="truncate text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
                   {stageLabel} · {count} {count === 1 ? 'match' : 'matches'}
@@ -197,9 +256,11 @@ export default function HistoryList({
                     : 'bg-zinc-800/80 text-zinc-400 ring-white/10'
                 }`}
               >
+                {/* "You" — unlabeled, the day subtotal misreads as a
+                    league-wide figure beside the WrapCard totals below. */}
                 {group.subtotal > 0
-                  ? `+${formatPoints(group.subtotal)} pts`
-                  : '0 pts'}
+                  ? `You +${formatPoints(group.subtotal)} pts`
+                  : 'You 0 pts'}
               </span>
             </div>
             <div className="space-y-3">

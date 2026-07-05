@@ -11,6 +11,7 @@ import OddsStrip from './OddsStrip';
 import PickForm from './PickForm';
 import { BreakdownChips, CHIP_TONES, NoPointsChip } from './breakdown-chips';
 import { codeToFlagEmoji, shortTeamName } from './flags';
+import { STALE_FEED_MS } from './freshness';
 import {
   STAGE_LABELS,
   formatKickoffEt,
@@ -31,6 +32,10 @@ const POLL_MS = 30_000;
  * live window — do not lower this below ~5.5h without updating that seed.
  */
 const STALE_LIVE_MS = 6 * 60 * 60 * 1000;
+
+// A feed-live card whose last update is older than STALE_FEED_MS stops
+// pulsing red (same calm "awaiting result" treatment as the no-feed stale
+// state above) — shared with the bracket via ./freshness.
 
 interface Props {
   /** League slug — the reveal panel's fetch needs it. */
@@ -226,11 +231,14 @@ function FeedAge({
   const age = Math.max(0, nowVal - liveUpdatedAt);
   const stale = age > 3 * 60_000;
   // Seconds cap at 55 — 57.5s+ would otherwise round to "60s" instead of
-  // rolling into the minutes branch.
+  // rolling into the minutes branch. Past 90 minutes the label rolls into
+  // hours ("1h 15m") — an unbounded "347m ago" reads as a glitch.
   const label =
     age < 60_000
       ? `${Math.min(55, Math.max(5, Math.round(age / 5000) * 5))}s`
-      : `${Math.round(age / 60_000)}m`;
+      : age < 90 * 60_000
+        ? `${Math.round(age / 60_000)}m`
+        : `${Math.floor(age / 3_600_000)}h ${Math.floor((age % 3_600_000) / 60_000)}m`;
   return (
     <span
       className={`text-[9px] font-medium tabular-nums ${
@@ -342,6 +350,12 @@ function FixtureCenter({
   serverNowMs: number;
 }) {
   if (item.status === 'finished') {
+    // Level knockout score = penalties (the bracket's decidedOnPens rule) —
+    // without the caption a 1–1 FT in the Round of 16 reads as unfinished.
+    const pens =
+      item.stage !== 'group' &&
+      item.homeScore !== null &&
+      item.homeScore === item.awayScore;
     return (
       <div className="flex flex-col items-center">
         <span className="font-display text-2xl font-bold tabular-nums tracking-tight text-zinc-50">
@@ -350,10 +364,46 @@ function FixtureCenter({
         <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
           FT
         </span>
+        {pens ? (
+          <span className="whitespace-nowrap text-[9px] font-medium text-zinc-400">
+            on penalties
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+  // Teams unassigned: whatever the clock says, this is a schedule slot, not a
+  // match — the card's "Bracket pending" note owns the state, and the center
+  // column must never claim "In progress" for a fixture nobody could watch.
+  if (item.teamsTbd) {
+    return (
+      <div className="flex flex-col items-center gap-0.5">
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+          Kickoff
+        </span>
+        <span className="whitespace-nowrap text-base font-semibold tabular-nums tracking-tight text-zinc-300">
+          {formatKickoffEt(item.kickoffUtc)}
+        </span>
       </div>
     );
   }
   if (item.liveStatus === 'in') {
+    // Feed frozen past STALE_FEED_MS: keep the last known score but hand the
+    // lockup to the same calm tone as the no-feed stale state — no pulsing
+    // dot on a heartbeat nobody can vouch for.
+    if (stale) {
+      return (
+        <div className="flex flex-col items-center">
+          <span className="font-display text-2xl font-bold tabular-nums tracking-tight text-zinc-300">
+            {item.liveHome ?? 0}–{item.liveAway ?? 0}
+          </span>
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+            Awaiting result
+          </span>
+          <FeedAge liveUpdatedAt={item.liveUpdatedAt} serverNowMs={serverNowMs} />
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col items-center">
         <LiveScore item={item} />
@@ -581,7 +631,22 @@ export default function TodayBoard({
   const hasPick = (m: TodayMatchView) =>
     m.myPick !== null || savedClient[m.matchId] === true;
   const pickedCount = items.filter(hasPick).length;
-  const allPicked = pickedCount === items.length;
+  // Honest denominator: bracket placeholders can't be picked, so they don't
+  // count against the fraction — they get a "· N TBD" suffix instead. The
+  // amber urgency also drops once no gap is FILLABLE (open, teams known),
+  // matching the service's missingPickCount philosophy.
+  const pickableCount = items.filter((m) => !m.teamsTbd).length;
+  const tbdCount = items.length - pickableCount;
+  // Feed-live counts as locked here (the booster jump target's rule): a card
+  // whose feed says the ball is rolling is not a fillable gap.
+  const fillableGaps = items.filter(
+    (m) =>
+      !m.teamsTbd &&
+      !m.locked &&
+      m.liveStatus !== 'in' &&
+      m.status !== 'finished' &&
+      !hasPick(m),
+  ).length;
   // Every fixture is a bracket placeholder — nobody can pick anything, so the
   // amber "0/N picked" urgency (and any lock countdown) would be a demand to
   // do the impossible. The whole day reads as a calm "bracket pending".
@@ -640,9 +705,10 @@ export default function TodayBoard({
             </span>
           ) : (
             <span
-              className={`shrink-0 whitespace-nowrap ${allPicked ? 'text-emerald-400' : 'text-amber-300'}`}
+              className={`shrink-0 whitespace-nowrap ${fillableGaps === 0 ? 'text-emerald-400' : 'text-amber-300'}`}
             >
-              {pickedCount}/{items.length} picked
+              {pickedCount}/{pickableCount} picked
+              {tbdCount > 0 ? ` · ${tbdCount} TBD` : ''}
             </span>
           )}
         </p>
@@ -664,14 +730,28 @@ export default function TodayBoard({
         {(() => {
           const target =
             items.find((m) => m.boosted) ??
+            // liveStatus check: a feed-live card hides its BoosterButton, so
+            // jumping there would land on a control that isn't rendered.
             items.find(
-              (m) => m.status !== 'finished' && !m.locked && !m.boosterDisabled,
+              (m) =>
+                m.status !== 'finished' &&
+                !m.locked &&
+                m.liveStatus !== 'in' &&
+                !m.boosterDisabled,
             );
           const interactive = target !== undefined;
           // Bracket-pending day: nothing can be boosted, so "Booster
           // available" would contradict every disabled card below — state
-          // when it actually opens instead.
-          const label = allTbd ? 'Booster opens with the bracket' : boosterLabel;
+          // when it actually opens instead. Same honesty when no card can
+          // take the booster at all (everything locked/live/TBD): "available"
+          // must never promise an action the cards below refuse.
+          const label = allTbd
+            ? 'Booster opens with the bracket'
+            : !interactive && !boosterArmed
+              ? items.some((m) => m.teamsTbd)
+                ? 'Booster opens with the bracket'
+                : 'No match can take the booster right now'
+              : boosterLabel;
           // h-7 matches the "How scoring works" pill sharing this row;
           // `shrink min-w-0` undo the chip utility's flex-shrink:0 so the
           // truncating label span below keeps long fixture names ("On Canada
@@ -772,14 +852,22 @@ export default function TodayBoard({
         </p>
       ) : null}
       {items.map((m, i) => {
+        // teamsTbd opts out: a kicked-off slot with no teams assigned is a
+        // bracket gap, not a match in progress — no red ring, no lockup.
         const isLive =
-          m.status !== 'finished' && (m.locked || m.liveStatus === 'in');
+          !m.teamsTbd &&
+          m.status !== 'finished' &&
+          (m.locked || m.liveStatus === 'in');
         // Locked for hours with no live feed and no result — drop the red
         // urgency (ring + pulsing lockup) for a calm "awaiting result" card.
+        // A feed-live card counts too once its feed has been frozen past
+        // STALE_FEED_MS: red urgency needs a heartbeat behind it.
         const stale =
           isLive &&
-          m.liveStatus !== 'in' &&
-          serverNowMs - new Date(m.kickoffUtc).getTime() > STALE_LIVE_MS;
+          (m.liveStatus === 'in'
+            ? m.liveUpdatedAt !== null &&
+              serverNowMs - m.liveUpdatedAt > STALE_FEED_MS
+            : serverNowMs - new Date(m.kickoffUtc).getTime() > STALE_LIVE_MS);
         const picked = hasPick(m);
         return (
         <div
@@ -878,7 +966,7 @@ export default function TodayBoard({
               Centered: right-aligned it sat squarely under the Locks chip,
               which made the lock timer look tappable. */}
           {m.status !== 'finished' && m.boosted && !m.boosterDisabled ? (
-            <p className="mt-1 text-center text-[10px] font-medium text-zinc-500">
+            <p className="mt-1 text-center text-[10px] font-medium text-zinc-400">
               doubles this match · tap to remove
             </p>
           ) : null}
@@ -946,14 +1034,27 @@ export default function TodayBoard({
               )}
               <LeaguePicksReveal slug={slug} matchId={m.matchId} myEntryId={entryId} />
             </div>
-          ) : m.locked ? (
+          ) : isLive ? (
+            // Feed-live counts as locked-for-display even if the lock flag
+            // lags: an editable form + odds strip under a live score offers a
+            // bet on a match already running (same discipline as the hidden
+            // booster and suppressed countdown above).
             <div className="mt-3 border-t border-white/5 pt-3">
               <PickSummary item={m} />
               <p className="mt-2 flex items-center gap-1 text-[10px] font-medium text-zinc-400">
                 <LockIcon />
                 Picks are locked for this match.
               </p>
-              <LeaguePicksReveal slug={slug} matchId={m.matchId} myEntryId={entryId} />
+              {/* The reveal API unlocks at the SCHEDULED kickoff (app clock),
+                  not on the feed flag — mounting it earlier offers a panel
+                  that can only 403. */}
+              {m.locked ? (
+                <LeaguePicksReveal slug={slug} matchId={m.matchId} myEntryId={entryId} />
+              ) : (
+                <p className="mt-3 border-t border-white/5 pt-3 text-center text-[10px] text-zinc-500">
+                  Picks unlock here the moment a match kicks off — never before.
+                </p>
+              )}
             </div>
           ) : m.teamsTbd ? (
             <p className="mt-3 rounded-lg bg-zinc-950/50 px-3 py-2.5 text-xs text-zinc-500 ring-1 ring-inset ring-white/5">

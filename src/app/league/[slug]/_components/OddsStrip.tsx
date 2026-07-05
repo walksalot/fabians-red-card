@@ -93,21 +93,21 @@ export default function OddsStrip({
               <p className="text-zinc-500">{home} win</p>
               <p className="font-bold text-zinc-200">{odds.homeML}</p>
               {odds.openHomeML && odds.openHomeML !== odds.homeML ? (
-                <p className="text-[10px] text-zinc-600">opened {odds.openHomeML}</p>
+                <p className="text-[10px] text-zinc-400">opened {odds.openHomeML}</p>
               ) : null}
             </div>
             <div>
               <p className="text-zinc-500">Draw</p>
               <p className="font-bold text-zinc-200">{odds.drawML}</p>
               {odds.openDrawML && odds.openDrawML !== odds.drawML ? (
-                <p className="text-[10px] text-zinc-600">opened {odds.openDrawML}</p>
+                <p className="text-[10px] text-zinc-400">opened {odds.openDrawML}</p>
               ) : null}
             </div>
             <div>
               <p className="text-zinc-500">{away} win</p>
               <p className="font-bold text-zinc-200">{odds.awayML}</p>
               {odds.openAwayML && odds.openAwayML !== odds.awayML ? (
-                <p className="text-[10px] text-zinc-600">opened {odds.openAwayML}</p>
+                <p className="text-[10px] text-zinc-400">opened {odds.openAwayML}</p>
               ) : null}
             </div>
           </div>
@@ -123,7 +123,7 @@ export default function OddsStrip({
               Expected total: ~{odds.overUnder} goals
             </p>
           ) : null}
-          <p className="mt-1.5 text-center text-[10px] text-zinc-600">
+          <p className="mt-1.5 text-center text-[10px] text-zinc-400">
             Context, not advice.
           </p>
         </div>

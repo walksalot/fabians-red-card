@@ -76,6 +76,18 @@ export default function SettingsForm({
     toastTimer.current = window.setTimeout(() => setToast(null), 3500);
   }
 
+  // Validation failures anchor to the offending input: on a ~3-screen form
+  // the 3.5s toast alone fades while the bad field sits two screens up.
+  // The toast stays as secondary confirmation.
+  function rejectField(testId: string, text: string) {
+    const el = document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+    if (el) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.focus({ preventScroll: true });
+    }
+    showToast({ kind: 'err', text });
+  }
+
   // Live payout-split validation
   const splitFilled = payout.every((p) => p.trim() !== '');
   const splitNums = payout.map((p) => Number(p));
@@ -91,21 +103,21 @@ export default function SettingsForm({
     const buyInNum = Number(buyIn.trim());
     const boosterNum = Number(booster.trim());
 
-    if (trimmedName === '') return showToast({ kind: 'err', text: 'League name is required' });
+    if (trimmedName === '') return rejectField('admin-name', 'League name is required');
     if (!Number.isInteger(entriesNum) || entriesNum < 1 || entriesNum > 10)
-      return showToast({ kind: 'err', text: 'Entries per user must be 1–10' });
+      return rejectField('admin-entries', 'Entries per user must be 1–10');
     if (!Number.isFinite(buyInNum) || buyInNum < 0)
-      return showToast({ kind: 'err', text: 'Buy-in must be a non-negative amount' });
+      return rejectField('admin-buyin', 'Buy-in must be a non-negative amount');
     if (!splitOk)
-      return showToast({ kind: 'err', text: 'Payout split must be whole percents summing to 100' });
+      return rejectField('admin-payout', 'Payout split must be whole percents summing to 100');
     if (!Number.isFinite(boosterNum) || boosterNum <= 0)
-      return showToast({ kind: 'err', text: 'Booster multiplier must be greater than 0' });
+      return rejectField('admin-booster', 'Booster multiplier must be greater than 0');
 
     const roundMultipliers = {} as Record<StageKey, number>;
     for (const s of STAGES) {
       const n = Number(rounds[s].trim());
       if (!Number.isFinite(n) || n <= 0)
-        return showToast({ kind: 'err', text: `${STAGE_LABELS[s]} multiplier must be greater than 0` });
+        return rejectField(`admin-round-${s}`, `${STAGE_LABELS[s]} multiplier must be greater than 0`);
       roundMultipliers[s] = n;
     }
 
@@ -113,7 +125,7 @@ export default function SettingsForm({
     for (const f of SCORING_FIELDS) {
       const n = Number(scoring[f.key].trim());
       if (!Number.isFinite(n) || n < 0)
-        return showToast({ kind: 'err', text: `${f.label} points must be 0 or more` });
+        return rejectField(`admin-points-${f.key}`, `${f.label} points must be 0 or more`);
       scoringRules[f.key] = n;
     }
 
@@ -412,7 +424,7 @@ export default function SettingsForm({
       {toast && (
         <div
           role="status"
-          className={`fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-medium shadow-lg ${
+          className={`fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-1/2 z-50 -translate-x-1/2 rounded-full px-4 py-2 text-sm font-medium shadow-lg ${
             toast.kind === 'ok' ? 'bg-emerald-500 text-zinc-950' : 'bg-brand text-white'
           }`}
         >

@@ -125,6 +125,11 @@ export function shortTeamName(name: string): string {
   // the qualifier (winners vs runners-up) survives one line at 390px.
   const placeholder = /^Group ([A-L]) (winners|runners-up)$/.exec(name);
   if (placeholder) return `${placeholder[1]} ${placeholder[2]}`;
+  // Later-round feeders ("Winners Match 73") — keep the distinguishing match
+  // number, not the shared prefix: two side-by-side "Winners Mat…" are
+  // indistinguishable at 390px.
+  const feeder = /^Winners Match (\d+)$/.exec(name);
+  if (feeder) return `Winner M${feeder[1]}`;
   return name;
 }
 

@@ -57,7 +57,9 @@ export interface LiveBoard {
   rows: LiveBoardRow[];
 }
 
-/** All in-progress matches (kicked off per the app clock, not finished). */
+/** All in-progress matches (kicked off per the app clock, not finished).
+    Slots still missing a team are skipped — a "Winners Match 73" board with
+    nothing to score is a bracket gap, never a live match. */
 function liveMatches(db: Db) {
   const now = nowMs();
   return db
@@ -65,7 +67,12 @@ function liveMatches(db: Db) {
     .from(schema.matches)
     .where(eq(schema.matches.status, 'scheduled'))
     .all()
-    .filter((m) => now >= Date.parse(m.kickoffUtc));
+    .filter(
+      (m) =>
+        m.homeTeamId !== null &&
+        m.awayTeamId !== null &&
+        now >= Date.parse(m.kickoffUtc),
+    );
 }
 
 export function getLiveBoards(db: Db, leagueId: number): LiveBoard[] {
