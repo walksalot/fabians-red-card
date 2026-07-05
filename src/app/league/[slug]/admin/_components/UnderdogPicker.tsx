@@ -27,24 +27,54 @@ export default function UnderdogPicker({ matches, underdogPoints, nowMs }: Props
   // just-before-kickoff job; far-future days start collapsed.
   const todayNY = matchdayOf(nowMs);
   const nextMatchday = days.find((d) => d.matchday > todayNY)?.matchday ?? null;
+  // The day the admin acts on now (today, else the next matchday) — carries
+  // the #underdog-today anchor the jump pill targets, mirroring ResultsEntry:
+  // today's accordion can sit a full screen below weeks of past days.
+  const focusMatchday = days.some((d) => d.matchday === todayNY)
+    ? todayNY
+    : nextMatchday;
   return (
     <div className="space-y-3">
       <p className="text-sm text-zinc-400">
         Flag the underdog of a match — entries that predict the underdog to win earn a +
         {underdogPoints} point bonus when the upset lands.
       </p>
+      {focusMatchday !== null ? (
+        <a
+          href="#underdog-today"
+          className="inline-flex items-center gap-1.5 rounded-full bg-zinc-800/60 px-3 py-1.5 text-xs font-semibold text-zinc-300 ring-1 ring-inset ring-white/10 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+        >
+          Jump to {focusMatchday === todayNY ? 'today' : 'next matchday'}
+          <Chevron className="h-3 w-3 text-zinc-500" />
+        </a>
+      ) : null}
       {days.map((day) => {
         const defaultOpen =
           day.matchday === todayNY || day.matchday === nextMatchday;
+        const flaggedCount = day.matches.filter(
+          (m) => m.underdogTeamId !== null,
+        ).length;
         return (
           <details
             key={day.matchday}
+            id={day.matchday === focusMatchday ? 'underdog-today' : undefined}
             open={defaultOpen}
-            className="group rounded-xl border border-zinc-800 bg-zinc-950/40"
+            className="group scroll-mt-28 rounded-xl border border-zinc-800 bg-zinc-950/40"
           >
             <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold text-zinc-200 [&::-webkit-details-marker]:hidden [&::marker]:hidden">
               <span>{formatMatchday(day.matchday)}</span>
-              <Chevron className="h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180" />
+              <span className="flex items-center gap-2">
+                {/* Per-day state at a glance — collapsed days would otherwise
+                    hide whether the just-before-kickoff job is done. */}
+                <span
+                  className={`text-xs font-normal ${flaggedCount > 0 ? 'text-emerald-400' : 'text-zinc-500'}`}
+                >
+                  {flaggedCount > 0
+                    ? `${flaggedCount} flagged`
+                    : '—'}
+                </span>
+                <Chevron className="h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180" />
+              </span>
             </summary>
             <div className="space-y-2 px-2 pb-2">
               {day.matches.map((m) => (

@@ -9,10 +9,11 @@ export default function ChangePassword() {
 
   // The card sits at the bottom of Profile, so the revealed fields would
   // otherwise open underneath the fixed tab bar and look like a dead tap.
-  // scroll-mb on the form keeps the submit button clear of the bar.
+  // block:'end' honors the form's scroll-mb so the Update button clears the
+  // bar ('nearest' was a no-op — the form was already "in view" behind it).
   useEffect(() => {
     if (open) {
-      formRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      formRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
     }
   }, [open]);
   const [current, setCurrent] = useState('');
@@ -20,6 +21,14 @@ export default function ChangePassword() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Belt-and-braces: a failed submit pulls the message line back into view —
+  // the form's scroll-mb keeps it clear of the fixed tab bar.
+  useEffect(() => {
+    if (error) {
+      formRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [error]);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -72,24 +81,42 @@ export default function ChangePassword() {
       ) : null}
       {open ? (
         <form ref={formRef} onSubmit={onSubmit} className="mt-3 scroll-mb-24 space-y-2">
-          <input
-            data-testid="cp-current"
-            type="password"
-            autoComplete="current-password"
-            placeholder="Current password"
-            value={current}
-            onChange={(e) => setCurrent(e.target.value)}
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-          />
-          <input
-            data-testid="cp-next"
-            type="password"
-            autoComplete="new-password"
-            placeholder="New password (8+ characters)"
-            value={next}
-            onChange={(e) => setNext(e.target.value)}
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-          />
+          {/* AuthForm's field recipe (label eyebrow + zinc-950/60 well) — one
+              input language app-wide; placeholders alone vanish while typing. */}
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-400">
+              Current password
+            </span>
+            <input
+              data-testid="cp-current"
+              type="password"
+              autoComplete="current-password"
+              placeholder="••••••••"
+              value={current}
+              onChange={(e) => setCurrent(e.target.value)}
+              className="h-12 w-full rounded-xl border border-zinc-700 bg-zinc-950/60 px-4 text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-zinc-400">
+              New password
+            </span>
+            <input
+              data-testid="cp-next"
+              type="password"
+              autoComplete="new-password"
+              placeholder="8+ characters"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              className="h-12 w-full rounded-xl border border-zinc-700 bg-zinc-950/60 px-4 text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
+            />
+          </label>
+          {/* Reserved slot ABOVE the button (AuthForm's recipe): below it the
+              fixed tab bar covered the message entirely, so failed submits
+              read as a dead button. */}
+          <p aria-live="polite" role="alert" className="min-h-4 text-xs text-red-400">
+            {error}
+          </p>
           <button
             data-testid="cp-submit"
             type="submit"
@@ -100,11 +127,6 @@ export default function ChangePassword() {
           >
             {busy ? 'Saving…' : 'Update password'}
           </button>
-          {error && (
-            <p className="text-xs text-red-400" role="alert">
-              {error}
-            </p>
-          )}
         </form>
       ) : null}
     </div>

@@ -35,25 +35,30 @@ export default async function JoinPage({
   }
 
   if (!league) {
+    // Same shell as the valid-invite render below (and /reset's dead end):
+    // my-auto content block over the pinned footer, safe-area padding kept.
     return (
-      <main className="relative isolate mx-auto flex min-h-dvh w-full max-w-md flex-col items-center justify-center gap-6 px-5 py-10 text-center">
+      <main className="relative isolate mx-auto flex min-h-dvh w-full max-w-md flex-col px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-10">
         <AuthGlow />
-        <Brand />
-        <div className="space-y-2">
-          <h1 className="text-xl font-bold text-zinc-100">
-            That invite is a red card
-          </h1>
-          <p className="text-sm text-zinc-400">
-            This invite link is not valid. Ask your friend to send a fresh one
-            from the league admin page.
-          </p>
+        <div className="my-auto flex flex-col items-center gap-6 py-6 text-center">
+          <Brand />
+          <div className="space-y-2">
+            <h1 className="text-xl font-bold text-zinc-100">
+              That invite is a red card
+            </h1>
+            <p className="text-sm text-zinc-400">
+              This invite link is not valid. Ask your friend to send a fresh one
+              from the league admin page.
+            </p>
+          </div>
+          <Link
+            href="/"
+            className="flex h-12 items-center justify-center rounded-xl bg-zinc-900 px-6 font-semibold text-zinc-100 ring-1 ring-zinc-800"
+          >
+            Go home
+          </Link>
         </div>
-        <Link
-          href="/"
-          className="flex h-12 items-center justify-center rounded-xl bg-zinc-900 px-6 font-semibold text-zinc-100 ring-1 ring-zinc-800"
-        >
-          Go home
-        </Link>
+        <AuthFooter />
       </main>
     );
   }
@@ -73,6 +78,18 @@ export default async function JoinPage({
     )
     .filter((n): n is string => n !== null && n.trim().length > 0);
   const user = await getSessionUser(db);
+  // Existing members skip the join pitch — the POST is idempotent, but the
+  // page shouldn't sell a league you're already in. userId validated at the
+  // boundary like displayName above.
+  const isMember =
+    user !== null &&
+    members.some(
+      (m) =>
+        m !== null &&
+        typeof m === 'object' &&
+        'userId' in m &&
+        (m as { userId: unknown }).userId === user.id,
+    );
 
   return (
     <main className="relative isolate mx-auto flex min-h-dvh w-full max-w-md flex-col px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-10">
@@ -117,19 +134,29 @@ export default async function JoinPage({
             </div>
           ) : null}
         </div>
-        {!user ? (
-          <p className="text-sm text-zinc-400">
-            Create an account to lock in your spot — it takes 20 seconds.
-          </p>
-        ) : null}
       </header>
 
-      <JoinLeagueClient
-        token={token}
-        slug={league.slug}
-        leagueName={league.name}
-        signedIn={user !== null}
-      />
+      {isMember ? (
+        <div className="space-y-3">
+          <p className="text-sm text-zinc-400">
+            You&apos;re already in — no need to join again.
+          </p>
+          <Link
+            href={`/league/${league.slug}/today`}
+            data-testid="open-league"
+            className="flex h-12 w-full items-center justify-center rounded-xl bg-emerald-400 font-semibold text-zinc-950 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 active:scale-[.99]"
+          >
+            Open {league.name}
+          </Link>
+        </div>
+      ) : (
+        <JoinLeagueClient
+          token={token}
+          slug={league.slug}
+          leagueName={league.name}
+          signedIn={user !== null}
+        />
+      )}
       </div>
       <AuthFooter />
     </main>

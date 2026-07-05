@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { normalizeName } from '@/lib/scoring';
 import { americanToProb } from '@/lib/odds';
@@ -156,6 +156,10 @@ export default function PickForm({
   const [away, setAway] = useState(initial ? String(initial.predAway) : '');
   const [scorer, setScorer] = useState(initial?.predScorer ?? '');
   const [scorerOpen, setScorerOpen] = useState(false);
+  // Filter only once the user types in THIS focus session — with a saved
+  // scorer, filtering by the stored value would open a one-row panel and make
+  // changing the pick require backspacing the whole name first.
+  const [scorerTyped, setScorerTyped] = useState(false);
   const scorerBlurTimer = useRef<number | null>(null);
   const [firstTeam, setFirstTeam] = useState<'' | FirstTeam>(
     initial?.predFirstTeam ?? '',
@@ -279,7 +283,7 @@ export default function PickForm({
   // knows when a custom/misspelled name filters out every player. An
   // all-filtered panel must say so instead of rendering an empty border
   // (which painted as a stray gray line).
-  const scorerQuery = normalizeName(scorer);
+  const scorerQuery = scorerTyped ? normalizeName(scorer) : '';
   // Likelihood order when odds exist (shortest price first — the question
   // people Google answered in the list itself); alphabetical tail for
   // players without a posted price.
@@ -297,6 +301,28 @@ export default function PickForm({
       .sort((a, b) => scorerProbOf(b) - scorerProbOf(a) || a.localeCompare(b)),
   }));
   const scorerHasMatches = scorerSections.some((s) => s.options.length > 0);
+
+  // Keyboard half of the declared combobox pattern: ArrowUp/Down move a
+  // highlighted option (reflected via aria-activedescendant), Enter commits
+  // it. Flattened across both squad sections; -1 = nothing highlighted.
+  const scorerFlat = scorerSections.flatMap((s) => s.options);
+  const scorerSectionOffsets: number[] = [];
+  {
+    let acc = 0;
+    for (const s of scorerSections) {
+      scorerSectionOffsets.push(acc);
+      acc += s.options.length;
+    }
+  }
+  const [scorerActiveIdx, setScorerActiveIdx] = useState(-1);
+  const scorerOptionId = (idx: number) => `scorer-option-${matchId}-${idx}`;
+  // Keep the highlighted row visible inside the 224px scroll panel.
+  useEffect(() => {
+    if (scorerActiveIdx < 0) return;
+    document
+      .getElementById(`scorer-option-${matchId}-${scorerActiveIdx}`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [scorerActiveIdx, matchId]);
 
   return (
     <form onSubmit={onSubmit} className="mt-3 space-y-2.5">
@@ -422,6 +448,12 @@ export default function PickForm({
               role="combobox"
               aria-expanded={scorerOpen}
               aria-controls={`scorer-options-${matchId}`}
+              aria-autocomplete="list"
+              aria-activedescendant={
+                scorerOpen && scorerActiveIdx >= 0
+                  ? scorerOptionId(scorerActiveIdx)
+                  : undefined
+              }
               onFocus={(e) => {
                 // Focus can bounce away (to the Save button) and back inside
                 // the 150ms blur-close window — a stale timer must never shut
@@ -431,6 +463,8 @@ export default function PickForm({
                   scorerBlurTimer.current = null;
                 }
                 setScorerOpen(true);
+                setScorerTyped(false); // fresh focus browses the full list
+                setScorerActiveIdx(-1);
                 // The options panel opens up to 224px below this input; near
                 // the bottom of the viewport that renders under the fixed tab
                 // bar. Centering the field on focus keeps the whole panel
@@ -448,6 +482,37 @@ export default function PickForm({
                 // row that the blur timer is about to unmount (which dropped
                 // keyboard focus to <body> for one dead Tab stop).
                 if (e.key === 'Tab') setScorerOpen(false);
+                // Arrow keys walk the flattened option list, wrapping at the
+                // ends; Enter commits the highlighted option. Enter with no
+                // highlight keeps its stock behavior (submit the form).
+                if (
+                  (e.key === 'ArrowDown' || e.key === 'ArrowUp') &&
+                  scorerFlat.length > 0
+                ) {
+                  e.preventDefault();
+                  setScorerOpen(true);
+                  setScorerActiveIdx((i) =>
+                    e.key === 'ArrowDown'
+                      ? i < scorerFlat.length - 1
+                        ? i + 1
+                        : 0
+                      : i > 0
+                        ? i - 1
+                        : scorerFlat.length - 1,
+                  );
+                }
+                if (
+                  e.key === 'Enter' &&
+                  scorerOpen &&
+                  scorerActiveIdx >= 0 &&
+                  scorerActiveIdx < scorerFlat.length
+                ) {
+                  e.preventDefault();
+                  setScorer(scorerFlat[scorerActiveIdx]);
+                  setScorerOpen(false);
+                  setScorerActiveIdx(-1);
+                  touch();
+                }
               }}
               onBlur={() => {
                 // let an option tap land before the panel closes
@@ -459,6 +524,10 @@ export default function PickForm({
               onChange={(e) => {
                 setScorer(e.target.value);
                 setScorerOpen(true);
+                setScorerTyped(true);
+                // A new filter reorders the list — a stale highlight would
+                // point at a different player.
+                setScorerActiveIdx(-1);
                 touch();
               }}
               className={wideInputClass}
@@ -467,6 +536,8 @@ export default function PickForm({
             ((homeSquad?.length ?? 0) > 0 || (awaySquad?.length ?? 0) > 0) ? (
               <div
                 id={`scorer-options-${matchId}`}
+                role="listbox"
+                aria-label="First goalscorer options"
                 className="absolute inset-x-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60"
               >
                 {!scorerHasMatches ? (
@@ -477,17 +548,23 @@ export default function PickForm({
                     No squad match — pick a player from the list.
                   </p>
                 ) : null}
-                {scorerSections.map(({ team, options }) => {
+                {scorerSections.map(({ team, options }, si) => {
                   if (options.length === 0) return null;
                   return (
-                    <div key={team}>
+                    <div key={team} role="group" aria-label={team}>
                       <p className="sticky top-0 bg-zinc-900/95 px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500 backdrop-blur">
                         {team}
                       </p>
-                      {options.map((n) => (
+                      {options.map((n, oi) => {
+                        const idx = scorerSectionOffsets[si] + oi;
+                        const highlighted = idx === scorerActiveIdx;
+                        return (
                         <button
                           key={n}
                           type="button"
+                          id={scorerOptionId(idx)}
+                          role="option"
+                          aria-selected={highlighted}
                           data-testid="scorer-option"
                           // Out of the Tab sequence (combobox pattern): Tab
                           // from the input must land on the next form control,
@@ -507,7 +584,11 @@ export default function PickForm({
                           // floor — these are rapid-fire thumb targets.
                           // Shared emerald focus ring (not the stock blue UA
                           // outline) for keyboard users tabbing the list.
-                          className="flex w-full items-baseline justify-between gap-2 px-3 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400/60 active:bg-zinc-800"
+                          // bg-zinc-800 doubles as the keyboard highlight
+                          // (aria-activedescendant's visual half).
+                          className={`flex w-full items-baseline justify-between gap-2 px-3 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400/60 active:bg-zinc-800 ${
+                            highlighted ? 'bg-zinc-800' : ''
+                          }`}
                         >
                           <span className="min-w-0 truncate">{n}</span>
                           {scorerOdds[n] ? (
@@ -516,7 +597,8 @@ export default function PickForm({
                             </span>
                           ) : null}
                         </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   );
                 })}
@@ -568,6 +650,12 @@ export default function PickForm({
             </svg>
           </div>
         </div>
+        {/* Always-rendered save-error slot ABOVE the CTA (AuthForm's recipe):
+            below the button the fixed tab bar covered the message on the last
+            card, so a failed save read as a dead button. */}
+        <p aria-live="polite" className="min-h-5 text-sm text-brand-bright">
+          {status === 'error' ? error : null}
+        </p>
         {/* Card-level "Saved" chip beside the CTA (only in the re-opened Edit
             state) — inlining it on a field's label row read as if just that
             one field were saved. */}
@@ -628,9 +716,6 @@ export default function PickForm({
             )}
           </button>
         </div>
-        {status === 'error' && error && (
-          <p className="text-sm text-brand-bright">{error}</p>
-        )}
       </div>
     </form>
   );

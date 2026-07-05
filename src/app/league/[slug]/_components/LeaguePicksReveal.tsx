@@ -53,7 +53,9 @@ export default function LeaguePicksReveal({
 }) {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<RevealData | null>(null);
-  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
+  // 'hidden' = the server's 403 (picks stay private until kickoff) — an
+  // expected state, never dressed up as a transient network failure.
+  const [state, setState] = useState<'idle' | 'loading' | 'error' | 'hidden'>('idle');
 
   async function toggle() {
     const next = !open;
@@ -72,7 +74,7 @@ export default function LeaguePicksReveal({
           setData(json.data);
           setState('idle');
         } else {
-          setState('error');
+          setState(res.status === 403 ? 'hidden' : 'error');
         }
       } catch {
         setState('error');
@@ -116,6 +118,10 @@ export default function LeaguePicksReveal({
         <div className="pt-1">
           {state === 'loading' ? (
             <p className="px-1 py-2 text-xs text-zinc-500">Loading picks…</p>
+          ) : state === 'hidden' ? (
+            <p className="px-1 py-2 text-xs text-zinc-500">
+              Picks stay hidden until kickoff.
+            </p>
           ) : state === 'error' ? (
             <p className="px-1 py-2 text-xs text-zinc-500">
               Couldn&apos;t load picks — try again in a moment.

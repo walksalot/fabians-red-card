@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { codeToFlagEmoji } from '../../_components/flags';
+import { codeToFlagEmoji, shortTeamName } from '../../_components/flags';
 import {
   apiSend,
   formatKickoffEt,
@@ -17,7 +17,7 @@ import { adminSelectCls, Chevron } from './ui';
     min-h-10 keeps every row control at the 40px tap floor — the admin enters
     104 results from a phone, and the Save/Clear buttons beside them are 40px. */
 const scoreInputCls =
-  'min-h-10 w-12 rounded-xl border border-zinc-700 bg-zinc-950/60 px-1 py-1.5 text-center text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30';
+  'min-h-10 w-12 rounded-xl border border-zinc-700 bg-zinc-950/60 px-1 py-1.5 text-center text-sm text-zinc-100 transition-colors focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30 disabled:opacity-50';
 // No flex-1 here: the flex shorthand would override the basis-full that puts
 // the scorer input on its own row (saved names must never clip at 390px).
 const textInputCls =
@@ -37,7 +37,8 @@ function TeamTag({
   if (!code) {
     // Knockout placeholders ("Group A runners-up") don't fit the slot sized
     // for 3-letter codes — wrap to two smaller lines instead of truncating
-    // both sides to the identical "Group …".
+    // both sides to the identical "Group …". shortTeamName keeps the
+    // distinguishing token ("Winner M73") inside the clamp at 375px.
     return (
       <span
         title={name}
@@ -45,7 +46,7 @@ function TeamTag({
           align === 'right' ? 'text-right' : ''
         }`}
       >
-        {name}
+        {shortTeamName(name)}
       </span>
     );
   }
@@ -103,8 +104,15 @@ export default function ResultsEntry({ matches, nowMs }: Props) {
         </a>
       ) : null}
       {days.map((day) => {
-        const finishedCount = day.matches.filter((m) => m.status === 'finished').length;
-        const allFinished = finishedCount === day.matches.length;
+        // Honest denominator: a slot still missing a team can't take a result,
+        // so it sits outside the fraction as a "· N TBD" tail instead of
+        // making a fully-entered day read incomplete.
+        const enterable = day.matches.filter(
+          (m) => m.homeTeamId !== null && m.awayTeamId !== null,
+        );
+        const tbdCount = day.matches.length - enterable.length;
+        const finishedCount = enterable.filter((m) => m.status === 'finished').length;
+        const allFinished = enterable.length > 0 && finishedCount === enterable.length;
         const isPast = day.matches.every((m) => Date.parse(m.kickoffUtc) < nowMs);
         // Open only what the admin acts on now: past days still missing results,
         // today, and the next matchday. Everything else starts collapsed.
@@ -127,8 +135,10 @@ export default function ResultsEntry({ matches, nowMs }: Props) {
                 <span
                   className={`text-xs font-normal ${allFinished ? 'text-emerald-400' : 'text-zinc-500'}`}
                 >
-                  {finishedCount}/{day.matches.length} entered
-                  {allFinished ? ' ✓' : ''}
+                  {enterable.length > 0
+                    ? `${finishedCount}/${enterable.length} entered${allFinished ? ' ✓' : ''}`
+                    : 'TBD'}
+                  {enterable.length > 0 && tbdCount > 0 ? ` · ${tbdCount} TBD` : ''}
                 </span>
                 <Chevron className="h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180" />
               </span>
@@ -256,6 +266,10 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
     scorer !== savedSnapshot.scorer ||
     effectiveFirstTeam !== savedSnapshot.firstTeam;
 
+  // No teams assigned = nothing to score yet: inputs disarm and the Save
+  // button yields to a pointer at Knockouts — an armed form here saved
+  // results against placeholder slots. Display-layer only.
+  const teamsTbd = match.homeTeamId === null || match.awayTeamId === null;
   const kickedOff = Date.parse(match.kickoffUtc) <= nowMs;
   const chip = finished
     ? { text: 'FT', cls: 'bg-emerald-500/15 text-emerald-400' }
@@ -295,6 +309,7 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
           step={1}
           value={home}
           onChange={(e) => onScores(e.target.value, away)}
+          disabled={teamsTbd}
           className={scoreInputCls}
         />
         <span className="text-zinc-600">–</span>
@@ -307,6 +322,7 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
           step={1}
           value={away}
           onChange={(e) => onScores(home, e.target.value)}
+          disabled={teamsTbd}
           className={scoreInputCls}
         />
         <TeamTag name={match.awayName} code={match.awayCode} align="right" />
@@ -323,7 +339,7 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
           placeholder="First scorer"
           value={scorer}
           onChange={(e) => setScorer(e.target.value)}
-          disabled={zeroZero}
+          disabled={zeroZero || teamsTbd}
           className={`${textInputCls} basis-full`}
         />
         <span className="relative">
@@ -336,7 +352,8 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
                 setFirstTeam(e.target.value as '' | 'home' | 'away' | 'none');
               }
             }}
-            className={adminSelectCls}
+            disabled={teamsTbd}
+            className={`${adminSelectCls} disabled:opacity-50`}
           >
             <option value="" disabled>
               First team to score…
@@ -347,19 +364,28 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
           </select>
           <Chevron className="pointer-events-none absolute right-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-zinc-500" />
         </span>
-        <button
-          type="submit"
-          data-testid={`result-save-${match.id}`}
-          disabled={saving}
-          className={`min-h-10 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-60 ${
-            dirty
-              ? // Unsaved edits in this form — the one row that earns solid green.
-                'bg-emerald-500 text-zinc-950 hover:bg-emerald-400'
-              : 'border border-emerald-400/30 text-emerald-300 hover:bg-emerald-400/10'
-          }`}
-        >
-          {saving ? 'Saving…' : finished ? 'Edit result' : 'Save result'}
-        </button>
+        {teamsTbd ? (
+          <a
+            href="#fixtures"
+            className="flex min-h-10 items-center text-xs text-zinc-500 underline-offset-2 hover:text-zinc-300 hover:underline"
+          >
+            Teams not set — assign in Knockouts
+          </a>
+        ) : (
+          <button
+            type="submit"
+            data-testid={`result-save-${match.id}`}
+            disabled={saving}
+            className={`min-h-10 rounded-xl px-3 py-1.5 text-xs font-semibold transition-colors active:scale-95 disabled:opacity-60 ${
+              dirty
+                ? // Unsaved edits in this form — the one row that earns solid green.
+                  'bg-emerald-500 text-zinc-950 hover:bg-emerald-400'
+                : 'border border-emerald-400/30 text-emerald-300 hover:bg-emerald-400/10'
+            }`}
+          >
+            {saving ? 'Saving…' : finished ? 'Edit result' : 'Save result'}
+          </button>
+        )}
         {finished && (
           <button
             type="button"

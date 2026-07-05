@@ -93,7 +93,7 @@ export default async function RulesPage({
         <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
           How scoring works
         </p>
-        <h2 className="text-lg font-extrabold tracking-tight text-zinc-50">
+        <h2 className="font-display text-lg font-bold tracking-tight text-zinc-50">
           Rules
         </h2>
       </div>

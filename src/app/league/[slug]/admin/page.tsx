@@ -205,13 +205,18 @@ export default async function AdminPage({
   ];
 
   return (
-    <main className="min-h-dvh bg-zinc-950 pb-24 text-zinc-100">
-      <div className="mx-auto max-w-xl space-y-5 px-4 py-6">
+    // No own <main>/px-4/max-w wrapper — the league layout owns the shell;
+    // doubling it doubled the gutters and the <main> landmark.
+    <div className="space-y-5">
         <header className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-widest text-emerald-400">
+          {/* Shared screen-header recipe (Rules/Bracket): eyebrow over a
+              display-face title. */}
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
             Admin
           </p>
-          <h1 className="text-2xl font-bold">{league.name}</h1>
+          <h1 className="font-display text-lg font-bold tracking-tight text-zinc-50">
+            {league.name}
+          </h1>
           <Link
             href={`/league/${slug}/today`}
             className="inline-flex h-9 items-center gap-1.5 rounded-full bg-zinc-800/60 px-3.5 text-xs font-semibold text-zinc-300 ring-1 ring-inset ring-white/10 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
@@ -247,7 +252,10 @@ export default async function AdminPage({
                 <a
                   key={l.href}
                   href={l.href}
-                  className="shrink-0 whitespace-nowrap rounded-full bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 ring-1 ring-inset ring-white/10 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+                  // before: pseudo-element lifts the 28px pill to the ~44px
+                  // tap floor without growing the visual (layout.tsx's rank
+                  // chip recipe).
+                  className="relative shrink-0 whitespace-nowrap rounded-full bg-zinc-900 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 ring-1 ring-inset ring-white/10 transition-colors before:absolute before:inset-x-0 before:-inset-y-2 before:content-[''] hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
                 >
                   {l.label}
                 </a>
@@ -297,7 +305,6 @@ export default async function AdminPage({
             nowMs={now}
           />
         </section>
-      </div>
-    </main>
+    </div>
   );
 }

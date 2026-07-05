@@ -117,13 +117,17 @@ export default function LiveNow({
             ? Math.max(0, nowVal - b.liveUpdatedAt)
             : null;
         // Seconds cap at 55 — 57.5s+ would otherwise round to "60s ago"
-        // instead of rolling into the minutes branch.
+        // instead of rolling into the minutes branch. Past 90 minutes the
+        // label rolls into hours ("1h 15m ago") — an unbounded "347m ago"
+        // reads as a glitch.
         const feedAgeLabel =
           feedAgeMs === null
             ? null
             : feedAgeMs < 60_000
               ? `${Math.min(55, Math.max(5, Math.round(feedAgeMs / 5000) * 5))}s ago`
-              : `${Math.round(feedAgeMs / 60_000)}m ago`;
+              : feedAgeMs < 90 * 60_000
+                ? `${Math.round(feedAgeMs / 60_000)}m ago`
+                : `${Math.floor(feedAgeMs / 3_600_000)}h ${Math.floor((feedAgeMs % 3_600_000) / 60_000)}m ago`;
         return (
           <div
             key={b.matchId}
@@ -147,7 +151,7 @@ export default function LiveNow({
                 />
               ) : null}
               <span className="relative flex h-2 w-2 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand opacity-75" />
+                <span className="absolute inline-flex h-full w-full rounded-full bg-brand opacity-75 motion-safe:animate-ping" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-brand" />
               </span>
               <span className="min-w-0 flex-1">
@@ -231,7 +235,18 @@ export default function LiveNow({
                     <span className="min-w-0 flex-1 truncate font-medium text-zinc-200">
                       {r.label}
                       {r.boosted ? (
-                        <span className="ml-1 text-[10px] font-bold text-amber-300">⚡×</span>
+                        // SVG bolt (BoosterButton's glyph), never the ⚡ emoji.
+                        <span className="ml-1 whitespace-nowrap text-[10px] font-bold text-amber-300">
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="inline-block h-3 w-3 align-[-1.5px]"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          >
+                            <path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z" />
+                          </svg>
+                          ×
+                        </span>
                       ) : null}
                     </span>
                     {r.pick ? (
@@ -239,7 +254,7 @@ export default function LiveNow({
                         {r.pick.predHome}–{r.pick.predAway}
                       </span>
                     ) : (
-                      <span className="shrink-0 text-[11px] text-zinc-600">no pick</span>
+                      <span className="shrink-0 text-[11px] text-zinc-400">no pick</span>
                     )}
                     {r.breakdown ? (
                       // Chip discipline mirrors breakdown-chips.tsx: score

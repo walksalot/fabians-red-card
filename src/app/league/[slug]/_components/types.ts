@@ -166,6 +166,11 @@ export interface HistoryItemView {
   myPick: PickView | null;
   breakdown: BreakdownView | null;
   total: number | null;
+  /** Finished knockout tie level after extra time — went to penalties
+      (bracket.ts's decidedOnPens inference, reused for the caption). */
+  decidedOnPens?: boolean;
+  /** Shoot-out winner's name once the next round's slot reveals the advancer. */
+  pensAdvancer?: string | null;
 }
 
 export interface HistoryDayView {

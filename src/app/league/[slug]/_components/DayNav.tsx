@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import type { MatchdaySummary } from '@/lib/services/today';
 import { buildDayHref } from './day-href';
 import { formatMatchday } from './format';
+import { useSheetFocus } from './useSheetFocus';
 
 /**
  * The day browser: ‹ › step through matchdays, tapping the date opens the
@@ -32,6 +33,10 @@ export default function DayNav({
   const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  // aria-modal's other half: focus moves into the sheet on open and Tab
+  // cycles inside it while open.
+  useSheetFocus(open, sheetRef);
 
   // Escape closes the sheet and hands focus back to the date trigger — the
   // dialog declares aria-modal, so keyboard users rightly expect it.
@@ -51,6 +56,10 @@ export default function DayNav({
   const prev = idx > 0 ? days[idx - 1] : null;
   const next = idx >= 0 && idx < days.length - 1 ? days[idx + 1] : null;
   const isCurrent = viewedDay === currentDay;
+  // The dot points at the matchday AFTER the current one — suppress it while
+  // that very day is on screen (a nudge toward the page you're reading).
+  const gapDay = days.find((d) => d.matchday > currentDay)?.matchday ?? null;
+  const showGapDot = nextDayHasGaps && gapDay !== null && gapDay !== viewedDay;
 
   // Keep the rest of the query (e.g. ?entry= for multi-entry users) across
   // day navigation, mirroring EntrySwitcher.
@@ -94,7 +103,7 @@ export default function DayNav({
             {/* Inline beside the date (not floated to the button's invisible
                 corner) so the "unpicked matchday ahead" dot reads as attached
                 to the day browser, never as a stray pixel in dead space. */}
-            {nextDayHasGaps ? (
+            {showGapDot ? (
               <span
                 data-testid="day-gap-dot"
                 title="The next matchday still has unpicked matches"
@@ -128,7 +137,14 @@ export default function DayNav({
           cover the last matchday row. z-60 keeps the ordering explicit. */}
       {open ? (
         createPortal(
-        <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Choose a matchday">
+        <div
+          ref={sheetRef}
+          tabIndex={-1}
+          className="fixed inset-0 z-[60] focus:outline-none"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Choose a matchday"
+        >
           <button
             type="button"
             aria-label="Close"
@@ -146,7 +162,10 @@ export default function DayNav({
             </p>
             <div className="mt-3 space-y-1.5" data-testid="day-list">
               {days.map((d) => {
-                const complete = d.pickedCount >= d.matchCount;
+                // Emerald once no FILLABLE gap remains — bracket placeholders
+                // are excluded from the fraction (nobody can pick them) and
+                // surface as a "· N TBD" tail instead.
+                const complete = d.missingPickCount === 0;
                 const active = d.matchday === viewedDay;
                 return (
                   <button
@@ -174,7 +193,12 @@ export default function DayNav({
                       </span>
                       <span className="block text-[11px] text-zinc-500">
                         {d.matchCount} {d.matchCount === 1 ? 'match' : 'matches'}
-                        {d.boosterArmed ? ' · ⚡ booster armed' : ''}
+                        {d.boosterArmed ? (
+                          <>
+                            {' · '}
+                            <Bolt /> booster armed
+                          </>
+                        ) : null}
                       </span>
                     </span>
                     {/* Bracket-pending days get a neutral TBD chip — amber is
@@ -190,13 +214,15 @@ export default function DayNav({
                     >
                       {d.allTbd
                         ? 'TBD'
-                        : `${d.pickedCount}/${d.matchCount} picked`}
+                        : `${d.pickedCount}/${d.pickableCount} picked${
+                            d.tbdCount > 0 ? ` · ${d.tbdCount} TBD` : ''
+                          }`}
                     </span>
                   </button>
                 );
               })}
             </div>
-            <p className="mt-3 pb-1 text-center text-[11px] text-zinc-600">
+            <p className="mt-3 pb-1 text-center text-[11px] text-zinc-400">
               Finished days live in the History tab.
             </p>
           </div>
@@ -205,6 +231,20 @@ export default function DayNav({
         )
       ) : null}
     </>
+  );
+}
+
+/** The app's bolt glyph (BoosterButton's path) — emoji ⚡ stays out of the UI. */
+function Bolt() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="inline-block h-3 w-3 align-[-1.5px] text-amber-300"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z" />
+    </svg>
   );
 }
 

@@ -365,12 +365,24 @@ export default async function TodayPage({
       ) : null}
       {showBracket ? (
         <Link
-          href={`/league/${slug}/bracket`}
+          href={`/league/${slug}/bracket${rawEntry ? `?entry=${encodeURIComponent(rawEntry)}` : ''}`}
           data-testid="bracket-link"
           className="flex items-center justify-between gap-2 rounded-2xl border border-white/5 bg-zinc-900 px-3.5 py-2.5 text-[13px] font-bold text-zinc-200 transition-colors hover:bg-zinc-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
         >
           <span className="flex min-w-0 items-center gap-2">
-            <span aria-hidden="true" className="text-base leading-none">🏆</span>
+            {/* Bracket glyph (two feeders merging into one) — 🏆 stays the
+                wrap banner's day-winner symbol. */}
+            <svg
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+              className="h-4 w-4 shrink-0 text-zinc-400"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
+              <path d="M2 4h4v3.5h3.5M2 12h4V8.5h3.5M9.5 8h4.5" />
+            </svg>
             <span className="truncate">Road to the Final</span>
           </span>
           <span aria-hidden="true" className="shrink-0 text-zinc-500">→</span>

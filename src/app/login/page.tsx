@@ -1,7 +1,11 @@
+import { redirect } from 'next/navigation';
+import { getDb } from '@/db';
+import { getSessionUser } from '@/lib/session';
 import { AuthPageClient } from '@/components/AuthPageClient';
 import AuthFooter from '@/components/AuthFooter';
 import AuthGlow from '@/components/AuthGlow';
 import { Brand } from '@/components/Brand';
+import { safePath } from '@/components/client-api';
 
 export default async function LoginPage({
   searchParams,
@@ -10,6 +14,11 @@ export default async function LoginPage({
 }) {
   const params = await searchParams;
   const next = Array.isArray(params.next) ? params.next[0] : params.next;
+
+  // Already signed in — the mirror of HomePage's signed-out redirect: a
+  // sign-in form for a live session only invites a pointless re-login.
+  const user = await getSessionUser(getDb());
+  if (user) redirect(safePath(next));
 
   return (
     <main className="relative isolate mx-auto flex min-h-dvh w-full max-w-md flex-col px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-10">
