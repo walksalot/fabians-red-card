@@ -334,7 +334,19 @@ export function planSync(
     }
 
     if (completed) {
-      const pens = finalShootout(sides, homeScore, awayScore);
+      const feedPens = finalShootout(sides, homeScore, awayScore);
+      // A feed gap must never erase recorded tallies: when the event omits
+      // (or garbles) the shootout numbers but the final score still matches
+      // the banked one, the stored pair stands — otherwise a transient feed
+      // hiccup would null the pens and flap the propagated bracket slot.
+      const pens =
+        feedPens ??
+        (match.homeScore === homeScore &&
+        match.awayScore === awayScore &&
+        match.homePens !== null &&
+        match.awayPens !== null
+          ? { home: match.homePens, away: match.awayPens }
+          : null);
       // already recorded identically → idempotent no-op. Pens are part of the
       // identity: a tie banked before pens support (stored NULLs) re-writes
       // once so the shootout tallies backfill.

@@ -644,6 +644,71 @@ describe('planSync', () => {
       expect(planSync([event], [healed]).actions).toEqual([]);
     });
 
+    it('a feed gap never erases recorded tallies — no rewrite, no bracket flap', () => {
+      const healed = snap({
+        id: 1,
+        kickoffUtc: '2026-06-11T19:00:00Z',
+        status: 'finished',
+        resultSource: 'auto',
+        homeScore: 0,
+        awayScore: 0,
+        homePens: 4,
+        awayPens: 3,
+      });
+      // Same final, but this pass the feed omitted shootoutScore entirely.
+      const gappyEvent = espnEvent({
+        state: 'post',
+        completed: true,
+        home: { score: '0' },
+        away: { score: '0' },
+        details: shootoutKicks,
+      });
+      expect(planSync([gappyEvent], [healed]).actions).toEqual([]);
+
+      // A CORRECTED feed tally still wins over the stored one.
+      const corrected = espnEvent({
+        state: 'post',
+        completed: true,
+        home: { score: '0', shootoutScore: 5 },
+        away: { score: '0', shootoutScore: 4 },
+        details: shootoutKicks,
+      });
+      expect(planSync([corrected], [healed]).actions).toEqual([
+        {
+          kind: 'result',
+          matchId: 1,
+          homeScore: 0,
+          awayScore: 0,
+          firstScorer: null,
+          firstScoringTeam: 'none',
+          homePens: 5,
+          awayPens: 4,
+        },
+      ]);
+
+      // A corrected SCORE drops the stale stored tallies (they belonged to
+      // the old, wrong scoreline) rather than gluing them onto the new one.
+      const scoreFix = espnEvent({
+        state: 'post',
+        completed: true,
+        home: { score: '1' },
+        away: { score: '0' },
+        details: [{ clock: 1200, teamId: '100', athlete: 'Somebody' }],
+      });
+      expect(planSync([scoreFix], [healed]).actions).toEqual([
+        {
+          kind: 'result',
+          matchId: 1,
+          homeScore: 1,
+          awayScore: 0,
+          firstScorer: 'Somebody',
+          firstScoringTeam: 'home',
+          homePens: null,
+          awayPens: null,
+        },
+      ]);
+    });
+
     it('ignores junk tallies: a decisive score or a level shootout parses as no shootout', () => {
       // decisive score with stray shootout numbers → pens stay null
       const decisive = planSync(
