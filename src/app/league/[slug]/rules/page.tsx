@@ -106,6 +106,13 @@ export default async function RulesPage({
           <strong>first team to score</strong>.
         </p>
         <p>
+          <strong>Penalty shootouts don&rsquo;t count.</strong> A knockout tie
+          that goes to penalties scores as the draw it was after extra time:
+          shootout kicks never change the scoreline, the first goalscorer, or
+          the first team to score — the shootout only decides who advances in
+          the bracket.
+        </p>
+        <p>
           <strong>Picks lock at kickoff.</strong>{' '}
           You can change a pick as
           often as you like before the match starts — editing never affects

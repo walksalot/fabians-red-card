@@ -366,7 +366,11 @@ function FixtureCenter({
         </span>
         {pens ? (
           <span className="whitespace-nowrap text-[9px] font-medium text-zinc-400">
-            on penalties
+            {item.homePens !== null && item.awayPens !== null
+              ? // The tally stays out of the FT score above: shootout kicks
+                // are not goals, they only name who advances.
+                `${item.homePens}–${item.awayPens} on penalties`
+              : 'on penalties'}
           </span>
         ) : null}
       </div>
@@ -414,6 +418,13 @@ function FixtureCenter({
             {item.liveClock ?? 'Live'}
           </span>
         </span>
+        {item.liveHomePens !== null && item.liveAwayPens !== null ? (
+          // Shootout in progress: the running tally rides below the (level)
+          // real score — shootout kicks are not goals, so the score holds.
+          <span className="whitespace-nowrap text-[10px] font-bold tabular-nums text-brand-bright">
+            Pens {item.liveHomePens}–{item.liveAwayPens}
+          </span>
+        ) : null}
         <FeedAge liveUpdatedAt={item.liveUpdatedAt} serverNowMs={serverNowMs} />
       </div>
     );

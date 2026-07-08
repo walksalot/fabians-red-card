@@ -98,6 +98,15 @@ export function scorePick(pick: PickInput, result: ResultInput, rules: ScoringRu
   opts: { roundMultiplier: number; boosted: boolean; boosterMultiplier: number }): PointsBreakdown
 ```
 
+Penalty shootouts (knockout ties level after extra time) NEVER touch scoring:
+the result is the draw at the end of extra time (that is `homeScore`/`awayScore`),
+`firstScorer`/`firstScoringTeam` come only from real goals (a 0-0 tie that went
+to pens stays `null`/`'none'`), and shootout tallies live in separate
+`matches.homePens`/`awayPens` columns used ONLY for display and bracket
+advancement (plus `liveHomePens`/`liveAwayPens` mid-shootout). The ESPN feed
+marks shootout kicks `scoringPlay: true` + `shootout: true` — the planner must
+exclude them from first-goal extraction.
+
 Rules (base components sum, then multipliers):
 - exact: predicted score identical → `rules.exact` (10). Outcome NOT also awarded when exact.
 - outcome (consolation): not exact but same result sign (home win / draw / away win) →

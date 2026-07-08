@@ -602,6 +602,175 @@ describe('results service', () => {
     expect(pointsFor(db, entry.id, 1)).toBeNull();
   });
 
+  it('stores shootout tallies on a level knockout tie without ever touching points', () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    const league = makeLeague(db, admin.id);
+    const entry = makeEntry(db, league.id, makeUser(db).id);
+    makeTeam(db, 1, 'SUI');
+    makeTeam(db, 2, 'COL');
+    makeMatch(db, 96, { stage: 'r16', homeTeamId: 1, awayTeamId: 2 });
+    // Called the goalless draw exactly: exact 10 + firstTeam('none') 2.
+    makePick(db, entry.id, 96, { predHome: 0, predAway: 0, predFirstTeam: 'none' });
+    // Predicted a Colombia win: the pens advance must NOT turn this into a win.
+    const entry2 = makeEntry(db, league.id, makeUser(db).id);
+    makePick(db, entry2.id, 96, { predHome: 0, predAway: 1, predFirstTeam: 'away' });
+
+    const match = enterResult(db, admin.id, {
+      matchId: 96,
+      homeScore: 0,
+      awayScore: 0,
+      firstScorer: null,
+      firstScoringTeam: 'none',
+      homePens: 2,
+      awayPens: 4,
+    });
+    expect(match.homePens).toBe(2);
+    expect(match.awayPens).toBe(4);
+    expect(match.firstScorer).toBeNull();
+    expect(match.firstScoringTeam).toBe('none');
+
+    // The tie scores as the 0-0 draw it was — the shootout pays nobody.
+    expect(pointsFor(db, entry.id, 96)?.total).toBe(12);
+    const colBacker = pointsFor(db, entry2.id, 96);
+    expect(colBacker?.total).toBe(0);
+    expect(colBacker?.parsed.outcome).toBe(0);
+    expect(colBacker?.parsed.firstTeam).toBe(0);
+  });
+
+  it('shootout tallies also ride on a level tie with goals, and clear on re-entry without them', () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    makeLeague(db, admin.id);
+    makeTeam(db, 1, 'CRO');
+    makeTeam(db, 2, 'BRA');
+    makeMatch(db, 98, { stage: 'qf', homeTeamId: 1, awayTeamId: 2 });
+
+    const withPens = enterResult(db, admin.id, {
+      matchId: 98,
+      homeScore: 1,
+      awayScore: 1,
+      firstScorer: 'Neymar',
+      firstScoringTeam: 'away',
+      homePens: 4,
+      awayPens: 2,
+    });
+    expect(withPens.homePens).toBe(4);
+
+    // Re-entering the result without tallies erases them (edit semantics).
+    const without = enterResult(db, admin.id, {
+      matchId: 98,
+      homeScore: 1,
+      awayScore: 1,
+      firstScorer: 'Neymar',
+      firstScoringTeam: 'away',
+    });
+    expect(without.homePens).toBeNull();
+    expect(without.awayPens).toBeNull();
+  });
+
+  it('rejects malformed shootouts: one-sided, level, decisive score, or group stage', () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    makeLeague(db, admin.id);
+    makeTeam(db, 1, 'SUI');
+    makeTeam(db, 2, 'COL');
+    makeMatch(db, 1, { stage: 'group', homeTeamId: 1, awayTeamId: 2 });
+    makeMatch(db, 96, { stage: 'r16', homeTeamId: 1, awayTeamId: 2 });
+    const draw = {
+      homeScore: 1,
+      awayScore: 1,
+      firstScorer: null,
+      firstScoringTeam: 'home' as const,
+    };
+
+    // one tally without the other
+    expectAppError(
+      () => enterResult(db, admin.id, { matchId: 96, ...draw, homePens: 4 }),
+      400,
+    );
+    // a shootout cannot end level
+    expectAppError(
+      () => enterResult(db, admin.id, { matchId: 96, ...draw, homePens: 3, awayPens: 3 }),
+      400,
+    );
+    // decisive scores never have a shootout
+    expectAppError(
+      () =>
+        enterResult(db, admin.id, {
+          matchId: 96,
+          homeScore: 2,
+          awayScore: 1,
+          firstScorer: null,
+          firstScoringTeam: 'home',
+          homePens: 4,
+          awayPens: 2,
+        }),
+      400,
+    );
+    // group games never have one either
+    expectAppError(
+      () => enterResult(db, admin.id, { matchId: 1, ...draw, homePens: 4, awayPens: 2 }),
+      400,
+    );
+  });
+
+  it('clearing a result clears the shootout tallies with it', () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    makeLeague(db, admin.id);
+    makeTeam(db, 1, 'SUI');
+    makeTeam(db, 2, 'COL');
+    makeMatch(db, 96, { stage: 'r16', homeTeamId: 1, awayTeamId: 2 });
+
+    enterResult(db, admin.id, {
+      matchId: 96,
+      homeScore: 0,
+      awayScore: 0,
+      firstScorer: null,
+      firstScoringTeam: 'none',
+      homePens: 2,
+      awayPens: 4,
+    });
+    const cleared = clearResult(db, admin.id, 96);
+    expect(cleared.homePens).toBeNull();
+    expect(cleared.awayPens).toBeNull();
+  });
+
+  it('a final result clears live shootout tallies along with the rest of the live state', () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    makeLeague(db, admin.id);
+    makeTeam(db, 1, 'SUI');
+    makeTeam(db, 2, 'COL');
+    makeMatch(db, 96, { stage: 'r16', homeTeamId: 1, awayTeamId: 2 });
+
+    setLiveScore(db, {
+      matchId: 96,
+      liveHome: 0,
+      liveAway: 0,
+      updatedAtMs: 5,
+      clock: 'Pens',
+      liveHomePens: 3,
+      liveAwayPens: 2,
+    });
+    const live = db.select().from(schema.matches).where(eq(schema.matches.id, 96)).get();
+    expect(live?.liveHomePens).toBe(3);
+    expect(live?.liveAwayPens).toBe(2);
+
+    const finished = enterResultAuto(db, {
+      matchId: 96,
+      homeScore: 0,
+      awayScore: 0,
+      firstScorer: null,
+      firstScoringTeam: 'none',
+      homePens: 4,
+      awayPens: 3,
+    });
+    expect(finished?.liveHomePens).toBeNull();
+    expect(finished?.liveAwayPens).toBeNull();
+  });
+
   it('recomputeLeague recomputes finished matches only for that league', () => {
     const db = freshDb();
     const adminA = makeUser(db);

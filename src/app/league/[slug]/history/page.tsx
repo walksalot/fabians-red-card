@@ -143,6 +143,14 @@ export default async function HistoryPage({
       }
       const node = nodeById.get(m.id);
       const decidedOnPens = node?.decidedOnPens ?? false;
+      // Winner-first tally ("4–2") — the caption names the advancer, so the
+      // numbers read from their side of the shootout.
+      const pensScore =
+        decidedOnPens && m.homePens !== null && m.awayPens !== null
+          ? node?.away.won
+            ? `${m.awayPens}–${m.homePens}`
+            : `${m.homePens}–${m.awayPens}`
+          : null;
       return {
         matchId: m.id,
         stage: m.stage,
@@ -155,6 +163,7 @@ export default async function HistoryPage({
               ? (node.away.team?.name ?? null)
               : null
           : null,
+        pensScore,
         homeName: nameOf(m.homeTeamId, m.homePlaceholder),
         awayName: nameOf(m.awayTeamId, m.awayPlaceholder),
         homeCode: codeOf(m.homeTeamId),
@@ -193,8 +202,13 @@ export default async function HistoryPage({
     if (!m) return `match ${matchId}`;
     const side = (teamId: number | null, ph: string | null) =>
       codeOf(teamId) ?? nameOf(teamId, ph);
-    // "(pens)" keeps a level knockout score from reading as a typo in prose.
-    const pens = nodeById.get(m.id)?.decidedOnPens ? ' (pens)' : '';
+    // "(pens)" keeps a level knockout score from reading as a typo in prose;
+    // recorded tallies spell it out ("(4–2 pens)").
+    const pens = nodeById.get(m.id)?.decidedOnPens
+      ? m.homePens !== null && m.awayPens !== null
+        ? ` (${m.homePens}–${m.awayPens} pens)`
+        : ' (pens)'
+      : '';
     return `${side(m.homeTeamId, m.homePlaceholder)} ${m.homeScore}–${m.awayScore} ${side(m.awayTeamId, m.awayPlaceholder)}${pens}`;
   };
   const wraps: Record<string, WrapCardView> = {};

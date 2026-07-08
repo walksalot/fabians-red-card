@@ -62,7 +62,14 @@ function SideLine({
         )}
       </span>
       {side.score !== null ? (
-        <span className="ml-auto shrink-0 font-extrabold">{side.score}</span>
+        <span className="ml-auto shrink-0 font-extrabold">
+          {side.score}
+          {side.pens !== null ? (
+            // Shootout tally — "1 (4)" reads as the pool scores it: the tie
+            // stays a draw, the parenthetical only names who advanced.
+            <span className="font-semibold text-zinc-400"> ({side.pens})</span>
+          ) : null}
+        </span>
       ) : null}
     </span>
   );

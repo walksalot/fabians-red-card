@@ -51,6 +51,9 @@ export interface LiveBoard {
   liveFirstScorer: string | null;
   /** Feed's match clock ("55'", "HT") — minutes accrued, soccer counts up. */
   liveClock: string | null;
+  /** Running shootout tallies while penalties are being taken (else null). */
+  liveHomePens: number | null;
+  liveAwayPens: number | null;
   liveUpdatedAt: number | null;
   /** False while the match has kicked off but the feed hasn't reported yet. */
   hasLiveData: boolean;
@@ -242,6 +245,8 @@ export function getLiveBoards(db: Db, leagueId: number): LiveBoard[] {
       liveAway: m.liveAway ?? 0,
       liveFirstScorer: m.liveFirstScorer,
       liveClock: m.liveClock,
+      liveHomePens: m.liveHomePens,
+      liveAwayPens: m.liveAwayPens,
       liveUpdatedAt: m.liveUpdatedAt,
       hasLiveData,
       rows,

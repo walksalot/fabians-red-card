@@ -19,10 +19,16 @@ export interface BracketMatchRow {
   awayPlaceholder: string | null;
   homeScore: number | null;
   awayScore: number | null;
+  /** Shootout tallies of a finished level tie (null when none / not recorded). */
+  homePens?: number | null;
+  awayPens?: number | null;
   liveStatus: string | null;
   liveHome: number | null;
   liveAway: number | null;
   liveClock: string | null;
+  /** Running shootout tallies while penalties are being taken. */
+  liveHomePens?: number | null;
+  liveAwayPens?: number | null;
   /** Feed's last-write epoch (ms) — drives the stale-feed demotion. */
   liveUpdatedAt?: number | null;
 }
@@ -39,6 +45,8 @@ export interface BracketSide {
   /** Codes this slot could still resolve to (empty = unknown/group-sourced). */
   possibleCodes: string[];
   score: number | null;
+  /** Shootout tally for this side ("0 (4)"), live or final; null when none. */
+  pens: number | null;
   /** True when this side is the (known or inferred) winner of a finished tie. */
   won: boolean;
   /** True when the side lost a finished tie (dim it). */
@@ -176,6 +184,8 @@ export function buildBracket(
     feeder: FeederSlot | null,
     score: number | null,
     otherScore: number | null,
+    pens: number | null,
+    otherPens: number | null,
   ): BracketSide => {
     const team = teamId !== null ? (teams.get(teamId) ?? null) : null;
     const possibleCodes =
@@ -185,9 +195,15 @@ export function buildBracket(
     if (m.status === 'finished' && score !== null && otherScore !== null) {
       if (score > otherScore) won = true;
       else if (score < otherScore) lost = true;
-      else if (teamId !== null) {
-        // Level after extra time: penalties. The advancer shows up in the
-        // child round; until it does, neither side is marked.
+      else if (pens !== null && otherPens !== null && pens !== otherPens) {
+        // Level after extra time with recorded shootout tallies: the advancer
+        // is known the moment the result lands — no waiting on later rounds.
+        if (pens > otherPens) won = true;
+        else lost = true;
+      } else if (teamId !== null) {
+        // Tallies unknown (result predates pens support / manual entry
+        // without them): fall back to inferring the advancer from the child
+        // round; until it fills, neither side is marked.
         const advanced = childTeamIds.get(m.id);
         if (advanced && advanced.size > 0) {
           if (advanced.has(teamId)) won = true;
@@ -200,7 +216,7 @@ export function buildBracket(
         }
       }
     }
-    return { team, placeholder, possibleCodes, score, won, lost };
+    return { team, placeholder, possibleCodes, score, pens, won, lost };
   };
 
   const stageOrder = new Map(stages.map((s, i) => [s, i]));
@@ -220,9 +236,11 @@ export function buildBracket(
       // never dims anyone.
       const homeScore = live ? m.liveHome : m.homeScore;
       const awayScore = live ? m.liveAway : m.awayScore;
+      const homePens = (live ? m.liveHomePens : m.homePens) ?? null;
+      const awayPens = (live ? m.liveAwayPens : m.awayPens) ?? null;
       const [homeFeeder, awayFeeder] = feedersFor(m);
-      const home = sideOf(m, m.homeTeamId, m.homePlaceholder, homeFeeder, homeScore, awayScore);
-      const away = sideOf(m, m.awayTeamId, m.awayPlaceholder, awayFeeder, awayScore, homeScore);
+      const home = sideOf(m, m.homeTeamId, m.homePlaceholder, homeFeeder, homeScore, awayScore, homePens, awayPens);
+      const away = sideOf(m, m.awayTeamId, m.awayPlaceholder, awayFeeder, awayScore, homeScore, awayPens, homePens);
       const feeders = [homeFeeder, awayFeeder]
         .filter((f): f is FeederSlot => f !== null)
         .map((f) => f.match);

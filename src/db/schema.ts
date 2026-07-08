@@ -129,6 +129,11 @@ export const matches = sqliteTable('matches', {
   status: text('status').notNull().default('scheduled'), // 'scheduled'|'finished'
   homeScore: integer('home_score'),
   awayScore: integer('away_score'),
+  // Penalty-shootout tallies for a level knockout final. Display + bracket
+  // advancement ONLY: the shootout never feeds the scoring engine (a tie that
+  // went to pens scores as the draw it was after extra time).
+  homePens: integer('home_pens'),
+  awayPens: integer('away_pens'),
   firstScorer: text('first_scorer'),
   firstScoringTeam: text('first_scoring_team'), // 'home'|'away'|'none'
   underdogTeamId: integer('underdog_team_id').references(() => teams.id),
@@ -147,6 +152,9 @@ export const matches = sqliteTable('matches', {
   // Live first-goal facts (drive the "if it ended now" provisional board).
   liveFirstScorer: text('live_first_scorer'),
   liveFirstScoringTeam: text('live_first_scoring_team'), // 'home'|'away'
+  // Running shootout tallies while penalties are being taken (display only).
+  liveHomePens: integer('live_home_pens'),
+  liveAwayPens: integer('live_away_pens'),
   // Betting-odds cheat sheet: parsed MatchOdds JSON (src/lib/odds.ts) from the
   // same feed as results; display-only. Refreshed by the sync; null when the
   // market is absent (TBD knockout slots).

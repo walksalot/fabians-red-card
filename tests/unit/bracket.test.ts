@@ -85,6 +85,30 @@ describe('buildBracket', () => {
     expect(tie2.home.lost).toBe(true); // Germany out
   });
 
+  it('recorded shootout tallies mark the pens winner immediately — no child fill needed', () => {
+    const nodes = buildBracket(
+      [
+        row({
+          id: 74, stage: 'r32', status: 'finished',
+          homeTeamId: 5, awayTeamId: 6,
+          homeScore: 1, awayScore: 1, homePens: 3, awayPens: 5,
+        }),
+        row({ id: 89, stage: 'r16', homePlaceholder: 'Winners Match 74', awayPlaceholder: 'Winners Match 77' }),
+      ],
+      TEAMS,
+    );
+    const tie = nodes.find((n) => n.matchId === 74)!;
+    expect(tie.decidedOnPens).toBe(true);
+    expect(tie.away.won).toBe(true); // Paraguay win the shootout 5-3
+    expect(tie.home.lost).toBe(true);
+    // The tallies ride on the sides for display ("1 (3)" / "1 (5)").
+    expect(tie.home.pens).toBe(3);
+    expect(tie.away.pens).toBe(5);
+    // A decisive score keeps pens null on both sides.
+    const child = nodes.find((n) => n.matchId === 89)!;
+    expect(child.home.pens).toBeNull();
+  });
+
   it('a child filled from elsewhere never eliminates a pens pair', () => {
     // R16 slot has a team, but it is NEITHER of the pens pair (data oddity):
     // nobody should be marked out.

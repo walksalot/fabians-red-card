@@ -153,6 +153,8 @@ export default async function AdminPage({
       m.awayTeamId !== null ? (teamById.get(m.awayTeamId)?.code ?? null) : null,
     homeScore: m.homeScore,
     awayScore: m.awayScore,
+    homePens: m.homePens,
+    awayPens: m.awayPens,
     firstScorer: m.firstScorer,
     firstScoringTeam: m.firstScoringTeam as AdminMatch['firstScoringTeam'],
     underdogTeamId: m.underdogTeamId,

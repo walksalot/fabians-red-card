@@ -23,6 +23,8 @@ export interface EspnTeamRef {
 export interface EspnCompetitor {
   homeAway?: string;
   score?: string | number;
+  /** Penalty-shootout tally — present only when the game went (or is going) to penalties. */
+  shootoutScore?: string | number;
   team?: EspnTeamRef;
 }
 
@@ -30,6 +32,10 @@ export interface EspnDetail {
   scoringPlay?: boolean;
   ownGoal?: boolean;
   redCard?: boolean;
+  /** In-game spot kick (a real goal) — distinct from a shootout kick. */
+  penaltyKick?: boolean;
+  /** Post-extra-time shootout kick: scoringPlay in the feed, never a goal here. */
+  shootout?: boolean;
   clock?: { value?: number };
   team?: { id?: string };
   athletesInvolved?: Array<{ displayName?: string }>;
@@ -64,6 +70,9 @@ export interface MatchSnapshot {
   resultSource: string | null; // 'auto' | 'manual' | null
   homeScore: number | null;
   awayScore: number | null;
+  /** Stored shootout tallies — lets the planner backfill a tie recorded before pens support. */
+  homePens: number | null;
+  awayPens: number | null;
 }
 
 export type SyncAction =
@@ -79,6 +88,9 @@ export type SyncAction =
       firstScoringTeam: 'home' | 'away' | null;
       /** Match clock as the feed shows it ("55'", "HT", "90'+3'"); null when absent. */
       clock: string | null;
+      /** Running shootout tallies while penalties are being taken; null otherwise. */
+      liveHomePens: number | null;
+      liveAwayPens: number | null;
     }
   | {
       kind: 'result';
@@ -87,6 +99,9 @@ export type SyncAction =
       awayScore: number;
       firstScorer: string | null;
       firstScoringTeam: 'home' | 'away' | 'none';
+      /** Shootout tallies for a level knockout final; null when no shootout. */
+      homePens: number | null;
+      awayPens: number | null;
     };
 
 export interface SyncPlan {
@@ -162,8 +177,12 @@ function firstGoal(details: EspnDetail[] | undefined): {
   scorer: string | null;
   teamId: string | null;
 } | null {
+  // Shootout kicks arrive as scoringPlay:true (clock parked at 120') but are
+  // NOT goals: they decide who advances, never the scoreline, the first
+  // scorer, or the first team to score. Without this filter a 0-0 tie that
+  // went to penalties credited "first goal" to the first shootout kicker.
   const plays = (details ?? [])
-    .filter((d) => d.scoringPlay === true)
+    .filter((d) => d.scoringPlay === true && d.shootout !== true)
     .sort((a, b) => (a.clock?.value ?? 0) - (b.clock?.value ?? 0));
   if (plays.length === 0) return null;
   const first = plays[0];
@@ -172,6 +191,30 @@ function firstGoal(details: EspnDetail[] | undefined): {
     scorer: firstNonOwn?.athletesInvolved?.[0]?.displayName ?? null,
     teamId: first.team?.id ?? null,
   };
+}
+
+/**
+ * Shootout tallies from the competitors, for a FINAL result. Only a level
+ * score can have gone to penalties, and a finished shootout always has a
+ * winner — anything else is feed junk and parses to null (no shootout).
+ */
+function finalShootout(
+  sides: Sides,
+  homeScore: number,
+  awayScore: number,
+): { home: number; away: number } | null {
+  if (homeScore !== awayScore) return null;
+  const home = parseScore(sides.home.shootoutScore);
+  const away = parseScore(sides.away.shootoutScore);
+  if (home === null || away === null || home === away) return null;
+  return { home, away };
+}
+
+/** Mid-shootout tallies (may legitimately be level while kicks are being taken). */
+function liveShootout(sides: Sides): { home: number; away: number } | null {
+  const home = parseScore(sides.home.shootoutScore);
+  const away = parseScore(sides.away.shootoutScore);
+  return home !== null && away !== null ? { home, away } : null;
 }
 
 export function planSync(
@@ -291,11 +334,16 @@ export function planSync(
     }
 
     if (completed) {
-      // already recorded identically → idempotent no-op
+      const pens = finalShootout(sides, homeScore, awayScore);
+      // already recorded identically → idempotent no-op. Pens are part of the
+      // identity: a tie banked before pens support (stored NULLs) re-writes
+      // once so the shootout tallies backfill.
       if (
         match.status === 'finished' &&
         match.homeScore === homeScore &&
         match.awayScore === awayScore &&
+        match.homePens === (pens?.home ?? null) &&
+        match.awayPens === (pens?.away ?? null) &&
         match.resultSource === 'auto'
       ) {
         continue;
@@ -308,6 +356,8 @@ export function planSync(
           awayScore: 0,
           firstScorer: null,
           firstScoringTeam: 'none',
+          homePens: pens?.home ?? null,
+          awayPens: pens?.away ?? null,
         });
         continue;
       }
@@ -333,6 +383,8 @@ export function planSync(
         awayScore,
         firstScorer: goal.scorer,
         firstScoringTeam,
+        homePens: pens?.home ?? null,
+        awayPens: pens?.away ?? null,
       });
     } else if (state === 'in') {
       // Same first-goal extraction as at full time, applied mid-match — it
@@ -346,6 +398,7 @@ export function planSync(
           : goal?.teamId && awayId && goal.teamId === awayId
             ? ('away' as const)
             : null;
+      const pens = liveShootout(sides);
       actions.push({
         kind: 'live',
         matchId: match.id,
@@ -354,6 +407,8 @@ export function planSync(
         firstScorer: goal?.scorer ?? null,
         firstScoringTeam,
         clock: parseLiveClock(comp.status),
+        liveHomePens: pens?.home ?? null,
+        liveAwayPens: pens?.away ?? null,
       });
     }
   }

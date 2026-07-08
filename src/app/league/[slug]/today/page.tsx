@@ -201,6 +201,8 @@ export default async function TodayPage({
       locked,
       homeScore: match.homeScore,
       awayScore: match.awayScore,
+      homePens: match.homePens,
+      awayPens: match.awayPens,
       // Result scorer gets the same canonical squad spelling as the pick —
       // the finished card shows both, and they must never disagree.
       firstScorer: canonicalScorer(match.firstScorer, [
@@ -211,6 +213,8 @@ export default async function TodayPage({
       liveAway: match.liveAway,
       liveStatus: match.liveStatus,
       liveClock: match.liveClock,
+      liveHomePens: match.liveHomePens,
+      liveAwayPens: match.liveAwayPens,
       // Same canonical spelling as the result/pick scorers above.
       liveFirstScorer: canonicalScorer(match.liveFirstScorer, [
         ...(squadOf(match.homeTeamId) ?? []),
