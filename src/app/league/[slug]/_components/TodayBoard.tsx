@@ -366,7 +366,11 @@ function FixtureCenter({
         </span>
         {pens ? (
           <span className="whitespace-nowrap text-[9px] font-medium text-zinc-400">
-            on penalties
+            {item.homePens !== null && item.awayPens !== null
+              ? // The tally stays out of the FT score above: shootout kicks
+                // are not goals, they only name who advances.
+                `${item.homePens}–${item.awayPens} on penalties`
+              : 'on penalties'}
           </span>
         ) : null}
       </div>
@@ -414,6 +418,13 @@ function FixtureCenter({
             {item.liveClock ?? 'Live'}
           </span>
         </span>
+        {item.liveHomePens !== null && item.liveAwayPens !== null ? (
+          // Shootout in progress: the running tally rides below the (level)
+          // real score — shootout kicks are not goals, so the score holds.
+          <span className="whitespace-nowrap text-[10px] font-bold tabular-nums text-brand-bright">
+            Pens {item.liveHomePens}–{item.liveAwayPens}
+          </span>
+        ) : null}
         <FeedAge liveUpdatedAt={item.liveUpdatedAt} serverNowMs={serverNowMs} />
       </div>
     );
@@ -546,12 +557,26 @@ function PickSummary({ item }: { item: TodayMatchView }) {
             </p>
           )
         ) : (item.liveHome ?? 0) + (item.liveAway ?? 0) > 0 ? (
-          // Goals on the board but no first scorer: own goals don't count for
-          // the market (the feed mapper leaves the scorer null), so "no goal
-          // yet" next to a visible 1–0 would read as a broken feed.
-          <p className="mt-1.5 text-xs text-amber-300/90">
-            First goal was an own goal — doesn&apos;t count; {p.predScorer} can
-            still land it
+          item.liveFirstScoringTeam ? (
+            // A team is credited but no scorer: an own goal — those never
+            // count for the market, so the pick genuinely stays alive.
+            <p className="mt-1.5 text-xs text-amber-300/90">
+              First goal was an own goal — doesn&apos;t count; {p.predScorer} can
+              still land it
+            </p>
+          ) : (
+            // Goals on the board with NO attribution at all: the feed just
+            // hasn't said yet — claiming "own goal" here would be a guess.
+            <p className="mt-1.5 text-xs text-zinc-400">
+              Goal on the board — first scorer not confirmed yet
+            </p>
+          )
+        ) : item.liveHomePens !== null && item.liveAwayPens !== null ? (
+          // Penalties at 0-0: no first goal can happen anymore — shootout
+          // kicks aren't goals, so the scorer market settles empty.
+          <p className="mt-1.5 text-xs text-zinc-400">
+            No goals — shootout kicks don&apos;t count, so the scorer market
+            settles empty
           </p>
         ) : (
           <p className="mt-1.5 text-xs text-amber-300/90">

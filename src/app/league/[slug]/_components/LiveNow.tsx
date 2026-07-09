@@ -178,6 +178,17 @@ export default function LiveNow({
                       {b.liveClock}
                     </span>
                   ) : null}
+                  {b.liveHomePens !== null && b.liveAwayPens !== null ? (
+                    // Shootout in progress: the running tally lives in its own
+                    // chip — the match score above stays the (level) real
+                    // score, because shootout kicks are not goals.
+                    <span
+                      data-testid={`live-pens-${b.matchId}`}
+                      className="ml-1.5 inline-block rounded-md bg-brand/15 px-1.5 py-0.5 align-middle text-[11px] font-bold tabular-nums text-brand-bright"
+                    >
+                      Pens {b.liveHomePens}–{b.liveAwayPens}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="block text-[11px] font-medium text-zinc-500">
                   Who&apos;s scoring right now — if it ended now

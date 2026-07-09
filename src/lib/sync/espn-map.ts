@@ -23,6 +23,8 @@ export interface EspnTeamRef {
 export interface EspnCompetitor {
   homeAway?: string;
   score?: string | number;
+  /** Penalty-shootout tally — present only when the game went (or is going) to penalties. */
+  shootoutScore?: string | number;
   team?: EspnTeamRef;
 }
 
@@ -30,6 +32,10 @@ export interface EspnDetail {
   scoringPlay?: boolean;
   ownGoal?: boolean;
   redCard?: boolean;
+  /** In-game spot kick (a real goal) — distinct from a shootout kick. */
+  penaltyKick?: boolean;
+  /** Post-extra-time shootout kick: scoringPlay in the feed, never a goal here. */
+  shootout?: boolean;
   clock?: { value?: number };
   team?: { id?: string };
   athletesInvolved?: Array<{ displayName?: string }>;
@@ -62,12 +68,29 @@ export interface MatchSnapshot {
   awayName: string | null;
   status: string; // 'scheduled' | 'finished'
   resultSource: string | null; // 'auto' | 'manual' | null
+  /** Fixture venue — the tiebreaker between same-instant TBD knockout slots. */
+  venue: string;
   homeScore: number | null;
   awayScore: number | null;
+  /** Stored shootout tallies — lets the planner backfill a tie recorded before pens support. */
+  homePens: number | null;
+  awayPens: number | null;
+  /** Stored first-goal facts — feed corrections to attribution must re-bank. */
+  firstScorer: string | null;
+  firstScoringTeam: string | null; // 'home' | 'away' | 'none' | null
 }
 
 export type SyncAction =
-  | { kind: 'teams'; matchId: number; homeCode: string; awayCode: string }
+  | {
+      kind: 'teams';
+      matchId: number;
+      /** FIFA-style abbreviation when the feed carries one. */
+      homeCode: string | null;
+      awayCode: string | null;
+      /** Display names — the apply step's fallback when a code maps to nothing. */
+      homeName: string | null;
+      awayName: string | null;
+    }
   | { kind: 'odds'; matchId: number; odds: MatchOdds }
   | {
       kind: 'live';
@@ -79,6 +102,9 @@ export type SyncAction =
       firstScoringTeam: 'home' | 'away' | null;
       /** Match clock as the feed shows it ("55'", "HT", "90'+3'"); null when absent. */
       clock: string | null;
+      /** Running shootout tallies while penalties are being taken; null otherwise. */
+      liveHomePens: number | null;
+      liveAwayPens: number | null;
     }
   | {
       kind: 'result';
@@ -87,6 +113,9 @@ export type SyncAction =
       awayScore: number;
       firstScorer: string | null;
       firstScoringTeam: 'home' | 'away' | 'none';
+      /** Shootout tallies for a level knockout final; null when no shootout. */
+      homePens: number | null;
+      awayPens: number | null;
     };
 
 export interface SyncPlan {
@@ -114,7 +143,9 @@ export function normalizeKickoff(date: string): string | null {
   return `${m[1]}T${m[2]}:${m[3]}:00Z`;
 }
 
-function plainName(s: string): string {
+/** Diacritic-/punctuation-insensitive comparison key (also used by the
+    orchestrator's name-based team-fill fallback). */
+export function plainName(s: string): string {
   return s
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
@@ -162,8 +193,12 @@ function firstGoal(details: EspnDetail[] | undefined): {
   scorer: string | null;
   teamId: string | null;
 } | null {
+  // Shootout kicks arrive as scoringPlay:true (clock parked at 120') but are
+  // NOT goals: they decide who advances, never the scoreline, the first
+  // scorer, or the first team to score. Without this filter a 0-0 tie that
+  // went to penalties credited "first goal" to the first shootout kicker.
   const plays = (details ?? [])
-    .filter((d) => d.scoringPlay === true)
+    .filter((d) => d.scoringPlay === true && d.shootout !== true)
     .sort((a, b) => (a.clock?.value ?? 0) - (b.clock?.value ?? 0));
   if (plays.length === 0) return null;
   const first = plays[0];
@@ -172,6 +207,30 @@ function firstGoal(details: EspnDetail[] | undefined): {
     scorer: firstNonOwn?.athletesInvolved?.[0]?.displayName ?? null,
     teamId: first.team?.id ?? null,
   };
+}
+
+/**
+ * Shootout tallies from the competitors, for a FINAL result. Only a level
+ * score can have gone to penalties, and a finished shootout always has a
+ * winner — anything else is feed junk and parses to null (no shootout).
+ */
+function finalShootout(
+  sides: Sides,
+  homeScore: number,
+  awayScore: number,
+): { home: number; away: number } | null {
+  if (homeScore !== awayScore) return null;
+  const home = parseScore(sides.home.shootoutScore);
+  const away = parseScore(sides.away.shootoutScore);
+  if (home === null || away === null || home === away) return null;
+  return { home, away };
+}
+
+/** Mid-shootout tallies (may legitimately be level while kicks are being taken). */
+function liveShootout(sides: Sides): { home: number; away: number } | null {
+  const home = parseScore(sides.home.shootoutScore);
+  const away = parseScore(sides.away.shootoutScore);
+  return home !== null && away !== null ? { home, away } : null;
 }
 
 export function planSync(
@@ -241,26 +300,47 @@ export function planSync(
     // 2. placeholder fill: a knockout slot at this kickoff with unknown teams
     if (!match) {
       const placeholders = candidates.filter((m) => !m.homeCode || !m.awayCode);
+      let slot: MatchSnapshot | undefined;
       if (placeholders.length === 1) {
-        match = placeholders[0];
-        const homeCode = sides.home.team?.abbreviation?.toUpperCase();
-        const awayCode = sides.away.team?.abbreviation?.toUpperCase();
-        if (homeCode && awayCode) {
-          actions.push({ kind: 'teams', matchId: match.id, homeCode, awayCode });
-        }
+        slot = placeholders[0];
       } else if (placeholders.length > 1) {
-        // same-instant knockout games: disambiguate by venue name
+        // same-instant knockout games: disambiguate by ACTUAL venue name —
+        // stadium spellings drift ("Estadio Azteca" vs "Estadio Azteca,
+        // Mexico City"), so containment either way also identifies the slot.
         const venue = comp.venue?.fullName ? plainName(comp.venue.fullName) : null;
-        const byVenue = venue
-          ? placeholders.filter((m) => m.homeName === null && venue.length > 0)
-          : [];
+        const byVenue =
+          venue !== null && venue.length > 0
+            ? placeholders.filter((m) => {
+                const fixtureVenue = plainName(m.venue);
+                return (
+                  fixtureVenue.length > 0 &&
+                  (fixtureVenue === venue ||
+                    fixtureVenue.includes(venue) ||
+                    venue.includes(fixtureVenue))
+                );
+              })
+            : [];
         if (byVenue.length !== 1) {
           notes.push(
             `ambiguous: ${event.name ?? when} matches ${placeholders.length} fixtures at ${when} — fill teams in Admin`,
           );
           continue;
         }
-        match = byVenue[0];
+        slot = byVenue[0];
+      }
+      if (slot) {
+        match = slot;
+        const homeCode = sides.home.team?.abbreviation?.toUpperCase() ?? null;
+        const awayCode = sides.away.team?.abbreviation?.toUpperCase() ?? null;
+        const homeName = sides.home.team?.displayName ?? null;
+        const awayName = sides.away.team?.displayName ?? null;
+        // Codes are the primary key; names travel too so the apply step can
+        // still fill the slot when the feed's abbreviation matches no seeded
+        // FIFA code (otherwise a banked final would strand a team-less match
+        // no later pass could ever heal — the teams query was scheduled-only).
+        if ((homeCode ?? homeName) && (awayCode ?? awayName)) {
+          actions.push({ kind: 'teams', matchId: match.id, homeCode, awayCode, homeName, awayName });
+        }
       }
     }
 
@@ -291,16 +371,55 @@ export function planSync(
     }
 
     if (completed) {
-      // already recorded identically → idempotent no-op
+      const feedPens = finalShootout(sides, homeScore, awayScore);
+      // A feed gap must never erase recorded tallies: when the event omits
+      // (or garbles) the shootout numbers but the final score still matches
+      // the banked one, the stored pair stands — otherwise a transient feed
+      // hiccup would null the pens and flap the propagated bracket slot.
+      const pens =
+        feedPens ??
+        (match.homeScore === homeScore &&
+        match.awayScore === awayScore &&
+        match.homePens !== null &&
+        match.awayPens !== null
+          ? { home: match.homePens, away: match.awayPens }
+          : null);
+      // First-goal facts from THIS event, extracted before the idempotence
+      // check: ESPN re-attributes goals after full time (deflections
+      // re-credited, goals reclassified as own goals), and a correction with
+      // an unchanged scoreline must still re-bank the scorer market.
+      const goalless = homeScore + awayScore === 0;
+      const goal = goalless ? null : firstGoal(comp.details);
+      const homeId = sides.home.team?.id;
+      const awayId = sides.away.team?.id;
+      const firstScoringTeam = goalless
+        ? ('none' as const)
+        : goal?.teamId && homeId && goal.teamId === homeId
+          ? ('home' as const)
+          : goal?.teamId && awayId && goal.teamId === awayId
+            ? ('away' as const)
+            : null;
+      // Usable facts: goalless needs none; a scored game needs an attributed
+      // first goal. A detail-less re-serve of a banked result compares as
+      // unchanged (same feed-gap rule as the pens) — never erase facts.
+      const factsUsable = goalless || (goal !== null && firstScoringTeam !== null);
+      // already recorded identically → idempotent no-op. Pens AND first-goal
+      // facts are part of the identity: a tie banked before pens support
+      // re-writes once to backfill, and a scorer correction re-banks points.
       if (
         match.status === 'finished' &&
         match.homeScore === homeScore &&
         match.awayScore === awayScore &&
+        match.homePens === (pens?.home ?? null) &&
+        match.awayPens === (pens?.away ?? null) &&
+        (!factsUsable ||
+          (match.firstScorer === (goal?.scorer ?? null) &&
+            match.firstScoringTeam === firstScoringTeam)) &&
         match.resultSource === 'auto'
       ) {
         continue;
       }
-      if (homeScore + awayScore === 0) {
+      if (goalless) {
         actions.push({
           kind: 'result',
           matchId: match.id,
@@ -308,19 +427,12 @@ export function planSync(
           awayScore: 0,
           firstScorer: null,
           firstScoringTeam: 'none',
+          homePens: pens?.home ?? null,
+          awayPens: pens?.away ?? null,
         });
         continue;
       }
-      const goal = firstGoal(comp.details);
-      const homeId = sides.home.team?.id;
-      const awayId = sides.away.team?.id;
-      const firstScoringTeam =
-        goal?.teamId && homeId && goal.teamId === homeId
-          ? 'home'
-          : goal?.teamId && awayId && goal.teamId === awayId
-            ? 'away'
-            : null;
-      if (!goal || firstScoringTeam === null) {
+      if (!factsUsable || firstScoringTeam === null) {
         notes.push(
           `match ${match.id}: final ${homeScore}-${awayScore} but goal details unusable — enter result manually`,
         );
@@ -331,8 +443,10 @@ export function planSync(
         matchId: match.id,
         homeScore,
         awayScore,
-        firstScorer: goal.scorer,
+        firstScorer: goal?.scorer ?? null,
         firstScoringTeam,
+        homePens: pens?.home ?? null,
+        awayPens: pens?.away ?? null,
       });
     } else if (state === 'in') {
       // Same first-goal extraction as at full time, applied mid-match — it
@@ -346,6 +460,7 @@ export function planSync(
           : goal?.teamId && awayId && goal.teamId === awayId
             ? ('away' as const)
             : null;
+      const pens = liveShootout(sides);
       actions.push({
         kind: 'live',
         matchId: match.id,
@@ -354,6 +469,8 @@ export function planSync(
         firstScorer: goal?.scorer ?? null,
         firstScoringTeam,
         clock: parseLiveClock(comp.status),
+        liveHomePens: pens?.home ?? null,
+        liveAwayPens: pens?.away ?? null,
       });
     }
   }

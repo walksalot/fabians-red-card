@@ -67,6 +67,10 @@ Open **Admin** (last tab — only you see it) on your phone:
     must otherwise match what players typed. Eyeball the picks shown for the match and be
     generous when adjudicating your own typing.
   - *0–0 games:* enter 0 and 0; "first team to score" flips to "none" automatically.
+  - *Knockout ties:* enter the score **after extra time** (a shootout game that ended
+    0–0 is entered as 0 and 0). A "Pens" row appears for level knockout scores — type
+    the shootout result there so the bracket knows who advanced. Shootout kicks never
+    count for points, the scoreline, first goalscorer, or first team to score.
 - **Knockout rounds:** once a bracket slot is decided, Admin → Knockout teams: pick the
   two teams for each match so everyone can make picks. (Group-stage games come pre-loaded.)
 - **Underdog bonus:** before a match, optionally flag one side as the underdog in Admin →

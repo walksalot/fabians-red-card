@@ -9,6 +9,7 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
 import { AppError } from '@/lib/errors';
+import { knockoutAdvancers, propagateMatch } from '@/lib/services/bracket-propagation';
 import {
   scorePick,
   type PickInput,
@@ -26,6 +27,13 @@ export interface EnterResultInput {
   awayScore: number;
   firstScorer: string | null;
   firstScoringTeam: 'home' | 'away' | 'none';
+  /**
+   * Shootout tallies when a level knockout final went to penalties. They name
+   * the advancer (bracket/display only) — the scoring engine never sees them,
+   * so the tie still scores as the draw it was after extra time.
+   */
+  homePens?: number | null;
+  awayPens?: number | null;
 }
 
 export interface SetMatchTeamsInput {
@@ -86,8 +94,44 @@ function validateScore(label: string, value: number): void {
   }
 }
 
+/**
+ * Normalize + validate the shootout tallies for a result about to be written.
+ * Only a level knockout final can have gone to penalties, and a finished
+ * shootout always has a winner. Absent tallies on a level knockout score are
+ * legal (feed gap / admin doesn't know them yet) — the bracket simply can't
+ * name the advancer until they arrive.
+ */
+function validatePens(
+  match: MatchRow,
+  input: EnterResultInput,
+): { homePens: number | null; awayPens: number | null } {
+  const homePens = input.homePens ?? null;
+  const awayPens = input.awayPens ?? null;
+  if (homePens === null && awayPens === null) return { homePens: null, awayPens: null };
+  if (homePens === null || awayPens === null) {
+    throw new AppError('enter both shootout scores or neither', 400);
+  }
+  validateScore('homePens', homePens);
+  validateScore('awayPens', awayPens);
+  if (match.stage === 'group') {
+    throw new AppError('shootout scores only apply to knockout matches', 400);
+  }
+  if (input.homeScore !== input.awayScore) {
+    throw new AppError('shootout scores only apply when the match ends level', 400);
+  }
+  if (homePens === awayPens) {
+    throw new AppError('a shootout cannot end level — one side must win it', 400);
+  }
+  return { homePens, awayPens };
+}
+
 /** Shared write+recompute for a final result. `source` records who entered it. */
-function writeResult(db: Db, input: EnterResultInput, source: 'manual' | 'auto'): MatchRow {
+function writeResult(
+  db: Db,
+  match: MatchRow,
+  input: EnterResultInput,
+  source: 'manual' | 'auto',
+): MatchRow {
   validateScore('homeScore', input.homeScore);
   validateScore('awayScore', input.awayScore);
 
@@ -102,18 +146,26 @@ function writeResult(db: Db, input: EnterResultInput, source: 'manual' | 'auto')
       400,
     );
   }
+  const { homePens, awayPens } = validatePens(match, input);
 
   // Result write + recompute commit together: a recompute failure must never
   // leave a stored result with some leagues' points recomputed and others
   // stale. better-sqlite3 runs on a single connection, so statements issued
   // via `db` inside the callback participate in this transaction.
   return db.transaction(() => {
+    // Decidability before the write: when a correction turns a DECIDED tie
+    // undecidable (re-entered level without tallies), the earlier
+    // propagation's child fill is known-stale and must revert.
+    const wasDecided = knockoutAdvancers(match) !== null;
+
     const updated = db
       .update(schema.matches)
       .set({
         status: 'finished',
         homeScore: input.homeScore,
         awayScore: input.awayScore,
+        homePens,
+        awayPens,
         firstScorer,
         firstScoringTeam,
         resultSource: source,
@@ -124,12 +176,19 @@ function writeResult(db: Db, input: EnterResultInput, source: 'manual' | 'auto')
         liveFirstScorer: null,
         liveFirstScoringTeam: null,
         liveClock: null,
+        liveHomePens: null,
+        liveAwayPens: null,
       })
       .where(eq(schema.matches.id, input.matchId))
       .returning()
       .get();
 
     recomputeMatch(db, input.matchId);
+    // The decided tie flows straight into the next round's slot — the
+    // bracket and pick screens must never wait for an external team fill.
+    propagateMatch(db, updated, {
+      revertWhenFinished: wasDecided && knockoutAdvancers(updated) === null,
+    });
     return updated;
   });
 }
@@ -137,8 +196,8 @@ function writeResult(db: Db, input: EnterResultInput, source: 'manual' | 'auto')
 /** Enter (or re-enter — results are editable) a final result, then recompute points. */
 export function enterResult(db: Db, adminUserId: number, input: EnterResultInput): MatchRow {
   requireResultsAdmin(db, adminUserId);
-  getMatchOrThrow(db, input.matchId);
-  return writeResult(db, input, 'manual');
+  const match = getMatchOrThrow(db, input.matchId);
+  return writeResult(db, match, input, 'manual');
 }
 
 /**
@@ -149,7 +208,7 @@ export function enterResult(db: Db, adminUserId: number, input: EnterResultInput
 export function enterResultAuto(db: Db, input: EnterResultInput): MatchRow | null {
   const match = getMatchOrThrow(db, input.matchId);
   if (match.resultSource === 'manual') return null;
-  return writeResult(db, input, 'auto');
+  return writeResult(db, match, input, 'auto');
 }
 
 /** Record an in-progress live score from the feed (display only; never scores points). */
@@ -164,19 +223,37 @@ export function setLiveScore(
     firstScoringTeam?: 'home' | 'away' | null;
     /** Feed's match clock ("55'", "HT"); minutes accrued, display only. */
     clock?: string | null;
+    /** Running shootout tallies while penalties are being taken. */
+    liveHomePens?: number | null;
+    liveAwayPens?: number | null;
   },
 ): void {
   const match = getMatchOrThrow(db, input.matchId);
   if (match.resultSource === 'manual' || match.status === 'finished') return;
+  // Attribution gap: goals exist but this poll carries no first-goal facts
+  // at all (feed served the event without its details). Keep the established
+  // facts instead of nulling them — one detail-less response must not flap
+  // everyone's provisional scorer/first-team points. A 0-0 snapshot DOES
+  // clear them (VAR can erase the only goal), and any attributed poll
+  // (even scorer-null own-goal attribution) replaces them verbatim.
+  const incomingScorer = input.firstScorer ?? null;
+  const incomingTeam = input.firstScoringTeam ?? null;
+  const attributionGap =
+    input.liveHome + input.liveAway > 0 && incomingScorer === null && incomingTeam === null;
+  // Same rule for a mid-shootout tallies gap: kicks never un-happen live;
+  // the final result write clears all live state anyway.
+  const pensGap = (input.liveHomePens ?? null) === null && (input.liveAwayPens ?? null) === null;
   db.update(schema.matches)
     .set({
       liveHome: input.liveHome,
       liveAway: input.liveAway,
       liveStatus: 'in',
       liveUpdatedAt: input.updatedAtMs,
-      liveFirstScorer: input.firstScorer ?? null,
-      liveFirstScoringTeam: input.firstScoringTeam ?? null,
+      liveFirstScorer: attributionGap ? match.liveFirstScorer : incomingScorer,
+      liveFirstScoringTeam: attributionGap ? match.liveFirstScoringTeam : incomingTeam,
       liveClock: input.clock ?? null,
+      liveHomePens: pensGap ? match.liveHomePens : (input.liveHomePens ?? null),
+      liveAwayPens: pensGap ? match.liveAwayPens : (input.liveAwayPens ?? null),
     })
     .where(eq(schema.matches.id, input.matchId))
     .run();
@@ -201,6 +278,8 @@ export function clearResult(db: Db, adminUserId: number, matchId: number): Match
         status: 'scheduled',
         homeScore: null,
         awayScore: null,
+        homePens: null,
+        awayPens: null,
         firstScorer: null,
         firstScoringTeam: null,
         resultSource: null,
@@ -210,6 +289,9 @@ export function clearResult(db: Db, adminUserId: number, matchId: number): Match
       .get();
 
     recomputeMatch(db, matchId); // not finished → deletes the matchPoints rows
+    // The tie is undecided again: any next-round slot we filled from it
+    // reverts to its seeded placeholder (deliberate admin fills stay).
+    propagateMatch(db, updated);
     return updated;
   });
 }
@@ -264,7 +346,16 @@ export function setMatchTeams(
 
     // Mirrors setUnderdog: a team correction on an already-finished match
     // changes underdog sides, so the stored points must follow immediately.
-    if (match.status === 'finished') recomputeMatch(db, input.matchId);
+    if (match.status === 'finished') {
+      recomputeMatch(db, input.matchId);
+      // The corrected pair also changes who advanced: the child slot still
+      // holds the OLD pair's winner, so that team must be replaceable too.
+      propagateMatch(db, updated, {
+        alsoReplaceable: [match.homeTeamId, match.awayTeamId].filter(
+          (id): id is number => id !== null,
+        ),
+      });
+    }
     return updated;
   });
 }

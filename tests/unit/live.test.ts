@@ -41,6 +41,23 @@ const pick = (db: Db, entryId: number, p: Partial<typeof schema.picks.$inferInse
   }).run();
 
 describe('getLiveBoards (if it ended now)', () => {
+  it('drops a zombie board: kicked off long ago, no result, no fresh feed', async () => {
+    const world = seedWorld(freshDb());
+    const { db, leagueId } = world;
+    world.entry('A');
+    // Ten hours after kickoff with no result and no recent feed write this is
+    // a postponed/abandoned fixture, not a live game — no perpetual red pulse.
+    await withFakeNow('2026-06-12T05:00:00Z', () => {
+      expect(getLiveBoards(db, leagueId)).toHaveLength(0);
+    });
+    // …but a FRESH feed write (a genuinely delayed, still-running game)
+    // keeps the board alive past the kickoff horizon.
+    setLive(db, { liveStatus: 'in', liveHome: 0, liveAway: 0, liveUpdatedAt: Date.parse('2026-06-12T04:55:00Z') });
+    await withFakeNow('2026-06-12T05:00:00Z', () => {
+      expect(getLiveBoards(db, leagueId)).toHaveLength(1);
+    });
+  });
+
   it('returns nothing before kickoff and after a final result', async () => {
     const world = seedWorld(freshDb());
     const { db, leagueId } = world;

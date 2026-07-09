@@ -51,11 +51,19 @@ export interface LiveBoard {
   liveFirstScorer: string | null;
   /** Feed's match clock ("55'", "HT") — minutes accrued, soccer counts up. */
   liveClock: string | null;
+  /** Running shootout tallies while penalties are being taken (else null). */
+  liveHomePens: number | null;
+  liveAwayPens: number | null;
   liveUpdatedAt: number | null;
   /** False while the match has kicked off but the feed hasn't reported yet. */
   hasLiveData: boolean;
   rows: LiveBoardRow[];
 }
+
+/** A board older than this is a zombie, not a live match: no real game
+    (delays + extra time + a shootout included) runs six hours. Postponed or
+    abandoned fixtures otherwise pulse "LIVE" forever awaiting a result. */
+const LIVE_ZOMBIE_MS = 6 * 3600_000;
 
 /** All in-progress matches (kicked off per the app clock, not finished).
     Slots still missing a team are skipped — a "Winners Match 73" board with
@@ -71,7 +79,11 @@ function liveMatches(db: Db) {
       (m) =>
         m.homeTeamId !== null &&
         m.awayTeamId !== null &&
-        now >= Date.parse(m.kickoffUtc),
+        now >= Date.parse(m.kickoffUtc) &&
+        // freshness anchor: kickoff, or the last feed write when that is
+        // NEWER — a delayed game the feed still reports stays alive, while
+        // a fixture with neither recent kickoff nor recent feed drops off.
+        now - Math.max(Date.parse(m.kickoffUtc), m.liveUpdatedAt ?? 0) < LIVE_ZOMBIE_MS,
     );
 }
 
@@ -242,6 +254,8 @@ export function getLiveBoards(db: Db, leagueId: number): LiveBoard[] {
       liveAway: m.liveAway ?? 0,
       liveFirstScorer: m.liveFirstScorer,
       liveClock: m.liveClock,
+      liveHomePens: m.liveHomePens,
+      liveAwayPens: m.liveAwayPens,
       liveUpdatedAt: m.liveUpdatedAt,
       hasLiveData,
       rows,

@@ -48,6 +48,9 @@ export interface AdminMatch {
   awayCode: string | null;
   homeScore: number | null;
   awayScore: number | null;
+  /** Shootout tallies of a level knockout final (never affect scoring). */
+  homePens: number | null;
+  awayPens: number | null;
   firstScorer: string | null;
   firstScoringTeam: 'home' | 'away' | 'none' | null;
   underdogTeamId: number | null;

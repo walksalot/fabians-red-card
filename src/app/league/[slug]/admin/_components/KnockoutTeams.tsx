@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   apiSend,
   formatKickoffEt,
@@ -12,26 +13,52 @@ import {
 import { adminSelectCls, Chevron } from './ui';
 
 interface Props {
-  matches: AdminMatch[]; // r32+ matches that still have a placeholder side
+  matches: AdminMatch[]; // every r32+ match (assigned ones are correctable)
   teams: AdminTeam[]; // all 48 teams, name-sorted
 }
 
 export default function KnockoutTeams({ matches, teams }: Props) {
+  // Open slots up top (the match-night job); already-assigned matches fold
+  // into a corrections drawer so a mistaken assignment is never permanent.
+  const open = matches.filter((m) => m.homeTeamId === null || m.awayTeamId === null);
+  const assigned = matches.filter((m) => m.homeTeamId !== null && m.awayTeamId !== null);
   if (matches.length === 0) {
-    return (
-      <p className="text-sm text-zinc-400">
-        All knockout matches have their teams assigned.
-      </p>
-    );
+    return <p className="text-sm text-zinc-400">No knockout matches in the schedule.</p>;
   }
   return (
     <div className="space-y-3">
-      <p className="text-sm text-zinc-400">
-        As the bracket fills in, assign the qualified teams to each knockout slot.
-      </p>
-      {matches.map((m) => (
-        <KnockoutRow key={m.id} match={m} teams={teams} />
-      ))}
+      {open.length > 0 ? (
+        <>
+          <p className="text-sm text-zinc-400">
+            As the bracket fills in, assign the qualified teams to each knockout slot.
+          </p>
+          {open.map((m) => (
+            <KnockoutRow key={m.id} match={m} teams={teams} />
+          ))}
+        </>
+      ) : (
+        <p className="text-sm text-zinc-400">
+          All knockout matches have their teams assigned.
+        </p>
+      )}
+      {assigned.length > 0 ? (
+        <details className="group rounded-xl border border-zinc-800 bg-zinc-950/40">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold text-zinc-200 [&::-webkit-details-marker]:hidden [&::marker]:hidden">
+            <span>Assigned — correct a mistake</span>
+            <span className="flex items-center gap-2">
+              <span className="text-xs font-normal text-zinc-500">
+                {assigned.length} match{assigned.length === 1 ? '' : 'es'}
+              </span>
+              <Chevron className="h-3.5 w-3.5 shrink-0 text-zinc-500 transition-transform duration-200 group-open:rotate-180" />
+            </span>
+          </summary>
+          <div className="space-y-2 px-2 pb-2">
+            {assigned.map((m) => (
+              <KnockoutRow key={m.id} match={m} teams={teams} />
+            ))}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -39,6 +66,7 @@ export default function KnockoutTeams({ matches, teams }: Props) {
 const selectCls = `w-full ${adminSelectCls}`;
 
 function KnockoutRow({ match, teams }: { match: AdminMatch; teams: AdminTeam[] }) {
+  const router = useRouter();
   const [homeId, setHomeId] = useState(
     match.homeTeamId !== null ? String(match.homeTeamId) : '',
   );
@@ -65,8 +93,12 @@ function KnockoutRow({ match, teams }: { match: AdminMatch; teams: AdminTeam[] }
       awayTeamId: Number(awayId),
     });
     setSaving(false);
-    if (res.ok) setMsg({ kind: 'ok', text: 'Teams assigned ✓' });
-    else setMsg({ kind: 'err', text: res.error });
+    if (res.ok) {
+      setMsg({ kind: 'ok', text: 'Teams assigned ✓' });
+      // Server truth changed (slots, downstream propagation, TBD states in
+      // Results) — re-render the page data like the member-side forms do.
+      router.refresh();
+    } else setMsg({ kind: 'err', text: res.error });
   }
 
   return (

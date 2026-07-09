@@ -138,10 +138,16 @@ export async function upsertPick(
 
   requireOwnedEntry(db, userId, input.entryId);
   const match = getMatchOr404(db, input.matchId);
-  // Locked at kickoff — and also once a result exists. The admin may enter a
+  // Locked at kickoff — and also once a result exists or the feed reports
+  // the game IN PROGRESS (a delayed fixture time must never keep the window
+  // open while the real game is being played). The admin may enter a
   // result ahead of kickoff; from that moment the result is public, so an
   // unkicked-but-finished match must never accept a "prediction".
-  if (match.status === 'finished' || hasKickedOff(match.kickoffUtc)) {
+  if (
+    match.status === 'finished' ||
+    match.liveStatus === 'in' ||
+    hasKickedOff(match.kickoffUtc)
+  ) {
     throw new AppError('Picks are locked for this match', 409);
   }
   if (match.homeTeamId === null || match.awayTeamId === null) {

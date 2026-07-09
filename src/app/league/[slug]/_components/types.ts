@@ -46,6 +46,9 @@ export interface TodayMatchView {
   locked: boolean;
   homeScore: number | null;
   awayScore: number | null;
+  /** Shootout tallies of a finished level knockout tie (never scoring). */
+  homePens: number | null;
+  awayPens: number | null;
   firstScorer: string | null;
   /** Live in-progress score from the feed (display only); liveStatus 'in' while playing. */
   liveHome: number | null;
@@ -53,6 +56,9 @@ export interface TodayMatchView {
   liveStatus: string | null;
   /** Feed's match clock ("55'", "HT") — minutes accrued, soccer counts up. */
   liveClock: string | null;
+  /** Running shootout tallies while penalties are being taken. */
+  liveHomePens: number | null;
+  liveAwayPens: number | null;
   /** First-goal facts as they stand mid-match (canonical squad spelling). */
   liveFirstScorer: string | null;
   /** The feed's raw spelling — the string the engine will score against at
@@ -169,8 +175,11 @@ export interface HistoryItemView {
   /** Finished knockout tie level after extra time — went to penalties
       (bracket.ts's decidedOnPens inference, reused for the caption). */
   decidedOnPens?: boolean;
-  /** Shoot-out winner's name once the next round's slot reveals the advancer. */
+  /** Shoot-out winner's name — from stored tallies, or (legacy results
+      without them) once the next round's slot reveals the advancer. */
   pensAdvancer?: string | null;
+  /** Shootout tally line ("4–2") when the tallies are recorded. */
+  pensScore?: string | null;
 }
 
 export interface HistoryDayView {

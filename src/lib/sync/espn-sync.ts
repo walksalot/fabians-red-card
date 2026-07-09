@@ -9,11 +9,12 @@
  * Everything network-related is injected as `fetchScoreboard`, so the whole
  * thing is unit-testable with a stub and no real HTTP.
  */
-import { and, eq, gte, inArray, lte, ne } from 'drizzle-orm';
+import { and, eq, gte, isNull, lte, ne } from 'drizzle-orm';
 import { getDb, schema, type Db } from '@/db';
 import { now } from '@/lib/clock';
+import { propagateAllKnockouts, propagateMatch } from '@/lib/services/bracket-propagation';
 import { enterResultAuto, recomputeMatch, setLiveScore } from '@/lib/services/results';
-import { planSync, type EspnEvent, type MatchSnapshot } from './espn-map';
+import { plainName, planSync, type EspnEvent, type MatchSnapshot } from './espn-map';
 
 const ESPN_BASE =
   'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard';
@@ -57,6 +58,15 @@ function yyyymmdd(d: Date): string {
  * live scores AND the final result). The UTC dates are kept as belt-and-braces
  * for any grouping drift; unmatched events are skipped harmlessly.
  */
+/**
+ * How long a finished level knockout tie with no recorded shootout tallies
+ * keeps its dates in the fetch set. Ties banked before pens support (or
+ * through a feed gap) can't name their advancer; re-fetching lets the planner
+ * re-write them with the tallies. Two weeks spans every knockout round of the
+ * tournament, and the set empties itself as soon as each tie heals.
+ */
+const PENS_BACKFILL_MS = 14 * 24 * 3600_000;
+
 function datesNeedingSync(db: Db): string[] {
   const nowMs = now().getTime();
   // look back 3 days (late finishes, delayed/suspended games, corrections —
@@ -80,8 +90,32 @@ function datesNeedingSync(db: Db): string[] {
       ),
     )
     .all();
+  // Shootout backfill: finished level knockout ties still missing pens.
+  const pensGaps = db
+    .select({
+      kickoffUtc: schema.matches.kickoffUtc,
+      matchday: schema.matches.matchday,
+      homeScore: schema.matches.homeScore,
+      awayScore: schema.matches.awayScore,
+    })
+    .from(schema.matches)
+    .where(
+      and(
+        eq(schema.matches.status, 'finished'),
+        ne(schema.matches.stage, 'group'),
+        isNull(schema.matches.homePens),
+      ),
+    )
+    .all()
+    .filter(
+      (r) =>
+        r.homeScore !== null &&
+        r.homeScore === r.awayScore &&
+        Date.parse(r.kickoffUtc) >= nowMs - PENS_BACKFILL_MS &&
+        Date.parse(r.kickoffUtc) <= nowMs,
+    );
   const dates = new Set<string>();
-  for (const r of rows) {
+  for (const r of [...rows, ...pensGaps]) {
     dates.add(r.matchday.replace(/-/g, '')); // ESPN's grouping (ET)
     const k = new Date(r.kickoffUtc);
     dates.add(yyyymmdd(k));
@@ -97,8 +131,13 @@ function snapshotMatches(db: Db): MatchSnapshot[] {
       kickoffUtc: schema.matches.kickoffUtc,
       status: schema.matches.status,
       resultSource: schema.matches.resultSource,
+      venue: schema.matches.venue,
       homeScore: schema.matches.homeScore,
       awayScore: schema.matches.awayScore,
+      homePens: schema.matches.homePens,
+      awayPens: schema.matches.awayPens,
+      firstScorer: schema.matches.firstScorer,
+      firstScoringTeam: schema.matches.firstScoringTeam,
       homeTeamId: schema.matches.homeTeamId,
       awayTeamId: schema.matches.awayTeamId,
     })
@@ -121,8 +160,13 @@ function snapshotMatches(db: Db): MatchSnapshot[] {
       awayName: away?.name ?? null,
       status: m.status,
       resultSource: m.resultSource,
+      venue: m.venue,
       homeScore: m.homeScore,
       awayScore: m.awayScore,
+      homePens: m.homePens,
+      awayPens: m.awayPens,
+      firstScorer: m.firstScorer,
+      firstScoringTeam: m.firstScoringTeam,
     };
   });
 }
@@ -146,12 +190,33 @@ export async function runSync(
   db: Db = getDb(),
   fetchScoreboard: ScoreboardFetcher = fetchScoreboardFromEspn,
 ): Promise<SyncSummary> {
+  // Self-heal knockout slots from already-banked results BEFORE anything
+  // network-bound: pure DB work that must run even when the feed is off
+  // (manual-mode admins get the same instant bracket propagation) or down.
+  let propagated = 0;
+  const notesEarly: string[] = [];
+  try {
+    propagated = propagateAllKnockouts(db);
+  } catch (err) {
+    notesEarly.push(
+      `knockout propagation failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   if (!autoSyncEnabled(db)) {
-    return { datesChecked: [], results: 0, liveUpdates: 0, teamFills: 0, oddsUpdates: 0, notes: [], skipped: 'auto-sync disabled' };
+    return {
+      datesChecked: [],
+      results: 0,
+      liveUpdates: 0,
+      teamFills: propagated,
+      oddsUpdates: 0,
+      notes: notesEarly,
+      skipped: 'auto-sync disabled',
+    };
   }
   const dates = datesNeedingSync(db);
   const events: EspnEvent[] = [];
-  const notes: string[] = [];
+  const notes: string[] = [...notesEarly];
   for (const d of dates) {
     try {
       events.push(...(await fetchScoreboard(d)));
@@ -165,12 +230,20 @@ export async function runSync(
   const nowMs = now().getTime();
   let results = 0;
   let liveUpdates = 0;
-  let teamFills = 0;
+  let teamFills = propagated;
   let oddsUpdates = 0;
 
-  const teamIdByCode = new Map(
-    db.select({ id: schema.teams.id, code: schema.teams.code }).from(schema.teams).all().map((t) => [t.code, t.id]),
-  );
+  const teamRows = db
+    .select({ id: schema.teams.id, code: schema.teams.code, name: schema.teams.name })
+    .from(schema.teams)
+    .all();
+  const teamIdByCode = new Map(teamRows.map((t) => [t.code, t.id]));
+  // Fallback for feed abbreviations that match no seeded FIFA code — the
+  // display name resolves the same team ("Korea Republic" etc.).
+  const teamIdByName = new Map(teamRows.map((t) => [plainName(t.name), t.id]));
+  const resolveTeamId = (code: string | null, name: string | null): number | undefined =>
+    (code !== null ? teamIdByCode.get(code) : undefined) ??
+    (name !== null ? teamIdByName.get(plainName(name)) : undefined);
 
   for (const action of plan.actions) {
     try {
@@ -181,6 +254,8 @@ export async function runSync(
           awayScore: action.awayScore,
           firstScorer: action.firstScorer,
           firstScoringTeam: action.firstScoringTeam,
+          homePens: action.homePens,
+          awayPens: action.awayPens,
         });
         if (wrote) results++;
       } else if (action.kind === 'odds') {
@@ -195,22 +270,35 @@ export async function runSync(
           firstScorer: action.firstScorer,
           firstScoringTeam: action.firstScoringTeam,
           clock: action.clock,
+          liveHomePens: action.liveHomePens,
+          liveAwayPens: action.liveAwayPens,
         });
         liveUpdates++;
       } else if (action.kind === 'teams') {
-        const homeId = teamIdByCode.get(action.homeCode);
-        const awayId = teamIdByCode.get(action.awayCode);
+        const homeId = resolveTeamId(action.homeCode, action.homeName);
+        const awayId = resolveTeamId(action.awayCode, action.awayName);
         if (homeId && awayId && homeId !== awayId) {
           db.transaction(() => {
+            // Finished matches heal too: a final can bank against a slot
+            // whose teams could not be mapped at the time — the late fill
+            // must recompute (underdog sides become resolvable) and let the
+            // winner flow into the bracket.
             const m = db
               .update(schema.matches)
               .set({ homeTeamId: homeId, awayTeamId: awayId, homePlaceholder: null, awayPlaceholder: null })
-              .where(and(eq(schema.matches.id, action.matchId), inArray(schema.matches.status, ['scheduled'])))
+              .where(eq(schema.matches.id, action.matchId))
               .returning()
               .get();
-            if (m && m.status === 'finished') recomputeMatch(db, action.matchId);
+            if (m && m.status === 'finished') {
+              recomputeMatch(db, action.matchId);
+              propagateMatch(db, m);
+            }
           });
           teamFills++;
+        } else {
+          notes.push(
+            `match ${action.matchId}: feed teams ${action.homeCode ?? action.homeName} / ${action.awayCode ?? action.awayName} match no seeded team — assign in Admin`,
+          );
         }
       }
     } catch (err) {

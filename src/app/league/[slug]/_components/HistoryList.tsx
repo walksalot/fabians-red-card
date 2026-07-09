@@ -103,7 +103,9 @@ function HistoryItem({
         <p className="mt-1 text-center text-[11px] text-zinc-400">
           Decided on penalties
           {item.pensAdvancer
-            ? ` · ${shortTeamName(item.pensAdvancer)} advance`
+            ? ` · ${shortTeamName(item.pensAdvancer)} advance${
+                item.pensScore ? ` ${item.pensScore}` : ''
+              }`
             : ''}
         </p>
       ) : null}

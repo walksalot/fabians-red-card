@@ -16,6 +16,10 @@ const bodySchema = z.object({
     .default(null)
     .transform((value) => (value === '' ? null : value)),
   firstScoringTeam: z.enum(['home', 'away', 'none']),
+  // Shootout tallies for a level knockout final (service validates the
+  // pairing rules); display + bracket advancement only, never scoring.
+  homePens: z.number().int().min(0).max(99).nullable().default(null),
+  awayPens: z.number().int().min(0).max(99).nullable().default(null),
 });
 
 export const POST = handle(async (req) => {

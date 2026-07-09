@@ -66,14 +66,18 @@ export default async function HistoryPage({
 
   // Penalties context: reuse the bracket's decidedOnPens/advancer inference
   // (bracket.ts) — level knockout scores read as unfinished without it. Needs
-  // ALL matches (the advancer shows up in the next round's slot).
+  // ALL matches (the advancer shows up in the next round's slot), and an
+  // explicit stage list: the DEFAULT stages draw the Road-to-the-Final tree
+  // and skip 'third', which here would strip the third-place tie of its
+  // pens caption/tallies.
+  const allMatches = db.select().from(schema.matches).all();
   const bracketTeams = new Map<number, BracketTeamRef>(
     teamRows.map((t) => [t.id, { id: t.id, code: t.code, name: t.name }]),
   );
   const bracketNodes = buildBracket(
-    db.select().from(schema.matches).all(),
+    allMatches,
     bracketTeams,
-    undefined,
+    ['r32', 'r16', 'qf', 'sf', 'third', 'final'],
     feederMapFromFixtures(fixtures),
   );
   const nodeById = new Map(bracketNodes.map((n) => [n.matchId, n]));
@@ -143,6 +147,14 @@ export default async function HistoryPage({
       }
       const node = nodeById.get(m.id);
       const decidedOnPens = node?.decidedOnPens ?? false;
+      // Winner-first tally ("4–2") — the caption names the advancer, so the
+      // numbers read from their side of the shootout.
+      const pensScore =
+        decidedOnPens && m.homePens !== null && m.awayPens !== null
+          ? node?.away.won
+            ? `${m.awayPens}–${m.homePens}`
+            : `${m.homePens}–${m.awayPens}`
+          : null;
       return {
         matchId: m.id,
         stage: m.stage,
@@ -155,6 +167,7 @@ export default async function HistoryPage({
               ? (node.away.team?.name ?? null)
               : null
           : null,
+        pensScore,
         homeName: nameOf(m.homeTeamId, m.homePlaceholder),
         awayName: nameOf(m.awayTeamId, m.awayPlaceholder),
         homeCode: codeOf(m.homeTeamId),
@@ -193,12 +206,27 @@ export default async function HistoryPage({
     if (!m) return `match ${matchId}`;
     const side = (teamId: number | null, ph: string | null) =>
       codeOf(teamId) ?? nameOf(teamId, ph);
-    // "(pens)" keeps a level knockout score from reading as a typo in prose.
-    const pens = nodeById.get(m.id)?.decidedOnPens ? ' (pens)' : '';
+    // "(pens)" keeps a level knockout score from reading as a typo in prose;
+    // recorded tallies spell it out ("(4–2 pens)").
+    const pens = nodeById.get(m.id)?.decidedOnPens
+      ? m.homePens !== null && m.awayPens !== null
+        ? ` (${m.homePens}–${m.awayPens} pens)`
+        : ' (pens)'
+      : '';
     return `${side(m.homeTeamId, m.homePlaceholder)} ${m.homeScore}–${m.awayScore} ${side(m.awayTeamId, m.awayPlaceholder)}${pens}`;
   };
+  // Wraps only for COMPLETE days: a partial wrap would crown a premature
+  // "won the day" while games are still being played (the same invariant
+  // latestWrappableMatchday enforces for the Today banner).
+  const unfinishedByDay = new Map<string, number>();
+  for (const m of allMatches) {
+    if (m.status !== 'finished') {
+      unfinishedByDay.set(m.matchday, (unfinishedByDay.get(m.matchday) ?? 0) + 1);
+    }
+  }
   const wraps: Record<string, WrapCardView> = {};
   for (const day of days) {
+    if ((unfinishedByDay.get(day) ?? 0) > 0) continue;
     const w = computeMatchdayWrap(db, league.id, day);
     if (!w) continue;
     wraps[day] = {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { codeToFlagEmoji, shortTeamName } from '../../_components/flags';
 import {
   apiSend,
@@ -156,8 +157,15 @@ export default function ResultsEntry({ matches, nowMs }: Props) {
 }
 
 function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
+  const router = useRouter();
   const [home, setHome] = useState(match.homeScore !== null ? String(match.homeScore) : '');
   const [away, setAway] = useState(match.awayScore !== null ? String(match.awayScore) : '');
+  const [homePens, setHomePens] = useState(
+    match.homePens !== null ? String(match.homePens) : '',
+  );
+  const [awayPens, setAwayPens] = useState(
+    match.awayPens !== null ? String(match.awayPens) : '',
+  );
   const [scorer, setScorer] = useState(match.firstScorer ?? '');
   // '' = unentered. Defaulting to 'home' let an admin save "first team: home"
   // without ever choosing it — every blank form looked pre-filled.
@@ -173,6 +181,8 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
   const [savedSnapshot, setSavedSnapshot] = useState(() => ({
     home: match.homeScore !== null ? String(match.homeScore) : '',
     away: match.awayScore !== null ? String(match.awayScore) : '',
+    homePens: match.homePens !== null ? String(match.homePens) : '',
+    awayPens: match.awayPens !== null ? String(match.awayPens) : '',
     scorer: match.firstScorer ?? '',
     firstTeam: (match.firstScoringTeam ?? '') as '' | 'home' | 'away' | 'none',
   }));
@@ -183,6 +193,14 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
   const effectiveFirstTeam: '' | 'home' | 'away' | 'none' = zeroZero
     ? 'none'
     : firstTeam;
+  // A level knockout final went to penalties — offer the shootout inputs.
+  // Optional (an admin may not know the tallies yet); they only ever name the
+  // advancer for the bracket, never points.
+  const levelKnockout =
+    match.stage !== 'group' &&
+    home.trim() !== '' &&
+    away.trim() !== '' &&
+    Number(home) === Number(away);
 
   function onScores(h: string, a: string) {
     setHome(h);
@@ -213,6 +231,32 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
       setMsg({ kind: 'err', text: 'Pick the first team to score' });
       return;
     }
+    // Shootout tallies travel as a pair and must name a winner (mirrors the
+    // server rules so the admin hears it before the round-trip).
+    let pens: { homePens: number | null; awayPens: number | null } = {
+      homePens: null,
+      awayPens: null,
+    };
+    if (levelKnockout && (homePens.trim() !== '' || awayPens.trim() !== '')) {
+      const ph = Number(homePens.trim());
+      const pa = Number(awayPens.trim());
+      if (
+        homePens.trim() === '' ||
+        awayPens.trim() === '' ||
+        !Number.isInteger(ph) ||
+        !Number.isInteger(pa) ||
+        ph < 0 ||
+        pa < 0
+      ) {
+        setMsg({ kind: 'err', text: 'Enter both shootout scores' });
+        return;
+      }
+      if (ph === pa) {
+        setMsg({ kind: 'err', text: 'A shootout cannot end level' });
+        return;
+      }
+      pens = { homePens: ph, awayPens: pa };
+    }
     const trimmedScorer = scorer.trim();
     setSaving(true);
     setMsg(null);
@@ -222,18 +266,29 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
       awayScore: a,
       firstScorer: zeroZero || trimmedScorer === '' ? null : trimmedScorer,
       firstScoringTeam: zeroZero ? 'none' : effectiveFirstTeam,
+      ...pens,
     });
     setSaving(false);
     if (res.ok) {
       setFinished(true);
+      // A decisive score stores no shootout — the inputs empty to match.
+      if (!levelKnockout) {
+        setHomePens('');
+        setAwayPens('');
+      }
       setSavedSnapshot({
         home,
         away,
+        homePens: levelKnockout ? homePens : '',
+        awayPens: levelKnockout ? awayPens : '',
         scorer,
         firstTeam: zeroZero ? 'none' : effectiveFirstTeam,
       });
       setMsg({ kind: 'ok', text: 'Saved ✓' });
       window.setTimeout(() => setMsg(null), 2500);
+      // A result changes more than this row (bracket propagation fills the
+      // next round's slots, day counters move) — re-render the page data.
+      router.refresh();
     } else {
       setMsg({ kind: 'err', text: res.error });
     }
@@ -252,9 +307,17 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
     if (res.ok) {
       setFinished(false);
       // Server-side the result is gone — whatever sits in the inputs is unsaved.
-      setSavedSnapshot({ home: '', away: '', scorer: '', firstTeam: '' });
+      setSavedSnapshot({
+        home: '',
+        away: '',
+        homePens: '',
+        awayPens: '',
+        scorer: '',
+        firstTeam: '',
+      });
       setMsg({ kind: 'ok', text: 'Result cleared' });
       window.setTimeout(() => setMsg(null), 2500);
+      router.refresh();
     } else {
       setMsg({ kind: 'err', text: res.error });
     }
@@ -264,7 +327,9 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
     home !== savedSnapshot.home ||
     away !== savedSnapshot.away ||
     scorer !== savedSnapshot.scorer ||
-    effectiveFirstTeam !== savedSnapshot.firstTeam;
+    effectiveFirstTeam !== savedSnapshot.firstTeam ||
+    (levelKnockout &&
+      (homePens !== savedSnapshot.homePens || awayPens !== savedSnapshot.awayPens));
 
   // No teams assigned = nothing to score yet: inputs disarm and the Save
   // button yields to a pointer at Knockouts — an armed form here saved
@@ -327,6 +392,44 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
         />
         <TeamTag name={match.awayName} code={match.awayCode} align="right" />
       </div>
+
+      {levelKnockout ? (
+        // Knockout tie: capture the shootout so the bracket can name the
+        // advancer. Points ignore it — the game stays a draw for scoring.
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+            Pens
+          </span>
+          <input
+            data-testid={`result-pens-home-${match.id}`}
+            aria-label={`${match.homeName} shootout score`}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1}
+            value={homePens}
+            onChange={(e) => setHomePens(e.target.value)}
+            disabled={teamsTbd}
+            className={scoreInputCls}
+          />
+          <span className="text-zinc-600">–</span>
+          <input
+            data-testid={`result-pens-away-${match.id}`}
+            aria-label={`${match.awayName} shootout score`}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1}
+            value={awayPens}
+            onChange={(e) => setAwayPens(e.target.value)}
+            disabled={teamsTbd}
+            className={scoreInputCls}
+          />
+          <span className="min-w-0 flex-1 text-[11px] leading-tight text-zinc-500">
+            Shootout — decides who advances, never points
+          </span>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         {/* basis-full: the scorer gets its own row so saved names never clip

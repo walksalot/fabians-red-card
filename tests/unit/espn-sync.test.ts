@@ -187,6 +187,187 @@ describe('runSync (auto-results orchestrator)', () => {
     expect(summary.notes.join(' ')).toMatch(/fetch failed/);
     expect(summary.results).toBe(0);
   });
+
+  // End-to-end regression for the SUI 0-0 COL shootout: the whole loop —
+  // feed → planner → result write → bracket propagation — in one pass.
+  it('banks a shootout final with its tallies and fills the next round slot in the same pass', async () => {
+    const db = createTestDb();
+    seedWorld(db);
+    db.insert(schema.teams).values([
+      { id: 3, code: 'SUI', name: 'Switzerland', groupLetter: 'B' },
+      { id: 4, code: 'COL', name: 'Colombia', groupLetter: 'C' },
+    ]).run();
+    // Real bracket wiring: R16 match 96 feeds the away slot of QF match 100.
+    db.insert(schema.matches).values([
+      {
+        id: 96, stage: 'r16', homeTeamId: 3, awayTeamId: 4,
+        kickoffUtc: '2026-06-11T16:00:00Z', matchday: '2026-06-11',
+        venue: 'BC Place', city: 'Vancouver', status: 'scheduled',
+      },
+      {
+        id: 100, stage: 'qf', homePlaceholder: 'Winners Match 95', awayPlaceholder: 'Winners Match 96',
+        kickoffUtc: '2026-06-13T20:00:00Z', matchday: '2026-06-13',
+        venue: 'Arrowhead Stadium', city: 'Kansas City', status: 'scheduled',
+      },
+    ]).run();
+    const pensFinal: EspnEvent = {
+      date: '2026-06-11T16:00Z',
+      name: 'Colombia at Switzerland',
+      competitions: [
+        {
+          status: { type: { completed: true, state: 'post', shortDetail: 'FT-Pens' } },
+          competitors: [
+            { homeAway: 'home', score: '0', shootoutScore: 2, team: { id: '300', abbreviation: 'SUI', displayName: 'Switzerland' } },
+            { homeAway: 'away', score: '0', shootoutScore: 4, team: { id: '400', abbreviation: 'COL', displayName: 'Colombia' } },
+          ],
+          details: [
+            // shootout kicks: scoringPlay true in the real feed, shootout true
+            { scoringPlay: true, ownGoal: false, shootout: true, clock: { value: 7200 }, team: { id: '400' }, athletesInvolved: [{ displayName: 'Juan Fernando Quintero' }] },
+            { scoringPlay: true, ownGoal: false, shootout: true, clock: { value: 7200 }, team: { id: '300' }, athletesInvolved: [{ displayName: 'Granit Xhaka' }] },
+          ],
+        },
+      ],
+    };
+
+    // Date-aware fetcher (like the real feed): the event lives on its own
+    // scoreboard date only, not on every date the sync happens to check.
+    const fetcher = async (d: string) => (d === '20260611' ? [pensFinal] : []);
+    const summary = await runSync(db, fetcher);
+    expect(summary.results).toBe(1);
+
+    const tie = db.select().from(schema.matches).where(eq(schema.matches.id, 96)).get();
+    expect(tie?.status).toBe('finished');
+    expect(tie?.homeScore).toBe(0);
+    expect(tie?.awayScore).toBe(0);
+    expect(tie?.firstScorer).toBeNull(); // Quintero's kick is not a goal
+    expect(tie?.firstScoringTeam).toBe('none');
+    expect(tie?.homePens).toBe(2);
+    expect(tie?.awayPens).toBe(4);
+
+    // Colombia advanced into the QF slot without waiting for a feed team
+    // fill — written inside the result transaction itself.
+    const qf = db.select().from(schema.matches).where(eq(schema.matches.id, 100)).get();
+    expect(qf?.awayTeamId).toBe(4);
+    expect(qf?.awayPlaceholder).toBeNull();
+    expect(qf?.homeTeamId).toBeNull(); // other feeder undecided
+
+    // Second pass: nothing to rewrite, nothing to re-propagate.
+    const second = await runSync(db, fetcher);
+    expect(second.results).toBe(0);
+    expect(second.teamFills).toBe(0);
+  });
+
+  it('fills teams by display name when the feed abbreviation matches no seeded code, healing a finished TBD match', async () => {
+    const db = createTestDb();
+    seedWorld(db);
+    db.insert(schema.teams).values([
+      { id: 3, code: 'KOR', name: 'Korea Republic', groupLetter: 'B' },
+      { id: 4, code: 'CIV', name: "Côte d'Ivoire", groupLetter: 'C' },
+    ]).run();
+    // R32 placeholder slot whose game already FINISHED while its feed codes
+    // ('SKO'/'IVC' — not our FIFA codes) matched nothing: previously the
+    // teams could never fill again (the old update was scheduled-only) and
+    // the bracket stayed stranded forever.
+    db.insert(schema.matches).values({
+      id: 73, stage: 'r32', homePlaceholder: '1A', awayPlaceholder: '2B',
+      kickoffUtc: '2026-06-11T16:00:00Z', matchday: '2026-06-11',
+      venue: 'SoFi Stadium', city: 'LA', status: 'finished',
+      homeScore: 2, awayScore: 0, firstScorer: 'Somebody', firstScoringTeam: 'home',
+      resultSource: 'auto',
+    }).run();
+    db.insert(schema.matches).values({
+      id: 90, stage: 'r16', homePlaceholder: 'Winners Match 73', awayPlaceholder: 'Winners Match 75',
+      kickoffUtc: '2026-06-13T20:00:00Z', matchday: '2026-06-13',
+      venue: 'NRG Stadium', city: 'Houston', status: 'scheduled',
+    }).run();
+    const event: EspnEvent = {
+      date: '2026-06-11T16:00Z',
+      name: "Côte d'Ivoire at Korea Republic",
+      competitions: [
+        {
+          status: { type: { completed: true, state: 'post' } },
+          competitors: [
+            { homeAway: 'home', score: '2', team: { id: '300', abbreviation: 'SKO', displayName: 'Korea Republic' } },
+            { homeAway: 'away', score: '0', team: { id: '400', abbreviation: 'IVC', displayName: "Côte d'Ivoire" } },
+          ],
+          details: [
+            { scoringPlay: true, ownGoal: false, clock: { value: 900 }, team: { id: '300' }, athletesInvolved: [{ displayName: 'Somebody' }] },
+          ],
+        },
+      ],
+    };
+
+    const summary = await runSync(db, async (d) => (d === '20260611' ? [event] : []));
+    expect(summary.teamFills).toBeGreaterThanOrEqual(1);
+    const healed = db.select().from(schema.matches).where(eq(schema.matches.id, 73)).get();
+    expect(healed?.homeTeamId).toBe(3); // by name, not code
+    expect(healed?.awayTeamId).toBe(4);
+    // …and the finished match's winner flowed straight into the R16 slot.
+    expect(
+      db.select().from(schema.matches).where(eq(schema.matches.id, 90)).get()?.homeTeamId,
+    ).toBe(3);
+  });
+
+  it('re-banks a scorer correction end to end and recomputes the scorer market', async () => {
+    const db = createTestDb();
+    const { e1 } = seedWorld(db);
+    // A scheduled sibling on the same matchday keeps the date in the fetch
+    // set after match 1 finishes — the exact window corrections arrive in.
+    db.insert(schema.matches).values({
+      id: 2, stage: 'group', groupLetter: 'A',
+      kickoffUtc: '2026-06-11T22:00:00Z', matchday: '2026-06-11',
+      venue: 'V', city: 'C', status: 'scheduled',
+    }).run();
+    const fetcher = (ev: EspnEvent) => async (d: string) => (d === '20260611' ? [ev] : []);
+    await runSync(db, fetcher(completedEvent()));
+    expect(
+      db.select().from(schema.matchPoints).where(eq(schema.matchPoints.entryId, e1)).get()?.total,
+    ).toBe(20); // exact 10 + scorer 8 + firstTeam 2
+
+    // The feed re-credits the opening goal to somebody else — e1's scorer
+    // pick no longer matches and the 8 points must come back off.
+    const corrected = completedEvent();
+    corrected.competitions![0].details![0].athletesInvolved = [{ displayName: 'Lyle Foster' }];
+    const summary = await runSync(db, fetcher(corrected));
+    expect(summary.results).toBe(1);
+    const match = db.select().from(schema.matches).where(eq(schema.matches.id, 1)).get();
+    expect(match?.firstScorer).toBe('Lyle Foster');
+    expect(
+      db.select().from(schema.matchPoints).where(eq(schema.matchPoints.entryId, e1)).get()?.total,
+    ).toBe(12); // exact 10 + firstTeam 2, scorer gone
+  });
+
+  it('propagates stale knockout winners even when auto-sync is off (self-heal path)', async () => {
+    const db = createTestDb();
+    seedWorld(db);
+    db.update(schema.leagues).set({ autoSyncEnabled: 0 }).run();
+    db.insert(schema.teams).values([
+      { id: 3, code: 'SUI', name: 'Switzerland', groupLetter: 'B' },
+      { id: 4, code: 'COL', name: 'Colombia', groupLetter: 'C' },
+    ]).run();
+    // A tie banked before propagation existed: finished, pens known, child empty.
+    db.insert(schema.matches).values([
+      {
+        id: 96, stage: 'r16', homeTeamId: 3, awayTeamId: 4,
+        kickoffUtc: '2026-06-11T16:00:00Z', matchday: '2026-06-11',
+        venue: 'BC Place', city: 'Vancouver', status: 'finished',
+        homeScore: 0, awayScore: 0, homePens: 2, awayPens: 4,
+        firstScoringTeam: 'none', resultSource: 'auto',
+      },
+      {
+        id: 100, stage: 'qf', homePlaceholder: 'Winners Match 95', awayPlaceholder: 'Winners Match 96',
+        kickoffUtc: '2026-06-13T20:00:00Z', matchday: '2026-06-13',
+        venue: 'Arrowhead Stadium', city: 'Kansas City', status: 'scheduled',
+      },
+    ]).run();
+
+    const summary = await runSync(db, async () => []);
+    expect(summary.skipped).toBeTruthy(); // feed never consulted…
+    expect(summary.teamFills).toBe(1); // …but the bracket still healed
+    expect(
+      db.select().from(schema.matches).where(eq(schema.matches.id, 100)).get()?.awayTeamId,
+    ).toBe(4);
+  });
 });
 
 import { eq } from 'drizzle-orm';
