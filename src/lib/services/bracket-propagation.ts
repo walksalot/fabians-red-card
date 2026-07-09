@@ -13,6 +13,9 @@
  *  - a finished child match is never re-teamed (banked results are facts)
  *  - clearing a feeder's result reverts our fill back to the seeded
  *    placeholder text, so the bracket honestly shows the slot as open again
+ *  - a FINISHED tie whose winner is merely unknown (level, tallies not
+ *    recorded yet) never un-fills anything — the legacy team-fill path may
+ *    already have placed the true advancer
  */
 import { and, asc, eq, ne } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
@@ -146,11 +149,17 @@ export function propagateMatch(db: Db, match: MatchRow): number {
       writeSlot(db, child, ref.side, target, null);
       writes++;
     } else if (
+      match.status !== 'finished' &&
       occupant !== null &&
       (occupant === match.homeTeamId || occupant === match.awayTeamId)
     ) {
-      // The tie is no longer decided: our fill reverts to the seeded
-      // placeholder so the slot honestly reads as open again.
+      // The tie's RESULT was cleared: our fill reverts to the seeded
+      // placeholder so the slot honestly reads as open again. This branch is
+      // strictly for cleared results — a FINISHED tie that is merely
+      // undecidable (level, shootout tallies not recorded yet) must never
+      // un-fill a slot: the legacy team-fill path (feed/admin) may already
+      // hold the true advancer there, and erasing it would break the bracket
+      // and pick screens until the tallies backfill.
       writeSlot(db, child, ref.side, null, ref.placeholder);
       writes++;
     }

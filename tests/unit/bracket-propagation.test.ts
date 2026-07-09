@@ -260,6 +260,27 @@ describe('knockout winner propagation', () => {
     expect(matchById(db, 103).awayTeamId).toBeNull(); // other semi undecided
   });
 
+  it('a finished tie missing its tallies never un-fills a slot the legacy path already filled', () => {
+    const db = freshDb();
+    seedQuarterFinalScene(db);
+    // Legacy production shape: the tie banked 0-0 BEFORE pens support, and
+    // the old ESPN/admin team fill already placed the true advancer (SUI) in
+    // the QF slot. The sweep must not "revert" what it never wrote.
+    db.update(schema.matches)
+      .set({ status: 'finished', homeScore: 0, awayScore: 0, resultSource: 'auto' })
+      .where(eq(schema.matches.id, 89))
+      .run();
+    db.update(schema.matches)
+      .set({ homeTeamId: 1, homePlaceholder: null })
+      .where(eq(schema.matches.id, 97))
+      .run();
+
+    expect(propagateAllKnockouts(db)).toBe(0);
+    const qf = matchById(db, 97);
+    expect(qf.homeTeamId).toBe(1); // untouched
+    expect(qf.homePlaceholder).toBeNull();
+  });
+
   it('never re-teams a finished child match', () => {
     const db = freshDb();
     seedQuarterFinalScene(db);
