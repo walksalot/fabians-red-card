@@ -311,9 +311,9 @@ export default async function RulesPage({
               How do results get entered?
             </dt>
             <dd className="mt-0.5 text-zinc-400">
-              Automatically, as matches finish. The admin can correct anything
-              by hand, and corrections recalculate everyone&apos;s points
-              instantly.
+              {league.autoSyncEnabled !== 0
+                ? 'Automatically, as matches finish. The admin can correct anything by hand, and corrections recalculate everyone’s points instantly.'
+                : 'The admin types them in after each match (automatic results are switched off), and every save recalculates everyone’s points instantly.'}
             </dd>
           </div>
         </dl>

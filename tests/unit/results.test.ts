@@ -771,6 +771,63 @@ describe('results service', () => {
     expect(finished?.liveAwayPens).toBeNull();
   });
 
+  it('a detail-less live poll never erases established first-goal facts or shootout tallies', () => {
+    const db = freshDb();
+    const admin = makeUser(db);
+    makeLeague(db, admin.id);
+    makeTeam(db, 1, 'MEX');
+    makeTeam(db, 2, 'ECU');
+    makeMatch(db, 1, { homeTeamId: 1, awayTeamId: 2 });
+
+    setLiveScore(db, {
+      matchId: 1,
+      liveHome: 1,
+      liveAway: 0,
+      updatedAtMs: 5,
+      firstScorer: 'Raúl Jiménez',
+      firstScoringTeam: 'home',
+    });
+    // Next poll: same score, but the feed dropped the goal details entirely.
+    setLiveScore(db, { matchId: 1, liveHome: 1, liveAway: 0, updatedAtMs: 6 });
+    let m = db.select().from(schema.matches).where(eq(schema.matches.id, 1)).get();
+    expect(m?.liveFirstScorer).toBe('Raúl Jiménez'); // preserved, no flap
+    expect(m?.liveFirstScoringTeam).toBe('home');
+
+    // An ATTRIBUTED poll replaces facts verbatim — own-goal shape included
+    // (team credited, scorer legitimately null).
+    setLiveScore(db, {
+      matchId: 1,
+      liveHome: 1,
+      liveAway: 0,
+      updatedAtMs: 7,
+      firstScorer: null,
+      firstScoringTeam: 'away',
+    });
+    m = db.select().from(schema.matches).where(eq(schema.matches.id, 1)).get();
+    expect(m?.liveFirstScorer).toBeNull();
+    expect(m?.liveFirstScoringTeam).toBe('away');
+
+    // VAR erases the only goal: a 0-0 snapshot clears the facts for real.
+    setLiveScore(db, { matchId: 1, liveHome: 0, liveAway: 0, updatedAtMs: 8 });
+    m = db.select().from(schema.matches).where(eq(schema.matches.id, 1)).get();
+    expect(m?.liveFirstScorer).toBeNull();
+    expect(m?.liveFirstScoringTeam).toBeNull();
+
+    // Mid-shootout tallies survive a poll that omits them.
+    setLiveScore(db, {
+      matchId: 1,
+      liveHome: 0,
+      liveAway: 0,
+      updatedAtMs: 9,
+      liveHomePens: 3,
+      liveAwayPens: 2,
+    });
+    setLiveScore(db, { matchId: 1, liveHome: 0, liveAway: 0, updatedAtMs: 10 });
+    m = db.select().from(schema.matches).where(eq(schema.matches.id, 1)).get();
+    expect(m?.liveHomePens).toBe(3);
+    expect(m?.liveAwayPens).toBe(2);
+  });
+
   it('recomputeLeague recomputes finished matches only for that league', () => {
     const db = freshDb();
     const adminA = makeUser(db);

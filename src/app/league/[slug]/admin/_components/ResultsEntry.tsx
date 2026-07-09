@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { codeToFlagEmoji, shortTeamName } from '../../_components/flags';
 import {
   apiSend,
@@ -156,6 +157,7 @@ export default function ResultsEntry({ matches, nowMs }: Props) {
 }
 
 function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
+  const router = useRouter();
   const [home, setHome] = useState(match.homeScore !== null ? String(match.homeScore) : '');
   const [away, setAway] = useState(match.awayScore !== null ? String(match.awayScore) : '');
   const [homePens, setHomePens] = useState(
@@ -284,6 +286,9 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
       });
       setMsg({ kind: 'ok', text: 'Saved ✓' });
       window.setTimeout(() => setMsg(null), 2500);
+      // A result changes more than this row (bracket propagation fills the
+      // next round's slots, day counters move) — re-render the page data.
+      router.refresh();
     } else {
       setMsg({ kind: 'err', text: res.error });
     }
@@ -312,6 +317,7 @@ function ResultForm({ match, nowMs }: { match: AdminMatch; nowMs: number }) {
       });
       setMsg({ kind: 'ok', text: 'Result cleared' });
       window.setTimeout(() => setMsg(null), 2500);
+      router.refresh();
     } else {
       setMsg({ kind: 'err', text: res.error });
     }

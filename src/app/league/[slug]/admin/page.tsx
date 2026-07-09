@@ -160,9 +160,10 @@ export default async function AdminPage({
     underdogTeamId: m.underdogTeamId,
   }));
 
-  const knockoutMatches = adminMatches.filter(
-    (m) => m.stage !== 'group' && (m.homeTeamId === null || m.awayTeamId === null),
-  );
+  // ALL knockout slots, assigned ones included — an admin must be able to
+  // CORRECT a wrong assignment (the form previously hid a match the moment
+  // both teams were set, making mistakes permanent).
+  const knockoutMatches = adminMatches.filter((m) => m.stage !== 'group');
   const underdogMatches = adminMatches.filter(
     (m) => m.homeTeamId !== null && m.awayTeamId !== null,
   );

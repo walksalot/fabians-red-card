@@ -60,6 +60,11 @@ export interface LiveBoard {
   rows: LiveBoardRow[];
 }
 
+/** A board older than this is a zombie, not a live match: no real game
+    (delays + extra time + a shootout included) runs six hours. Postponed or
+    abandoned fixtures otherwise pulse "LIVE" forever awaiting a result. */
+const LIVE_ZOMBIE_MS = 6 * 3600_000;
+
 /** All in-progress matches (kicked off per the app clock, not finished).
     Slots still missing a team are skipped — a "Winners Match 73" board with
     nothing to score is a bracket gap, never a live match. */
@@ -74,7 +79,11 @@ function liveMatches(db: Db) {
       (m) =>
         m.homeTeamId !== null &&
         m.awayTeamId !== null &&
-        now >= Date.parse(m.kickoffUtc),
+        now >= Date.parse(m.kickoffUtc) &&
+        // freshness anchor: kickoff, or the last feed write when that is
+        // NEWER — a delayed game the feed still reports stays alive, while
+        // a fixture with neither recent kickoff nor recent feed drops off.
+        now - Math.max(Date.parse(m.kickoffUtc), m.liveUpdatedAt ?? 0) < LIVE_ZOMBIE_MS,
     );
 }
 

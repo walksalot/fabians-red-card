@@ -68,15 +68,29 @@ export interface MatchSnapshot {
   awayName: string | null;
   status: string; // 'scheduled' | 'finished'
   resultSource: string | null; // 'auto' | 'manual' | null
+  /** Fixture venue — the tiebreaker between same-instant TBD knockout slots. */
+  venue: string;
   homeScore: number | null;
   awayScore: number | null;
   /** Stored shootout tallies — lets the planner backfill a tie recorded before pens support. */
   homePens: number | null;
   awayPens: number | null;
+  /** Stored first-goal facts — feed corrections to attribution must re-bank. */
+  firstScorer: string | null;
+  firstScoringTeam: string | null; // 'home' | 'away' | 'none' | null
 }
 
 export type SyncAction =
-  | { kind: 'teams'; matchId: number; homeCode: string; awayCode: string }
+  | {
+      kind: 'teams';
+      matchId: number;
+      /** FIFA-style abbreviation when the feed carries one. */
+      homeCode: string | null;
+      awayCode: string | null;
+      /** Display names — the apply step's fallback when a code maps to nothing. */
+      homeName: string | null;
+      awayName: string | null;
+    }
   | { kind: 'odds'; matchId: number; odds: MatchOdds }
   | {
       kind: 'live';
@@ -129,7 +143,9 @@ export function normalizeKickoff(date: string): string | null {
   return `${m[1]}T${m[2]}:${m[3]}:00Z`;
 }
 
-function plainName(s: string): string {
+/** Diacritic-/punctuation-insensitive comparison key (also used by the
+    orchestrator's name-based team-fill fallback). */
+export function plainName(s: string): string {
   return s
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
@@ -284,26 +300,47 @@ export function planSync(
     // 2. placeholder fill: a knockout slot at this kickoff with unknown teams
     if (!match) {
       const placeholders = candidates.filter((m) => !m.homeCode || !m.awayCode);
+      let slot: MatchSnapshot | undefined;
       if (placeholders.length === 1) {
-        match = placeholders[0];
-        const homeCode = sides.home.team?.abbreviation?.toUpperCase();
-        const awayCode = sides.away.team?.abbreviation?.toUpperCase();
-        if (homeCode && awayCode) {
-          actions.push({ kind: 'teams', matchId: match.id, homeCode, awayCode });
-        }
+        slot = placeholders[0];
       } else if (placeholders.length > 1) {
-        // same-instant knockout games: disambiguate by venue name
+        // same-instant knockout games: disambiguate by ACTUAL venue name —
+        // stadium spellings drift ("Estadio Azteca" vs "Estadio Azteca,
+        // Mexico City"), so containment either way also identifies the slot.
         const venue = comp.venue?.fullName ? plainName(comp.venue.fullName) : null;
-        const byVenue = venue
-          ? placeholders.filter((m) => m.homeName === null && venue.length > 0)
-          : [];
+        const byVenue =
+          venue !== null && venue.length > 0
+            ? placeholders.filter((m) => {
+                const fixtureVenue = plainName(m.venue);
+                return (
+                  fixtureVenue.length > 0 &&
+                  (fixtureVenue === venue ||
+                    fixtureVenue.includes(venue) ||
+                    venue.includes(fixtureVenue))
+                );
+              })
+            : [];
         if (byVenue.length !== 1) {
           notes.push(
             `ambiguous: ${event.name ?? when} matches ${placeholders.length} fixtures at ${when} — fill teams in Admin`,
           );
           continue;
         }
-        match = byVenue[0];
+        slot = byVenue[0];
+      }
+      if (slot) {
+        match = slot;
+        const homeCode = sides.home.team?.abbreviation?.toUpperCase() ?? null;
+        const awayCode = sides.away.team?.abbreviation?.toUpperCase() ?? null;
+        const homeName = sides.home.team?.displayName ?? null;
+        const awayName = sides.away.team?.displayName ?? null;
+        // Codes are the primary key; names travel too so the apply step can
+        // still fill the slot when the feed's abbreviation matches no seeded
+        // FIFA code (otherwise a banked final would strand a team-less match
+        // no later pass could ever heal — the teams query was scheduled-only).
+        if ((homeCode ?? homeName) && (awayCode ?? awayName)) {
+          actions.push({ kind: 'teams', matchId: match.id, homeCode, awayCode, homeName, awayName });
+        }
       }
     }
 
@@ -347,20 +384,42 @@ export function planSync(
         match.awayPens !== null
           ? { home: match.homePens, away: match.awayPens }
           : null);
-      // already recorded identically → idempotent no-op. Pens are part of the
-      // identity: a tie banked before pens support (stored NULLs) re-writes
-      // once so the shootout tallies backfill.
+      // First-goal facts from THIS event, extracted before the idempotence
+      // check: ESPN re-attributes goals after full time (deflections
+      // re-credited, goals reclassified as own goals), and a correction with
+      // an unchanged scoreline must still re-bank the scorer market.
+      const goalless = homeScore + awayScore === 0;
+      const goal = goalless ? null : firstGoal(comp.details);
+      const homeId = sides.home.team?.id;
+      const awayId = sides.away.team?.id;
+      const firstScoringTeam = goalless
+        ? ('none' as const)
+        : goal?.teamId && homeId && goal.teamId === homeId
+          ? ('home' as const)
+          : goal?.teamId && awayId && goal.teamId === awayId
+            ? ('away' as const)
+            : null;
+      // Usable facts: goalless needs none; a scored game needs an attributed
+      // first goal. A detail-less re-serve of a banked result compares as
+      // unchanged (same feed-gap rule as the pens) — never erase facts.
+      const factsUsable = goalless || (goal !== null && firstScoringTeam !== null);
+      // already recorded identically → idempotent no-op. Pens AND first-goal
+      // facts are part of the identity: a tie banked before pens support
+      // re-writes once to backfill, and a scorer correction re-banks points.
       if (
         match.status === 'finished' &&
         match.homeScore === homeScore &&
         match.awayScore === awayScore &&
         match.homePens === (pens?.home ?? null) &&
         match.awayPens === (pens?.away ?? null) &&
+        (!factsUsable ||
+          (match.firstScorer === (goal?.scorer ?? null) &&
+            match.firstScoringTeam === firstScoringTeam)) &&
         match.resultSource === 'auto'
       ) {
         continue;
       }
-      if (homeScore + awayScore === 0) {
+      if (goalless) {
         actions.push({
           kind: 'result',
           matchId: match.id,
@@ -373,16 +432,7 @@ export function planSync(
         });
         continue;
       }
-      const goal = firstGoal(comp.details);
-      const homeId = sides.home.team?.id;
-      const awayId = sides.away.team?.id;
-      const firstScoringTeam =
-        goal?.teamId && homeId && goal.teamId === homeId
-          ? 'home'
-          : goal?.teamId && awayId && goal.teamId === awayId
-            ? 'away'
-            : null;
-      if (!goal || firstScoringTeam === null) {
+      if (!factsUsable || firstScoringTeam === null) {
         notes.push(
           `match ${match.id}: final ${homeScore}-${awayScore} but goal details unusable — enter result manually`,
         );
@@ -393,7 +443,7 @@ export function planSync(
         matchId: match.id,
         homeScore,
         awayScore,
-        firstScorer: goal.scorer,
+        firstScorer: goal?.scorer ?? null,
         firstScoringTeam,
         homePens: pens?.home ?? null,
         awayPens: pens?.away ?? null,

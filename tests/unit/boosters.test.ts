@@ -141,6 +141,19 @@ const RESULT_1_0 = {
 };
 
 describe('setBooster / getBooster', () => {
+  it('booster is rejected while the feed reports the game in progress, even before the fixture kickoff', async () => {
+    const { db, user, entry } = setup();
+    db.update(schema.matches)
+      .set({ liveStatus: 'in', liveHome: 0, liveAway: 0 })
+      .where(eq(schema.matches.id, EARLY_ID))
+      .run();
+    await withFakeNow(MORNING, async () => {
+      await expect(
+        setBooster(db, user.id, { entryId: entry.id, matchday: MATCHDAY, matchId: EARLY_ID }),
+      ).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
   it('daily booster applies to exactly one chosen match per matchday', async () => {
     const { db, user, entry } = setup();
     await withFakeNow(MORNING, async () => {

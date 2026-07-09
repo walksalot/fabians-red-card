@@ -9,7 +9,7 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { schema, type Db } from '@/db';
 import { AppError } from '@/lib/errors';
-import { propagateMatch } from '@/lib/services/bracket-propagation';
+import { knockoutAdvancers, propagateMatch } from '@/lib/services/bracket-propagation';
 import {
   scorePick,
   type PickInput,
@@ -153,6 +153,11 @@ function writeResult(
   // stale. better-sqlite3 runs on a single connection, so statements issued
   // via `db` inside the callback participate in this transaction.
   return db.transaction(() => {
+    // Decidability before the write: when a correction turns a DECIDED tie
+    // undecidable (re-entered level without tallies), the earlier
+    // propagation's child fill is known-stale and must revert.
+    const wasDecided = knockoutAdvancers(match) !== null;
+
     const updated = db
       .update(schema.matches)
       .set({
@@ -181,7 +186,9 @@ function writeResult(
     recomputeMatch(db, input.matchId);
     // The decided tie flows straight into the next round's slot — the
     // bracket and pick screens must never wait for an external team fill.
-    propagateMatch(db, updated);
+    propagateMatch(db, updated, {
+      revertWhenFinished: wasDecided && knockoutAdvancers(updated) === null,
+    });
     return updated;
   });
 }
@@ -223,17 +230,30 @@ export function setLiveScore(
 ): void {
   const match = getMatchOrThrow(db, input.matchId);
   if (match.resultSource === 'manual' || match.status === 'finished') return;
+  // Attribution gap: goals exist but this poll carries no first-goal facts
+  // at all (feed served the event without its details). Keep the established
+  // facts instead of nulling them — one detail-less response must not flap
+  // everyone's provisional scorer/first-team points. A 0-0 snapshot DOES
+  // clear them (VAR can erase the only goal), and any attributed poll
+  // (even scorer-null own-goal attribution) replaces them verbatim.
+  const incomingScorer = input.firstScorer ?? null;
+  const incomingTeam = input.firstScoringTeam ?? null;
+  const attributionGap =
+    input.liveHome + input.liveAway > 0 && incomingScorer === null && incomingTeam === null;
+  // Same rule for a mid-shootout tallies gap: kicks never un-happen live;
+  // the final result write clears all live state anyway.
+  const pensGap = (input.liveHomePens ?? null) === null && (input.liveAwayPens ?? null) === null;
   db.update(schema.matches)
     .set({
       liveHome: input.liveHome,
       liveAway: input.liveAway,
       liveStatus: 'in',
       liveUpdatedAt: input.updatedAtMs,
-      liveFirstScorer: input.firstScorer ?? null,
-      liveFirstScoringTeam: input.firstScoringTeam ?? null,
+      liveFirstScorer: attributionGap ? match.liveFirstScorer : incomingScorer,
+      liveFirstScoringTeam: attributionGap ? match.liveFirstScoringTeam : incomingTeam,
       liveClock: input.clock ?? null,
-      liveHomePens: input.liveHomePens ?? null,
-      liveAwayPens: input.liveAwayPens ?? null,
+      liveHomePens: pensGap ? match.liveHomePens : (input.liveHomePens ?? null),
+      liveAwayPens: pensGap ? match.liveAwayPens : (input.liveAwayPens ?? null),
     })
     .where(eq(schema.matches.id, input.matchId))
     .run();
@@ -326,7 +346,16 @@ export function setMatchTeams(
 
     // Mirrors setUnderdog: a team correction on an already-finished match
     // changes underdog sides, so the stored points must follow immediately.
-    if (match.status === 'finished') recomputeMatch(db, input.matchId);
+    if (match.status === 'finished') {
+      recomputeMatch(db, input.matchId);
+      // The corrected pair also changes who advanced: the child slot still
+      // holds the OLD pair's winner, so that team must be replaceable too.
+      propagateMatch(db, updated, {
+        alsoReplaceable: [match.homeTeamId, match.awayTeamId].filter(
+          (id): id is number => id !== null,
+        ),
+      });
+    }
     return updated;
   });
 }

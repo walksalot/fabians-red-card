@@ -15,10 +15,13 @@ function snap(partial: Partial<MatchSnapshot> & { id: number; kickoffUtc: string
     awayName: 'South Africa',
     status: 'scheduled',
     resultSource: null,
+    venue: 'Estadio Azteca',
     homeScore: null,
     awayScore: null,
     homePens: null,
     awayPens: null,
+    firstScorer: null,
+    firstScoringTeam: null,
     ...partial,
   };
 }
@@ -276,6 +279,8 @@ describe('planSync', () => {
       resultSource: 'auto',
       homeScore: 2,
       awayScore: 1,
+      firstScorer: 'Somebody',
+      firstScoringTeam: 'home',
     });
     const plan = planSync(
       [
@@ -313,7 +318,7 @@ describe('planSync', () => {
       [r32],
     );
     expect(plan.actions).toEqual([
-      { kind: 'teams', matchId: 73, homeCode: 'BRA', awayCode: 'SCO' },
+      { kind: 'teams', matchId: 73, homeCode: 'BRA', awayCode: 'SCO', homeName: 'Brazil', awayName: 'Scotland' },
     ]);
   });
 
@@ -333,6 +338,26 @@ describe('planSync', () => {
     );
     expect(plan.actions).toEqual([]);
     expect(plan.notes.join(' ')).toMatch(/ambiguous/);
+  });
+
+  it('disambiguates same-instant placeholders by the ACTUAL venue name', () => {
+    const a = snap({ id: 73, kickoffUtc: '2026-06-28T19:00:00Z', homeCode: null, awayCode: null, homeName: null, awayName: null, venue: 'SoFi Stadium' });
+    const b = snap({ id: 74, kickoffUtc: '2026-06-28T19:00:00Z', homeCode: null, awayCode: null, homeName: null, awayName: null, venue: 'Gillette Stadium' });
+    const plan = planSync(
+      [
+        espnEvent({
+          date: '2026-06-28T19:00Z',
+          state: 'pre',
+          home: { abbr: 'BRA', name: 'Brazil' },
+          away: { abbr: 'SCO', name: 'Scotland' },
+          venue: 'Gillette Stadium, Foxborough', // spelling drift tolerated
+        }),
+      ],
+      [a, b],
+    );
+    expect(plan.actions).toEqual([
+      { kind: 'teams', matchId: 74, homeCode: 'BRA', awayCode: 'SCO', homeName: 'Brazil', awayName: 'Scotland' },
+    ]);
   });
 
   it('falls back to display-name matching when abbreviations differ', () => {
@@ -618,6 +643,7 @@ describe('planSync', () => {
         awayScore: 0,
         homePens: null,
         awayPens: null,
+        firstScoringTeam: 'none',
       });
       const event = espnEvent({
         state: 'post',
@@ -654,6 +680,7 @@ describe('planSync', () => {
         awayScore: 0,
         homePens: 4,
         awayPens: 3,
+        firstScoringTeam: 'none',
       });
       // Same final, but this pass the feed omitted shootoutScore entirely.
       const gappyEvent = espnEvent({
@@ -707,6 +734,92 @@ describe('planSync', () => {
           awayPens: null,
         },
       ]);
+    });
+
+    it('re-banks a post-FT scorer correction with an unchanged scoreline', () => {
+      const banked = snap({
+        id: 1,
+        kickoffUtc: '2026-06-11T19:00:00Z',
+        status: 'finished',
+        resultSource: 'auto',
+        homeScore: 2,
+        awayScore: 1,
+        firstScorer: 'Player A',
+        firstScoringTeam: 'home',
+      });
+      // ESPN re-credits the opening goal (deflection) to Player B.
+      const corrected = espnEvent({
+        state: 'post',
+        completed: true,
+        home: { score: '2' },
+        away: { score: '1' },
+        details: [
+          { clock: 600, teamId: '100', athlete: 'Player B' },
+          { clock: 2400, teamId: '200', athlete: 'Player C' },
+        ],
+      });
+      expect(planSync([corrected], [banked]).actions).toEqual([
+        {
+          kind: 'result',
+          matchId: 1,
+          homeScore: 2,
+          awayScore: 1,
+          firstScorer: 'Player B',
+          firstScoringTeam: 'home',
+          homePens: null,
+          awayPens: null,
+        },
+      ]);
+
+      // Reclassified as an own goal: the scorer market shifts off Player A
+      // (next non-own scorer wins it) while the team credit stands.
+      const ownGoal = espnEvent({
+        state: 'post',
+        completed: true,
+        home: { score: '2' },
+        away: { score: '1' },
+        details: [
+          { clock: 600, teamId: '100', ownGoal: true, athlete: 'Player A' },
+          { clock: 2400, teamId: '100', athlete: 'Player D' },
+        ],
+      });
+      expect(planSync([ownGoal], [banked]).actions).toEqual([
+        {
+          kind: 'result',
+          matchId: 1,
+          homeScore: 2,
+          awayScore: 1,
+          firstScorer: 'Player D',
+          firstScoringTeam: 'home',
+          homePens: null,
+          awayPens: null,
+        },
+      ]);
+    });
+
+    it('a detail-less re-serve of a banked result never rewrites or erases the scorer facts', () => {
+      const banked = snap({
+        id: 1,
+        kickoffUtc: '2026-06-11T19:00:00Z',
+        status: 'finished',
+        resultSource: 'auto',
+        homeScore: 2,
+        awayScore: 1,
+        firstScorer: 'Player A',
+        firstScoringTeam: 'home',
+      });
+      const gappy = espnEvent({
+        state: 'post',
+        completed: true,
+        home: { score: '2' },
+        away: { score: '1' },
+        details: [], // this pass the feed dropped the goal detail
+      });
+      const plan = planSync([gappy], [banked]);
+      expect(plan.actions).toEqual([]);
+      // …and it is not the "unusable — enter manually" case either: the
+      // result is already banked, so there is nothing for the admin to do.
+      expect(plan.notes).toEqual([]);
     });
 
     it('ignores junk tallies: a decisive score or a level shootout parses as no shootout', () => {

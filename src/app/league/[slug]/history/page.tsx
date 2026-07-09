@@ -66,14 +66,18 @@ export default async function HistoryPage({
 
   // Penalties context: reuse the bracket's decidedOnPens/advancer inference
   // (bracket.ts) — level knockout scores read as unfinished without it. Needs
-  // ALL matches (the advancer shows up in the next round's slot).
+  // ALL matches (the advancer shows up in the next round's slot), and an
+  // explicit stage list: the DEFAULT stages draw the Road-to-the-Final tree
+  // and skip 'third', which here would strip the third-place tie of its
+  // pens caption/tallies.
+  const allMatches = db.select().from(schema.matches).all();
   const bracketTeams = new Map<number, BracketTeamRef>(
     teamRows.map((t) => [t.id, { id: t.id, code: t.code, name: t.name }]),
   );
   const bracketNodes = buildBracket(
-    db.select().from(schema.matches).all(),
+    allMatches,
     bracketTeams,
-    undefined,
+    ['r32', 'r16', 'qf', 'sf', 'third', 'final'],
     feederMapFromFixtures(fixtures),
   );
   const nodeById = new Map(bracketNodes.map((n) => [n.matchId, n]));
@@ -211,8 +215,18 @@ export default async function HistoryPage({
       : '';
     return `${side(m.homeTeamId, m.homePlaceholder)} ${m.homeScore}–${m.awayScore} ${side(m.awayTeamId, m.awayPlaceholder)}${pens}`;
   };
+  // Wraps only for COMPLETE days: a partial wrap would crown a premature
+  // "won the day" while games are still being played (the same invariant
+  // latestWrappableMatchday enforces for the Today banner).
+  const unfinishedByDay = new Map<string, number>();
+  for (const m of allMatches) {
+    if (m.status !== 'finished') {
+      unfinishedByDay.set(m.matchday, (unfinishedByDay.get(m.matchday) ?? 0) + 1);
+    }
+  }
   const wraps: Record<string, WrapCardView> = {};
   for (const day of days) {
+    if ((unfinishedByDay.get(day) ?? 0) > 0) continue;
     const w = computeMatchdayWrap(db, league.id, day);
     if (!w) continue;
     wraps[day] = {

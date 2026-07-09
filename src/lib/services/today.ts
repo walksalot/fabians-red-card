@@ -162,7 +162,12 @@ export function getTodayBoard(
     teams: teamsOf(match, teamMap),
     myPick: myPicks.get(match.id) ?? null,
     booster: boosterByDay.get(match.matchday)?.matchId === match.id,
-    locked: nowEpochMs >= Date.parse(match.kickoffUtc),
+    // Mirrors the pick/booster lock rule: kickoff, a banked result, or the
+    // feed reporting the game in progress all freeze the form.
+    locked:
+      nowEpochMs >= Date.parse(match.kickoffUtc) ||
+      match.status === 'finished' ||
+      match.liveStatus === 'in',
   }));
 
   return { matchday: selected, matches: items };

@@ -257,6 +257,86 @@ describe('runSync (auto-results orchestrator)', () => {
     expect(second.teamFills).toBe(0);
   });
 
+  it('fills teams by display name when the feed abbreviation matches no seeded code, healing a finished TBD match', async () => {
+    const db = createTestDb();
+    seedWorld(db);
+    db.insert(schema.teams).values([
+      { id: 3, code: 'KOR', name: 'Korea Republic', groupLetter: 'B' },
+      { id: 4, code: 'CIV', name: "Côte d'Ivoire", groupLetter: 'C' },
+    ]).run();
+    // R32 placeholder slot whose game already FINISHED while its feed codes
+    // ('SKO'/'IVC' — not our FIFA codes) matched nothing: previously the
+    // teams could never fill again (the old update was scheduled-only) and
+    // the bracket stayed stranded forever.
+    db.insert(schema.matches).values({
+      id: 73, stage: 'r32', homePlaceholder: '1A', awayPlaceholder: '2B',
+      kickoffUtc: '2026-06-11T16:00:00Z', matchday: '2026-06-11',
+      venue: 'SoFi Stadium', city: 'LA', status: 'finished',
+      homeScore: 2, awayScore: 0, firstScorer: 'Somebody', firstScoringTeam: 'home',
+      resultSource: 'auto',
+    }).run();
+    db.insert(schema.matches).values({
+      id: 90, stage: 'r16', homePlaceholder: 'Winners Match 73', awayPlaceholder: 'Winners Match 75',
+      kickoffUtc: '2026-06-13T20:00:00Z', matchday: '2026-06-13',
+      venue: 'NRG Stadium', city: 'Houston', status: 'scheduled',
+    }).run();
+    const event: EspnEvent = {
+      date: '2026-06-11T16:00Z',
+      name: "Côte d'Ivoire at Korea Republic",
+      competitions: [
+        {
+          status: { type: { completed: true, state: 'post' } },
+          competitors: [
+            { homeAway: 'home', score: '2', team: { id: '300', abbreviation: 'SKO', displayName: 'Korea Republic' } },
+            { homeAway: 'away', score: '0', team: { id: '400', abbreviation: 'IVC', displayName: "Côte d'Ivoire" } },
+          ],
+          details: [
+            { scoringPlay: true, ownGoal: false, clock: { value: 900 }, team: { id: '300' }, athletesInvolved: [{ displayName: 'Somebody' }] },
+          ],
+        },
+      ],
+    };
+
+    const summary = await runSync(db, async (d) => (d === '20260611' ? [event] : []));
+    expect(summary.teamFills).toBeGreaterThanOrEqual(1);
+    const healed = db.select().from(schema.matches).where(eq(schema.matches.id, 73)).get();
+    expect(healed?.homeTeamId).toBe(3); // by name, not code
+    expect(healed?.awayTeamId).toBe(4);
+    // …and the finished match's winner flowed straight into the R16 slot.
+    expect(
+      db.select().from(schema.matches).where(eq(schema.matches.id, 90)).get()?.homeTeamId,
+    ).toBe(3);
+  });
+
+  it('re-banks a scorer correction end to end and recomputes the scorer market', async () => {
+    const db = createTestDb();
+    const { e1 } = seedWorld(db);
+    // A scheduled sibling on the same matchday keeps the date in the fetch
+    // set after match 1 finishes — the exact window corrections arrive in.
+    db.insert(schema.matches).values({
+      id: 2, stage: 'group', groupLetter: 'A',
+      kickoffUtc: '2026-06-11T22:00:00Z', matchday: '2026-06-11',
+      venue: 'V', city: 'C', status: 'scheduled',
+    }).run();
+    const fetcher = (ev: EspnEvent) => async (d: string) => (d === '20260611' ? [ev] : []);
+    await runSync(db, fetcher(completedEvent()));
+    expect(
+      db.select().from(schema.matchPoints).where(eq(schema.matchPoints.entryId, e1)).get()?.total,
+    ).toBe(20); // exact 10 + scorer 8 + firstTeam 2
+
+    // The feed re-credits the opening goal to somebody else — e1's scorer
+    // pick no longer matches and the 8 points must come back off.
+    const corrected = completedEvent();
+    corrected.competitions![0].details![0].athletesInvolved = [{ displayName: 'Lyle Foster' }];
+    const summary = await runSync(db, fetcher(corrected));
+    expect(summary.results).toBe(1);
+    const match = db.select().from(schema.matches).where(eq(schema.matches.id, 1)).get();
+    expect(match?.firstScorer).toBe('Lyle Foster');
+    expect(
+      db.select().from(schema.matchPoints).where(eq(schema.matchPoints.entryId, e1)).get()?.total,
+    ).toBe(12); // exact 10 + firstTeam 2, scorer gone
+  });
+
   it('propagates stale knockout winners even when auto-sync is off (self-heal path)', async () => {
     const db = createTestDb();
     seedWorld(db);

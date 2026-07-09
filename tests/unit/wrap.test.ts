@@ -52,6 +52,39 @@ describe('computeMatchdayWrap', () => {
     void c;
   });
 
+  it("an entry with NO picks that day skipped it — it didn't 'blank' it", () => {
+    const db = createTestDb();
+    const { leagueId } = seed(db);
+    // Fourth entry, zero picks (no matchPoints rows at all on the day).
+    const league = db.select().from(schema.leagues).all()[0];
+    db.insert(schema.entries)
+      .values({ leagueId: league.id, userId: league.adminUserId, label: 'Dot', createdAt: 1 })
+      .run();
+    const wrap = computeMatchdayWrap(db, leagueId, '2026-06-11')!;
+    expect(wrap.blankedCount).toBe(1); // still only Cy — Dot never played
+    // …but Dot still appears in the day totals table with 0.
+    expect(wrap.dayTotals.some((t) => t.label === 'Dot' && t.total === 0)).toBe(true);
+  });
+
+  it('day-winner and biggest-haul ties survive float drift (micro-point rounding)', () => {
+    const db = createTestDb();
+    const { leagueId, a, b } = seed(db);
+    db.delete(schema.matchPoints).run();
+    const bd = (total: number) =>
+      JSON.stringify({ exact: 0, outcome: 2, scorer: 0, firstTeam: 0, underdog: 0, base: 2, roundMultiplier: 1.5, boosterMultiplier: 1, total });
+    // 0.1 + 0.2 !== 0.3 in floats: identical hauls accumulated differently
+    // must still tie for the day win and share the biggest haul.
+    db.insert(schema.matchPoints).values([
+      // a accumulates 0.1 + 0.2 (= 0.30000000000000004 in floats); b holds
+      // exactly 0.3 — identical scores that differ only by float drift.
+      { entryId: a, matchId: 1, breakdown: bd(0.1), total: 0.1 },
+      { entryId: a, matchId: 2, breakdown: bd(0.2), total: 0.2 },
+      { entryId: b, matchId: 1, breakdown: bd(0.3), total: 0.3 },
+    ]).run();
+    const wrap = computeMatchdayWrap(db, leagueId, '2026-06-11')!;
+    expect(wrap.dayWinners.map((w) => w.entryId).sort()).toEqual([a, b].sort());
+  });
+
   it('a tied biggest haul credits EVERY holder, not the first row scanned', () => {
     // The live-league bug: ~10 entries hit the same top haul on one match and
     // the wrap named a single arbitrary entry. All holders must be reported.

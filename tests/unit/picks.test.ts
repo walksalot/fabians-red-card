@@ -143,6 +143,25 @@ describe('upsertPick', () => {
     expect(await getEntryPicks(db, entry.id)).toHaveLength(0);
   });
 
+  it('picks are rejected while the feed reports the game in progress, even before the fixture kickoff', async () => {
+    // Delayed fixture data / early real start: the stored kickoff is still in
+    // the future but the ball is genuinely rolling — no betting after kickoff.
+    const { db, user, entry } = setup();
+    db.update(schema.matches)
+      .set({ liveStatus: 'in', liveHome: 0, liveAway: 0 })
+      .where(eq(schema.matches.id, MATCH_ID))
+      .run();
+    await withFakeNow(BEFORE_KICKOFF, async () => {
+      await expect(
+        upsertPick(db, user.id, basePick(entry.id)),
+      ).rejects.toMatchObject({
+        status: 409,
+        message: 'Picks are locked for this match',
+      });
+    });
+    expect(await getEntryPicks(db, entry.id)).toHaveLength(0);
+  });
+
   it('picks are rejected once a result is entered, even before kickoff', async () => {
     const { db, user, entry, match } = setup();
     // The admin can enter a result ahead of kickoff; the result is then

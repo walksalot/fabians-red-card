@@ -113,17 +113,37 @@ function writeSlot(
   db.update(schema.matches).set(updates).where(eq(schema.matches.id, child.id)).run();
 }
 
+export interface PropagateOptions {
+  /**
+   * Extra team ids this call may replace or revert in child slots — the
+   * feeder's PREVIOUS pair when an admin corrects the teams of a finished
+   * tie (the occupant is the old pair's "winner" and must follow the fix).
+   */
+  alsoReplaceable?: readonly number[];
+  /**
+   * Let the revert branch fire although the feeder is finished. Set by
+   * writeResult when a correction turns a DECIDED tie undecidable (score
+   * re-entered as level without tallies): the previous propagation's fill is
+   * now known-stale, unlike a legacy fill whose tie was never decided here.
+   */
+  revertWhenFinished?: boolean;
+}
+
 /**
  * Push one knockout match's outcome into the slots it feeds. Handles both
  * directions: a decided tie fills its children; an undecided one (result
- * cleared, or pens unknown again) reverts fills that came from this tie.
- * Returns the number of slots written.
+ * cleared, or a correction that un-decided it) reverts fills that came from
+ * this tie. Returns the number of slots written.
  */
-export function propagateMatch(db: Db, match: MatchRow): number {
+export function propagateMatch(db: Db, match: MatchRow, opts: PropagateOptions = {}): number {
   if (match.stage === 'group') return 0; // R32 slots come from group standings
   const refs = childRefsByFeeder().get(match.id);
   if (!refs || refs.length === 0) return 0;
   const advancers = knockoutAdvancers(match);
+  const ours = (teamId: number): boolean =>
+    teamId === match.homeTeamId ||
+    teamId === match.awayTeamId ||
+    (opts.alsoReplaceable?.includes(teamId) ?? false);
   let writes = 0;
   for (const ref of refs) {
     const child = db
@@ -139,27 +159,23 @@ export function propagateMatch(db: Db, match: MatchRow): number {
     if (target !== null) {
       if (occupant === target) continue;
       // Fill an empty slot, or correct a fill that names one of the feeder's
-      // own teams (a re-entered result flipped the tie). A team from anywhere
-      // else was placed deliberately — leave it alone.
-      const replaceable =
-        occupant === null ||
-        occupant === match.homeTeamId ||
-        occupant === match.awayTeamId;
-      if (!replaceable) continue;
+      // own teams (a re-entered result flipped the tie, or a team correction
+      // moved the pair itself). A team from anywhere else was placed
+      // deliberately — leave it alone.
+      if (occupant !== null && !ours(occupant)) continue;
       writeSlot(db, child, ref.side, target, null);
       writes++;
     } else if (
-      match.status !== 'finished' &&
+      (match.status !== 'finished' || opts.revertWhenFinished === true) &&
       occupant !== null &&
-      (occupant === match.homeTeamId || occupant === match.awayTeamId)
+      ours(occupant)
     ) {
-      // The tie's RESULT was cleared: our fill reverts to the seeded
-      // placeholder so the slot honestly reads as open again. This branch is
-      // strictly for cleared results — a FINISHED tie that is merely
-      // undecidable (level, shootout tallies not recorded yet) must never
-      // un-fill a slot: the legacy team-fill path (feed/admin) may already
-      // hold the true advancer there, and erasing it would break the bracket
-      // and pick screens until the tallies backfill.
+      // The tie's result was cleared (or a correction un-decided it): our
+      // fill reverts to the seeded placeholder so the slot honestly reads as
+      // open again. WITHOUT the explicit flag this never fires for a
+      // finished tie — one that is merely undecidable (level, shootout
+      // tallies not recorded yet) must never un-fill a slot: the legacy
+      // team-fill path (feed/admin) may already hold the true advancer.
       writeSlot(db, child, ref.side, null, ref.placeholder);
       writes++;
     }

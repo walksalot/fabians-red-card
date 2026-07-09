@@ -88,10 +88,11 @@ export function computeMatchdayWrap(
   /** matchId -> entryIds that got the result right (exact or outcome). */
   const callers = new Map<number, number[]>();
 
+  const microOf = (n: number): number => Math.round(n * 1e6);
   for (const p of points) {
     totals.set(p.entryId, (totals.get(p.entryId) ?? 0) + p.total);
-    if (p.total > 0 && p.total >= bestPoints) {
-      if (p.total > bestPoints) {
+    if (microOf(p.total) > 0 && microOf(p.total) >= microOf(bestPoints)) {
+      if (microOf(p.total) > microOf(bestPoints)) {
         bestPoints = p.total;
         bestHolders = [];
       }
@@ -117,14 +118,23 @@ export function computeMatchdayWrap(
     }
   }
 
+  // Micro-point rounding before any equality/threshold, mirroring the
+  // leaderboard: round multipliers are floats, and 11.999999999 vs 12 must
+  // not split a genuine tie or invent a phantom "blank".
+  const micro = (n: number): number => Math.round(n * 1e6);
   const dayTotals: WrapEntryDay[] = entries
     .map((e) => ({ entryId: e.id, label: e.label, total: totals.get(e.id) ?? 0 }))
     .sort((a, b) => b.total - a.total || a.entryId - b.entryId);
   const top = dayTotals[0]?.total ?? 0;
   // A day where nobody scored crowns no winner — "won the day with 0" is a jab
   // the wrap should not make for the app (the group chat can).
-  const dayWinners = top > 0 ? dayTotals.filter((t) => t.total === top) : [];
-  const blankedCount = dayTotals.filter((t) => t.total === 0).length;
+  const dayWinners = micro(top) > 0 ? dayTotals.filter((t) => micro(t.total) === micro(top)) : [];
+  // "Blanked" means picked and got nothing — an entry with no picks that day
+  // (matchPoints rows exist only for picks) skipped it, it didn't blank it.
+  const pickedEntryIds = new Set(points.map((p) => p.entryId));
+  const blankedCount = dayTotals.filter(
+    (t) => pickedEntryIds.has(t.entryId) && micro(t.total) === 0,
+  ).length;
 
   const soleCalls: MatchdayWrap['soleCalls'] = [];
   for (const [matchId, list] of callers) {

@@ -6,7 +6,7 @@ import {
   propagateAllKnockouts,
   propagateMatch,
 } from '@/lib/services/bracket-propagation';
-import { clearResult, enterResult, setUnderdog } from '@/lib/services/results';
+import { clearResult, enterResult, setMatchTeams, setUnderdog } from '@/lib/services/results';
 import { freshDb } from '../helpers/db';
 
 // ---------------------------------------------------------------------------
@@ -324,6 +324,55 @@ describe('knockout winner propagation', () => {
     const qf = matchById(db, 97);
     expect(qf.homeTeamId).toBe(2);
     expect(qf.underdogTeamId).toBeNull();
+  });
+
+  it('correcting a finished feeder’s TEAMS moves the child slot to the new winner', () => {
+    const db = freshDb();
+    const admin = makeAdmin(db);
+    seedQuarterFinalScene(db);
+
+    enterResult(db, admin.id, {
+      matchId: 89,
+      homeScore: 2,
+      awayScore: 1,
+      firstScorer: null,
+      firstScoringTeam: 'home',
+    });
+    expect(matchById(db, 97).homeTeamId).toBe(1); // SUI (home) won 2-1
+
+    // The pairing itself was wrong: it was ENG (3) at home, not SUI. The old
+    // pair's winner is stranded in the QF unless the correction follows.
+    setMatchTeams(db, admin.id, { matchId: 89, homeTeamId: 3, awayTeamId: 2 });
+    expect(matchById(db, 97).homeTeamId).toBe(3); // ENG replaces the stale SUI
+  });
+
+  it('re-entering a decisive result as level WITHOUT tallies reverts our fill (no fabricated advancer)', () => {
+    const db = freshDb();
+    const admin = makeAdmin(db);
+    seedQuarterFinalScene(db);
+
+    enterResult(db, admin.id, {
+      matchId: 89,
+      homeScore: 2,
+      awayScore: 1,
+      firstScorer: null,
+      firstScoringTeam: 'home',
+    });
+    expect(matchById(db, 97).homeTeamId).toBe(1);
+
+    // Correction: it actually finished level and the admin doesn't know the
+    // shootout numbers yet — the previous fill is known-stale and must open
+    // up again rather than leave SUI looking like the (unknown) advancer.
+    enterResult(db, admin.id, {
+      matchId: 89,
+      homeScore: 1,
+      awayScore: 1,
+      firstScorer: null,
+      firstScoringTeam: 'home',
+    });
+    const qf = matchById(db, 97);
+    expect(qf.homeTeamId).toBeNull();
+    expect(qf.homePlaceholder).toBe('Winners Match 89');
   });
 
   it('propagateAllKnockouts heals a whole stale bracket in one pass (cascades by id order)', () => {

@@ -9,12 +9,12 @@
  * Everything network-related is injected as `fetchScoreboard`, so the whole
  * thing is unit-testable with a stub and no real HTTP.
  */
-import { and, eq, gte, inArray, isNull, lte, ne } from 'drizzle-orm';
+import { and, eq, gte, isNull, lte, ne } from 'drizzle-orm';
 import { getDb, schema, type Db } from '@/db';
 import { now } from '@/lib/clock';
-import { propagateAllKnockouts } from '@/lib/services/bracket-propagation';
+import { propagateAllKnockouts, propagateMatch } from '@/lib/services/bracket-propagation';
 import { enterResultAuto, recomputeMatch, setLiveScore } from '@/lib/services/results';
-import { planSync, type EspnEvent, type MatchSnapshot } from './espn-map';
+import { plainName, planSync, type EspnEvent, type MatchSnapshot } from './espn-map';
 
 const ESPN_BASE =
   'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard';
@@ -131,10 +131,13 @@ function snapshotMatches(db: Db): MatchSnapshot[] {
       kickoffUtc: schema.matches.kickoffUtc,
       status: schema.matches.status,
       resultSource: schema.matches.resultSource,
+      venue: schema.matches.venue,
       homeScore: schema.matches.homeScore,
       awayScore: schema.matches.awayScore,
       homePens: schema.matches.homePens,
       awayPens: schema.matches.awayPens,
+      firstScorer: schema.matches.firstScorer,
+      firstScoringTeam: schema.matches.firstScoringTeam,
       homeTeamId: schema.matches.homeTeamId,
       awayTeamId: schema.matches.awayTeamId,
     })
@@ -157,10 +160,13 @@ function snapshotMatches(db: Db): MatchSnapshot[] {
       awayName: away?.name ?? null,
       status: m.status,
       resultSource: m.resultSource,
+      venue: m.venue,
       homeScore: m.homeScore,
       awayScore: m.awayScore,
       homePens: m.homePens,
       awayPens: m.awayPens,
+      firstScorer: m.firstScorer,
+      firstScoringTeam: m.firstScoringTeam,
     };
   });
 }
@@ -227,9 +233,17 @@ export async function runSync(
   let teamFills = propagated;
   let oddsUpdates = 0;
 
-  const teamIdByCode = new Map(
-    db.select({ id: schema.teams.id, code: schema.teams.code }).from(schema.teams).all().map((t) => [t.code, t.id]),
-  );
+  const teamRows = db
+    .select({ id: schema.teams.id, code: schema.teams.code, name: schema.teams.name })
+    .from(schema.teams)
+    .all();
+  const teamIdByCode = new Map(teamRows.map((t) => [t.code, t.id]));
+  // Fallback for feed abbreviations that match no seeded FIFA code — the
+  // display name resolves the same team ("Korea Republic" etc.).
+  const teamIdByName = new Map(teamRows.map((t) => [plainName(t.name), t.id]));
+  const resolveTeamId = (code: string | null, name: string | null): number | undefined =>
+    (code !== null ? teamIdByCode.get(code) : undefined) ??
+    (name !== null ? teamIdByName.get(plainName(name)) : undefined);
 
   for (const action of plan.actions) {
     try {
@@ -261,19 +275,30 @@ export async function runSync(
         });
         liveUpdates++;
       } else if (action.kind === 'teams') {
-        const homeId = teamIdByCode.get(action.homeCode);
-        const awayId = teamIdByCode.get(action.awayCode);
+        const homeId = resolveTeamId(action.homeCode, action.homeName);
+        const awayId = resolveTeamId(action.awayCode, action.awayName);
         if (homeId && awayId && homeId !== awayId) {
           db.transaction(() => {
+            // Finished matches heal too: a final can bank against a slot
+            // whose teams could not be mapped at the time — the late fill
+            // must recompute (underdog sides become resolvable) and let the
+            // winner flow into the bracket.
             const m = db
               .update(schema.matches)
               .set({ homeTeamId: homeId, awayTeamId: awayId, homePlaceholder: null, awayPlaceholder: null })
-              .where(and(eq(schema.matches.id, action.matchId), inArray(schema.matches.status, ['scheduled'])))
+              .where(eq(schema.matches.id, action.matchId))
               .returning()
               .get();
-            if (m && m.status === 'finished') recomputeMatch(db, action.matchId);
+            if (m && m.status === 'finished') {
+              recomputeMatch(db, action.matchId);
+              propagateMatch(db, m);
+            }
           });
           teamFills++;
+        } else {
+          notes.push(
+            `match ${action.matchId}: feed teams ${action.homeCode ?? action.homeName} / ${action.awayCode ?? action.awayName} match no seeded team — assign in Admin`,
+          );
         }
       }
     } catch (err) {

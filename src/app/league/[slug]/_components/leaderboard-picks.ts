@@ -45,19 +45,21 @@ export function getLockedPicksByEntry(
   const now = nowMs();
   let latestDay: string | null = null;
   for (const m of matches) {
-    if (Date.parse(m.kickoffUtc) <= now) {
+    if (Date.parse(m.kickoffUtc) <= now || m.liveStatus === 'in') {
       if (latestDay === null || m.matchday > latestDay) latestDay = m.matchday;
     }
   }
   if (latestDay === null) return new Map();
 
-  // Locked/finished fixtures only — an unkicked match on the same day is
-  // still open and MUST stay out of the payload.
+  // Kicked-off (or feed-live) fixtures only — picks stay hidden until
+  // kickoff EVEN when a result was entered ahead of it (same privacy rule as
+  // getMatchPicksPublic): revealing everyone's picks on a future match leaks
+  // strategy, and a later clearResult would hand the leak back as an edge.
   const dayMatches = matches
     .filter(
       (m) =>
         m.matchday === latestDay &&
-        (m.status === 'finished' || Date.parse(m.kickoffUtc) <= now),
+        (Date.parse(m.kickoffUtc) <= now || m.liveStatus === 'in'),
     )
     .sort((a, b) => a.kickoffUtc.localeCompare(b.kickoffUtc) || a.id - b.id);
   if (dayMatches.length === 0) return new Map();
