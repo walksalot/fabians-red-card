@@ -3,6 +3,7 @@ import { requireUser } from '@/lib/session';
 import { AppError } from '@/lib/errors';
 import { getLeagueBySlug, prizePool } from '@/lib/services/leagues';
 import { getLeaderboard } from '@/lib/services/leaderboard';
+import { computeLeagueLore } from '@/lib/services/wrap';
 import { getLockedPicksByEntry } from '@/app/league/[slug]/_components/leaderboard-picks';
 import { getTodayPointsByEntry } from '@/app/league/[slug]/_components/today-points';
 import {
@@ -43,5 +44,6 @@ export const GET = handle<RouteCtx>(async (_req, { params }) => {
     // Pool math is per ENTRY while the card cites members — ship both so the
     // card can name the entry count whenever the two denominators differ.
     entryCount: entryCountOf(db, league.id),
+    lore: computeLeagueLore(db, league.id),
   });
 });

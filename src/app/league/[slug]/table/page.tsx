@@ -6,10 +6,13 @@ import { prizePool } from '@/lib/services/leagues';
 import LiveTable from '../_components/LiveTable';
 import LiveNow from '../_components/LiveNow';
 import { getLiveBoards } from '@/lib/services/live';
+import { computeLeagueLore } from '@/lib/services/wrap';
 import { loadLeagueContext } from '../_components/league-data';
 import { getLockedPicksByEntry } from '../_components/leaderboard-picks';
 import { getTodayPointsByEntry } from '../_components/today-points';
 import type { LeaderboardRowView, PrizePoolView } from '../_components/types';
+
+export const metadata = { title: 'Table' };
 
 export default async function TablePage({
   params,
@@ -45,6 +48,7 @@ export default async function TablePage({
     .all().length;
   const pool = prizePool(league, entryCount) as PrizePoolView;
   const liveBoards = getLiveBoards(db, league.id);
+  const lore = computeLeagueLore(db, league.id);
 
   return (
     <div className="space-y-4">
@@ -55,6 +59,7 @@ export default async function TablePage({
         initialPool={pool}
         initialMemberCount={memberCount}
         initialEntryCount={entryCount}
+        initialLore={lore}
         buyInCents={league.buyInCents}
         currency={league.currency}
         meUserId={user.id}

@@ -8,6 +8,8 @@ import { UNDERDOG_PROB_MAX } from '@/lib/sync/espn-sync';
 import { STAGE_LABELS, formatCents, ordinal } from '../_components/format';
 import { loadLeagueContext } from '../_components/league-data';
 
+export const metadata = { title: 'Rules' };
+
 function parseJson<T>(raw: string, fallback: T): T {
   try {
     return JSON.parse(raw) as T;

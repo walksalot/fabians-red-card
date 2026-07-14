@@ -21,6 +21,8 @@ import type {
   StageKey,
 } from './_components/shared';
 
+export const metadata = { title: 'Admin' };
+
 /** Shared section-card recipe; scroll-mt clears the app header + sticky nav. */
 const sectionCls = 'scroll-mt-28 rounded-2xl bg-zinc-900 p-4';
 
@@ -217,9 +219,9 @@ export default async function AdminPage({
           <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
             Admin
           </p>
-          <h1 className="font-display text-lg font-bold tracking-tight text-zinc-50">
+          <h2 className="font-display text-lg font-bold tracking-tight text-zinc-50">
             {league.name}
-          </h1>
+          </h2>
           <Link
             href={`/league/${slug}/today`}
             className="inline-flex h-9 items-center gap-1.5 rounded-full bg-zinc-800/60 px-3.5 text-xs font-semibold text-zinc-300 ring-1 ring-inset ring-white/10 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
@@ -272,12 +274,12 @@ export default async function AdminPage({
         </nav>
 
         <section id="invite" className={sectionCls}>
-          <h2 className="mb-3 text-base font-semibold text-zinc-100">Invite</h2>
+          <h3 className="mb-3 text-base font-semibold text-zinc-100">Invite</h3>
           <InviteBox inviteToken={league.inviteToken} memberCount={members.length} />
         </section>
 
         <section id="settings" className={sectionCls}>
-          <h2 className="mb-3 text-base font-semibold text-zinc-100">Settings</h2>
+          <h3 className="mb-3 text-base font-semibold text-zinc-100">Settings</h3>
           <SettingsForm
             slug={slug}
             settings={settings}
@@ -286,22 +288,22 @@ export default async function AdminPage({
         </section>
 
         <section id="members" className={sectionCls}>
-          <h2 className="mb-3 text-base font-semibold text-zinc-100">Members</h2>
+          <h3 className="mb-3 text-base font-semibold text-zinc-100">Members</h3>
           <MembersList slug={slug} members={members} currentUserId={user.id} />
         </section>
 
         <section id="results" className={sectionCls}>
-          <h2 className="mb-3 text-base font-semibold text-zinc-100">Results</h2>
+          <h3 className="mb-3 text-base font-semibold text-zinc-100">Results</h3>
           <ResultsEntry matches={adminMatches} nowMs={now} />
         </section>
 
         <section id="fixtures" className={sectionCls}>
-          <h2 className="mb-3 text-base font-semibold text-zinc-100">Knockout teams</h2>
+          <h3 className="mb-3 text-base font-semibold text-zinc-100">Knockout teams</h3>
           <KnockoutTeams matches={knockoutMatches} teams={teamsList} />
         </section>
 
         <section id="underdog" className={sectionCls}>
-          <h2 className="mb-3 text-base font-semibold text-zinc-100">Underdog</h2>
+          <h3 className="mb-3 text-base font-semibold text-zinc-100">Underdog</h3>
           <UnderdogPicker
             matches={underdogMatches}
             underdogPoints={settings.scoringRules.underdog}

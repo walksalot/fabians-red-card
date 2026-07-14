@@ -42,6 +42,28 @@ export interface MatchdayWrap {
   soleCalls: Array<{ entryId: number; label: string; matchId: number }>;
 }
 
+/** Tournament-to-date facts for the Table page's display-only league recap. */
+export interface LeagueLore {
+  settledPicks: number;
+  settledMatches: number;
+  exactCount: number;
+  scorerHits: number;
+  underdogHits: number;
+  /** Extra points earned above the same picks without their booster. */
+  boosterBonus: number;
+  /** Entry-days with at least one settled pick and zero total points. */
+  blankEntryDays: number;
+  biggestHaul: {
+    points: number;
+    labels: string[];
+    fixtures: string[];
+  } | null;
+  loneCallCount: number;
+  latestLoneCall: { label: string; fixture: string } | null;
+  /** The six most recent matchdays with settled picks, oldest to newest. */
+  pulse: Array<{ matchday: string; total: number }>;
+}
+
 /**
  * Compute the wrap for one FINISHED matchday. Returns null when the day has
  * no finished matches (a wrap for an unplayed day would be an empty brag).
@@ -159,6 +181,159 @@ export function computeMatchdayWrap(
     blankedCount,
     exactCount,
     soleCalls,
+  };
+}
+
+/**
+ * Compute a tournament-to-date recap from already-banked matchPoints. This is
+ * deliberately downstream of the scoring engine: it can describe points but
+ * cannot create, alter, or reinterpret them.
+ */
+export function computeLeagueLore(db: Db, leagueId: number): LeagueLore | null {
+  const entries = db
+    .select({ id: schema.entries.id, label: schema.entries.label })
+    .from(schema.entries)
+    .where(eq(schema.entries.leagueId, leagueId))
+    .all();
+  if (entries.length === 0) return null;
+
+  const finishedMatches = db
+    .select()
+    .from(schema.matches)
+    .where(eq(schema.matches.status, 'finished'))
+    .all();
+  if (finishedMatches.length === 0) return null;
+
+  const entryIds = entries.map((entry) => entry.id);
+  const matchIds = finishedMatches.map((match) => match.id);
+  const points = db
+    .select()
+    .from(schema.matchPoints)
+    .where(
+      and(
+        inArray(schema.matchPoints.entryId, entryIds),
+        inArray(schema.matchPoints.matchId, matchIds),
+      ),
+    )
+    .all();
+  if (points.length === 0) return null;
+
+  const teams = db.select().from(schema.teams).all();
+  const teamCode = new Map(teams.map((team) => [team.id, team.code]));
+  const labelOf = new Map(entries.map((entry) => [entry.id, entry.label]));
+  const matchOf = new Map(finishedMatches.map((match) => [match.id, match]));
+  const fixtureOf = (matchId: number): string => {
+    const match = matchOf.get(matchId);
+    if (!match) return `Match ${matchId}`;
+    const home =
+      (match.homeTeamId === null ? null : teamCode.get(match.homeTeamId)) ??
+      match.homePlaceholder ??
+      'TBD';
+    const away =
+      (match.awayTeamId === null ? null : teamCode.get(match.awayTeamId)) ??
+      match.awayPlaceholder ??
+      'TBD';
+    return match.homeScore === null || match.awayScore === null
+      ? `${home}–${away}`
+      : `${home} ${match.homeScore}–${match.awayScore} ${away}`;
+  };
+
+  const micro = (value: number): number => Math.round(value * 1e6);
+  const dayTotals = new Map<string, number>();
+  const entryDayTotals = new Map<string, number>();
+  const callersByMatch = new Map<number, number[]>();
+  let exactCount = 0;
+  let scorerHits = 0;
+  let underdogHits = 0;
+  let boosterBonus = 0;
+  let biggestPoints = 0;
+  let biggestHolders: Array<{ entryId: number; matchId: number }> = [];
+
+  for (const point of points) {
+    const match = matchOf.get(point.matchId);
+    if (!match) continue;
+    dayTotals.set(match.matchday, (dayTotals.get(match.matchday) ?? 0) + point.total);
+    const entryDayKey = `${point.entryId}:${match.matchday}`;
+    entryDayTotals.set(
+      entryDayKey,
+      (entryDayTotals.get(entryDayKey) ?? 0) + point.total,
+    );
+
+    if (micro(point.total) > 0 && micro(point.total) >= micro(biggestPoints)) {
+      if (micro(point.total) > micro(biggestPoints)) {
+        biggestPoints = point.total;
+        biggestHolders = [];
+      }
+      biggestHolders.push({ entryId: point.entryId, matchId: point.matchId });
+    }
+
+    let breakdown: PointsBreakdown | null = null;
+    try {
+      breakdown = JSON.parse(point.breakdown) as PointsBreakdown;
+    } catch {
+      // A malformed historical breakdown must not hide the rest of the recap.
+    }
+    if (!breakdown) continue;
+    if (micro(breakdown.exact) > 0) exactCount += 1;
+    if (micro(breakdown.scorer) > 0) scorerHits += 1;
+    if (micro(breakdown.underdog) > 0) underdogHits += 1;
+    if (breakdown.boosterMultiplier > 1) {
+      const unboosted = breakdown.base * breakdown.roundMultiplier;
+      boosterBonus += Math.max(0, point.total - unboosted);
+    }
+    if (micro(breakdown.exact) > 0 || micro(breakdown.outcome) > 0) {
+      const callers = callersByMatch.get(point.matchId) ?? [];
+      callers.push(point.entryId);
+      callersByMatch.set(point.matchId, callers);
+    }
+  }
+
+  const loneCalls = [...callersByMatch.entries()]
+    .filter(([, entryIdsForMatch]) => entryIdsForMatch.length === 1)
+    .map(([matchId, [entryId]]) => ({
+      entryId,
+      matchId,
+      kickoffUtc: matchOf.get(matchId)?.kickoffUtc ?? '',
+    }))
+    .sort((a, b) => a.kickoffUtc.localeCompare(b.kickoffUtc));
+  const latestLone = loneCalls.at(-1);
+
+  return {
+    settledPicks: points.length,
+    settledMatches: new Set(points.map((point) => point.matchId)).size,
+    exactCount,
+    scorerHits,
+    underdogHits,
+    boosterBonus: micro(boosterBonus) / 1e6,
+    blankEntryDays: [...entryDayTotals.values()].filter((total) => micro(total) === 0)
+      .length,
+    biggestHaul:
+      biggestHolders.length === 0
+        ? null
+        : {
+            points: biggestPoints,
+            labels: [
+              ...new Set(
+                biggestHolders.map(
+                  (holder) => labelOf.get(holder.entryId) ?? 'Unknown entry',
+                ),
+              ),
+            ],
+            fixtures: [
+              ...new Set(biggestHolders.map((holder) => fixtureOf(holder.matchId))),
+            ],
+          },
+    loneCallCount: loneCalls.length,
+    latestLoneCall: latestLone
+      ? {
+          label: labelOf.get(latestLone.entryId) ?? 'Unknown entry',
+          fixture: fixtureOf(latestLone.matchId),
+        }
+      : null,
+    pulse: [...dayTotals.entries()]
+      .sort(([dayA], [dayB]) => dayA.localeCompare(dayB))
+      .slice(-6)
+      .map(([matchday, total]) => ({ matchday, total: micro(total) / 1e6 })),
   };
 }
 

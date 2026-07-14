@@ -15,7 +15,12 @@ export function getDb(): Db {
   const dbPath = process.env.DB_PATH ?? '.data/app.db';
   if (cached && cached.dbPath === dbPath) return cached.db;
   if (dbPath !== ':memory:') {
-    fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
+    // DB_PATH may intentionally point outside the app in production. It is a
+    // runtime data location, not a build input for Turbopack to trace.
+    fs.mkdirSync(
+      path.dirname(path.resolve(/* turbopackIgnore: true */ dbPath)),
+      { recursive: true },
+    );
   }
   const sqlite = new Database(dbPath);
   sqlite.pragma('journal_mode = WAL');

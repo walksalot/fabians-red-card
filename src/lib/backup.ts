@@ -14,7 +14,9 @@ const KEEP = 14; // two weeks of daily backups
 
 function dbFilePath(): string | null {
   const p = process.env.DB_PATH ?? '.data/app.db';
-  return p === ':memory:' ? null : path.resolve(p);
+  return p === ':memory:'
+    ? null
+    : path.resolve(/* turbopackIgnore: true */ p);
 }
 
 /** Force a backup now. Returns the written path, or null if the DB is in-memory. */

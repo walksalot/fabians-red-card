@@ -8,6 +8,8 @@ import { resolveCurrentMatchday } from '@/lib/services/today';
 import { loadLeagueContext, pickSelectedEntry } from '../_components/league-data';
 import BracketTree from '../_components/BracketTree';
 
+export const metadata = { title: 'Road to the Final' };
+
 /**
  * Road to the Final — the knockout tree, filled in automatically as results
  * land. Read-only: every node comes straight from the matches table; taps

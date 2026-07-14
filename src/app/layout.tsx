@@ -17,7 +17,10 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Fabian's Red Card — World Cup Pool",
+  title: {
+    default: "Fabian's Red Card — World Cup Pool",
+    template: "%s — Fabian's Red Card",
+  },
   description:
     'Private World Cup 2026 prediction pool — exact scores, first goalscorers, boosters and bragging rights.',
 };

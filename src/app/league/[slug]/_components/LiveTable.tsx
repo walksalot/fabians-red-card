@@ -6,6 +6,7 @@ import AnimatedTotal from './AnimatedTotal';
 import { burstConfetti } from './confetti';
 import EmptyState from '@/components/EmptyState';
 import Monogram from '@/components/Monogram';
+import type { LeagueLore } from '@/lib/services/wrap';
 import { CHIP_TONES, breakdownChips } from './breakdown-chips';
 import { codeToFlagEmoji, shortTeamName } from './flags';
 import {
@@ -16,6 +17,7 @@ import {
   ordinal,
 } from './format';
 import { lastPlaceRank } from './standings-display';
+import LeagueLoreCard from './LeagueLoreCard';
 import type {
   LeaderboardRowView,
   LockedPickView,
@@ -28,6 +30,7 @@ interface Props {
   initialPool: PrizePoolView;
   initialMemberCount: number;
   initialEntryCount: number;
+  initialLore: LeagueLore | null;
   buyInCents: number;
   currency: string;
   /** Signed-in user's id — highlights their row(s). */
@@ -392,6 +395,7 @@ export default function LiveTable({
   initialPool,
   initialMemberCount,
   initialEntryCount,
+  initialLore,
   buyInCents,
   currency,
   meUserId,
@@ -400,6 +404,7 @@ export default function LiveTable({
   const [pool, setPool] = useState(initialPool);
   const [memberCount, setMemberCount] = useState(initialMemberCount);
   const [entryCount, setEntryCount] = useState(initialEntryCount);
+  const [lore, setLore] = useState(initialLore);
   // ▲/▼ baseline: the ranks from the user's PREVIOUS visit (persisted per
   // league in localStorage), so movement shows the morning after results land
   // — not only during a live poll. Falls back to this visit's ranks.
@@ -553,6 +558,7 @@ export default function LiveTable({
             prizePool: PrizePoolView;
             memberCount: number;
             entryCount: number;
+            lore: LeagueLore | null;
           };
         } | null = await res.json().catch(() => null);
         if (!cancelled && json?.ok && json.data) {
@@ -577,6 +583,7 @@ export default function LiveTable({
           setPool(json.data.prizePool);
           setMemberCount(json.data.memberCount);
           setEntryCount(json.data.entryCount);
+          setLore(json.data.lore);
         }
       } catch {
         // Network blip — keep showing the last good data.
@@ -866,6 +873,7 @@ export default function LiveTable({
           tiebreakers in this order
         </p>
       </div>
+      {lore ? <LeagueLoreCard lore={lore} /> : null}
     </div>
   );
 }

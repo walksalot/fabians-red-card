@@ -20,6 +20,8 @@ import type {
   LeaderboardRowView,
 } from '../_components/types';
 
+export const metadata = { title: 'Profile' };
+
 type StatIconKind =
   | 'target'
   | 'boot'
