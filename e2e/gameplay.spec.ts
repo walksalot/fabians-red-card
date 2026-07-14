@@ -218,6 +218,19 @@ test.describe('mid-tournament gameplay (mobile dark)', () => {
     await expect(rows.nth(1)).toContainText('Victor');
     await expect(rows.nth(1).getByTestId('row-total')).toHaveText('4');
 
+    // Display-only league lore is derived from the same banked rows: it can
+    // summarize scoring, but never reinterpret it.
+    const lore = page.getByTestId('league-lore');
+    await expect(lore).toBeVisible();
+    await expect(lore.getByTestId('league-lore-exact')).toHaveText('1');
+    await expect(lore.getByTestId('league-lore-scorer')).toHaveText('1');
+    await expect(lore.getByTestId('league-lore-booster')).toHaveText('+0');
+    await expect(lore).toContainText('Paula');
+    await expect(lore).toContainText('MEX 2–1 RSA');
+    await expect(lore).toContainText('+20');
+    await expect(lore).toContainText('Jun 11');
+    await expect(lore).toContainText('+24');
+
     // history shows the result and the points paula earned
     await page.getByTestId('tab-history').click();
     await expect(page.getByText(/2\s*[–-]\s*1/).first()).toBeVisible();

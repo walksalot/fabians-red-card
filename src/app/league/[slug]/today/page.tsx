@@ -28,6 +28,8 @@ import type {
   TodayMatchView,
 } from '../_components/types';
 
+export const metadata = { title: 'Today' };
+
 export default async function TodayPage({
   params,
   searchParams,

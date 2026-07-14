@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createTestDb, schema, type Db } from '@/db';
-import { computeMatchdayWrap, latestWrappableMatchday } from '@/lib/services/wrap';
+import {
+  computeLeagueLore,
+  computeMatchdayWrap,
+  latestWrappableMatchday,
+} from '@/lib/services/wrap';
 
 /** Two finished matches on one day, three entries with varied outcomes. */
 function seed(db: Db) {
@@ -142,5 +146,85 @@ describe('computeMatchdayWrap', () => {
     seed(db);
     expect(latestWrappableMatchday(db, '2026-06-12')).toBe('2026-06-11');
     expect(latestWrappableMatchday(db, '2026-06-11')).toBeNull();
+  });
+});
+
+describe('computeLeagueLore', () => {
+  it('summarizes only banked points without changing their scoring meaning', () => {
+    const db = createTestDb();
+    const { leagueId, a, b, c } = seed(db);
+    db.delete(schema.matchPoints).run();
+
+    const breakdown = (over: {
+      exact?: number;
+      outcome?: number;
+      scorer?: number;
+      underdog?: number;
+      boosterMultiplier?: number;
+      total: number;
+    }) => {
+      const exact = over.exact ?? 0;
+      const outcome = over.outcome ?? 0;
+      const scorer = over.scorer ?? 0;
+      const underdog = over.underdog ?? 0;
+      const base = exact + outcome + scorer + underdog;
+      return JSON.stringify({
+        exact,
+        outcome,
+        scorer,
+        firstTeam: 0,
+        underdog,
+        base,
+        roundMultiplier: 1,
+        boosterMultiplier: over.boosterMultiplier ?? 1,
+        total: over.total,
+      });
+    };
+
+    db.insert(schema.matchPoints).values([
+      {
+        entryId: a,
+        matchId: 1,
+        breakdown: breakdown({
+          exact: 10,
+          scorer: 8,
+          underdog: 5,
+          boosterMultiplier: 2,
+          total: 46,
+        }),
+        total: 46,
+      },
+      { entryId: b, matchId: 1, breakdown: breakdown({ outcome: 2, total: 2 }), total: 2 },
+      { entryId: c, matchId: 1, breakdown: breakdown({ total: 0 }), total: 0 },
+      { entryId: a, matchId: 2, breakdown: breakdown({ total: 0 }), total: 0 },
+      { entryId: b, matchId: 2, breakdown: breakdown({ outcome: 2, total: 2 }), total: 2 },
+      { entryId: c, matchId: 2, breakdown: breakdown({ total: 0 }), total: 0 },
+    ]).run();
+
+    const lore = computeLeagueLore(db, leagueId)!;
+    expect(lore).toMatchObject({
+      settledPicks: 6,
+      settledMatches: 2,
+      exactCount: 1,
+      scorerHits: 1,
+      underdogHits: 1,
+      boosterBonus: 23,
+      blankEntryDays: 1,
+      loneCallCount: 1,
+      latestLoneCall: { label: 'Ben', fixture: 'ECU 1–1 MEX' },
+      pulse: [{ matchday: '2026-06-11', total: 50 }],
+    });
+    expect(lore.biggestHaul).toEqual({
+      points: 46,
+      labels: ['Ada'],
+      fixtures: ['MEX 2–0 ECU'],
+    });
+  });
+
+  it('stays hidden until at least one pick has settled', () => {
+    const db = createTestDb();
+    const { leagueId } = seed(db);
+    db.delete(schema.matchPoints).run();
+    expect(computeLeagueLore(db, leagueId)).toBeNull();
   });
 });

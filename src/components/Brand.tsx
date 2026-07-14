@@ -1,4 +1,6 @@
-/** App wordmark with the red-card motif. Server-safe (no hooks). */
+import { useId } from 'react';
+
+/** App wordmark with the red-card motif. */
 
 /**
  * The referee's red card as a crafted inline-SVG mark: rounded card with a
@@ -9,10 +11,12 @@ export function RedCardMark({
 }: {
   className?: string;
 }) {
+  const gradientId = useId();
+
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
       <defs>
-        <linearGradient id="rc-card-grad" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#f2555a" />
           <stop offset="55%" stopColor="#e5484d" />
           <stop offset="100%" stopColor="#b3262b" />
@@ -34,7 +38,7 @@ export function RedCardMark({
           width="11"
           height="16.4"
           rx="2.4"
-          fill="url(#rc-card-grad)"
+          fill={`url(#${gradientId})`}
         />
         {/* 1px inner highlight along the top edge */}
         <rect

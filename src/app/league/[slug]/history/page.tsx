@@ -23,6 +23,8 @@ import type {
   HistoryDayView,
 } from '../_components/types';
 
+export const metadata = { title: 'History' };
+
 export default async function HistoryPage({
   params,
   searchParams,

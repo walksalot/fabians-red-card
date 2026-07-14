@@ -98,16 +98,22 @@ test.describe('world cup pool journey (mobile dark)', () => {
     // Table: leaderboard rows (admin + walter + daisy), prize pool, member count
     await page.getByTestId('tab-table').click();
     await expect(page).toHaveURL(/\/league\/fabians-red-card\/table/);
+    await expect(page).toHaveTitle("Table — Fabian's Red Card");
     await expect(page.getByTestId('leaderboard-row').first()).toBeVisible();
     await expect
       .poll(() => page.getByTestId('leaderboard-row').count())
       .toBeGreaterThanOrEqual(2);
     await expect(page.getByTestId('member-count')).toBeVisible();
     await expect(page.getByTestId('prize-pool')).toBeVisible();
+    const ids = await page.locator('[id]').evaluateAll((elements) =>
+      elements.map((element) => element.id).filter(Boolean),
+    );
+    expect(new Set(ids).size).toBe(ids.length);
 
     // Rules: scoring values from league settings + tiebreakers
     await page.getByTestId('tab-rules').click();
     await expect(page).toHaveURL(/\/league\/fabians-red-card\/rules/);
+    await expect(page).toHaveTitle("Rules — Fabian's Red Card");
     await expect(page.locator('body')).toContainText('10');
     await expect(page.locator('body')).toContainText('8');
     await expect(page.locator('body')).toContainText('5');
@@ -116,17 +122,20 @@ test.describe('world cup pool journey (mobile dark)', () => {
     // History: renders (empty state is fine — no finished matches yet)
     await page.getByTestId('tab-history').click();
     await expect(page).toHaveURL(/\/league\/fabians-red-card\/history/);
+    await expect(page).toHaveTitle("History — Fabian's Red Card");
     await expect(page.getByTestId('tab-history')).toBeVisible();
 
     // Profile: display name + stats
     await page.getByTestId('tab-profile').click();
     await expect(page).toHaveURL(/\/league\/fabians-red-card\/profile/);
+    await expect(page).toHaveTitle("Profile — Fabian's Red Card");
     await expect(page.getByText('Daisy').first()).toBeVisible();
     await expect(page.locator('body')).toContainText(/pick|exact|streak|points/i);
 
     // Today: pick form still there
     await page.getByTestId('tab-today').click();
     await expect(page).toHaveURL(/\/league\/fabians-red-card\/today/);
+    await expect(page).toHaveTitle("Today — Fabian's Red Card");
     await expect(page.getByTestId(firstPickFormTestId)).toBeVisible();
   });
 
@@ -142,6 +151,8 @@ test.describe('world cup pool journey (mobile dark)', () => {
 
     // Settings form
     await page.goto('/league/fabians-red-card/admin');
+    await expect(page).toHaveTitle("Admin — Fabian's Red Card");
+    await expect(page.locator('h1')).toHaveCount(1);
     await page.getByTestId('admin-name').fill('Fabian Cup');
     await page.getByTestId('admin-private').click();
     await page.getByTestId('admin-password').fill('newpass123');
@@ -223,4 +234,12 @@ test.describe('world cup pool journey (mobile dark)', () => {
     await expect(historyItem).toContainText('Scorer +8');
     await expect(historyItem).toContainText('First team +2');
   });
+});
+
+test('unknown routes show a branded recovery screen', async ({ page }) => {
+  await page.goto('/definitely-not-a-real-page');
+
+  await expect(page.getByText('404 · Offside')).toBeVisible();
+  await expect(page.getByRole('heading', { name: "This page isn't on the pitch" })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Return to app' })).toBeVisible();
 });
