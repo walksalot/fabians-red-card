@@ -1,13 +1,13 @@
 import { defineConfig } from '@playwright/test';
 
 /**
- * Journey e2e suite (pre-tournament). Mobile-dark (390x844) against a dev server
- * on port 3100, deterministic clock (FAKE_NOW 2026-06-10), dedicated SQLite db
+ * Journey e2e suite (pre-tournament). Mobile-dark (390x844) against a local
+ * server on port 3100, deterministic clock (FAKE_NOW 2026-06-10), dedicated
+ * SQLite db
  * (.data/e2e.db), live-feed scheduler disabled (hermetic, no real network).
  *
  * The mid-tournament gameplay suite runs separately
- * (playwright.gameplay.config.ts) so the two dev servers never run at once — two
- * `next dev` instances sharing one .next dir is unstable.
+ * (playwright.gameplay.config.ts) so the two local servers never run at once.
  */
 const mobileDark = { viewport: { width: 390, height: 844 }, colorScheme: 'dark' as const };
 
@@ -42,21 +42,19 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // CI runs the PRODUCTION server against the bundle built by a prior
-    // workflow step: `next dev`'s router can come up poisoned on loaded
-    // runners — a deep API route 404ing (Next's own HTML page) for the
-    // server's whole life; trace-verified across five red runs. The built
-    // server's static route table makes that impossible, and CI then tests
-    // the same artifact Railway ships. Locally, dev keeps iteration fast.
+    // Both CI and local runs use the PRODUCTION server. CI consumes the bundle
+    // built by a prior workflow step; local runs build it here. `next dev`'s
+    // router intermittently returned its own 404 page for valid app routes
+    // during combined browser runs. The built server's static route table
+    // removes that flake and exercises the same artifact Railway ships.
     // Seeding must precede `next start`: the boot hook opens and CACHES the
     // SQLite handle (instrumentation heal step), and the seed scripts DELETE
-    // the db files — reseeding after boot would leave the server serving the
-    // unlinked pre-seed file. global-setup skips its reseed on CI for the
-    // same reason. Dev is unaffected: instrumentation compiles lazily there,
-    // after global-setup has seeded.
+    // the db files. CI global setup therefore skips its post-boot reseed.
+    // Local setup repeats the deterministic seed, but the production server
+    // already opened an identically seeded database.
     command: process.env.CI
       ? 'node scripts/seed-e2e.mjs && node scripts/seed-e2e2.mjs && npm run start -- --port 3100'
-      : 'npm run dev -- --port 3100',
+      : 'node scripts/seed-e2e.mjs && node scripts/seed-e2e2.mjs && npm run build && npm run start -- --port 3100',
     port: 3100,
     reuseExistingServer: false,
     timeout: 120_000,
