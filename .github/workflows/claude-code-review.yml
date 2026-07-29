@@ -17,7 +17,13 @@ on:
     types: [opened, synchronize, ready_for_review]
 
 permissions:
-  contents: write
+  # contents: read is sufficient (narrowed 2026-07-29). This job checks the PR
+  # out and reads it; it never pushes a commit or a branch. Its only outputs are
+  # review comments, which need pull-requests/issues write, not contents write.
+  # On a public repository the reviewer reads attacker-controllable text (PR
+  # title, body, diff), so the narrower grant meaningfully shrinks what a prompt
+  # injection could reach.
+  contents: read
   pull-requests: write
   issues: write
   # The action's default GitHub App auth exchanges a GitHub OIDC token;
