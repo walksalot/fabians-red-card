@@ -1,11 +1,11 @@
 import { defineConfig } from '@playwright/test';
 
 /**
- * Mid-tournament gameplay e2e suite. Mobile-dark (390x844) against a dev server
- * on port 3200, deterministic clock (FAKE_NOW 2026-06-12 — match 1 has kicked
- * off and is locked, match 2 is open), dedicated SQLite db (.data/e2e2.db),
- * live-feed scheduler disabled. Runs after the journey suite (separate config)
- * so the two dev servers never run concurrently.
+ * Mid-tournament gameplay e2e suite. Mobile-dark (390x844) against a local
+ * server on port 3200, deterministic clock (FAKE_NOW 2026-06-12 — match 1 has
+ * kicked off and is locked, match 2 is open), dedicated SQLite db
+ * (.data/e2e2.db), live-feed scheduler disabled. Runs after the journey suite
+ * (separate config) so the two local servers never run concurrently.
  */
 const mobileDark = { viewport: { width: 390, height: 844 }, colorScheme: 'dark' as const };
 
@@ -30,12 +30,13 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // Production server on CI, dev locally; seeds run BEFORE the server
-    // boots so its cached db handle points at the seeded file — see
-    // playwright.config.ts.
+    // Seed both deterministic databases before boot so the production server's
+    // cached SQLite handle sees the fixtures. Local production routing avoids
+    // transient `next dev` 404s during combined browser runs; CI behavior is
+    // unchanged and consumes the workflow's existing build.
     command: process.env.CI
       ? 'node scripts/seed-e2e.mjs && node scripts/seed-e2e2.mjs && npm run start -- --port 3200'
-      : 'npm run dev -- --port 3200',
+      : 'node scripts/seed-e2e.mjs && node scripts/seed-e2e2.mjs && npm run build && npm run start -- --port 3200',
     port: 3200,
     reuseExistingServer: false,
     timeout: 120_000,
