@@ -571,12 +571,67 @@ async function lookup(card) {
   return { track: null, answered };
 }
 
+/* ---------------------------------------------------------------------------
+ * Build-time answers
+ * ------------------------------------------------------------------------ */
+
+/** @type {Promise<Record<string, {preview?: string, art?: string}>>|null} */
+let bakedPromise = null;
+
+/**
+ * The previews resolved at build time, fetched once and remembered.
+ *
+ * Deliberately soft: a missing, unreachable or malformed previews.json resolves
+ * to an empty map rather than throwing, because every caller can already cope
+ * with "no baked answer" - it just means the live lookup runs, exactly as it did
+ * before the file existed.
+ */
+function loadBaked() {
+  if (bakedPromise) return bakedPromise;
+  bakedPromise = (async () => {
+    try {
+      // Module-relative so it resolves the same whether the game is served from
+      // the site root, from /music/, or straight off disk.
+      const url = new URL('./previews.json', import.meta.url).href;
+      const res = await fetch(url, { cache: 'force-cache' });
+      if (!res.ok) return {};
+      const data = await res.json();
+      return data && typeof data === 'object' ? data : {};
+    } catch {
+      return {};
+    }
+  })();
+  return bakedPromise;
+}
+
+/**
+ * @param {Card} card
+ * @returns {Promise<ResolvedTrack|null>}
+ */
+async function bakedTrack(card) {
+  if (!card.id) return null;
+  const map = await loadBaked();
+  const hit = map[card.id];
+  if (!hit || typeof hit.preview !== 'string' || !hit.preview) return null;
+  return {
+    previewUrl: hit.preview,
+    artworkUrl: typeof hit.art === 'string' ? hit.art : '',
+    // The catalogue's own spelling is only ever shown after the reveal. The
+    // baked file carries it for the build-time review pass; the play screen must
+    // not be able to read a title from here by accident, so it is not surfaced.
+    matchedTitle: '',
+    matchedArtist: '',
+    matchedYear: typeof hit.matchedYear === 'number' ? hit.matchedYear : null,
+  };
+}
+
 /**
  * Resolve a card to a playable preview.
  *
- * Cached in localStorage (capped at 500 entries, oldest evicted) so a replayed
- * deck costs nothing, and deduplicated in memory so a prefetch and a tap for
- * the same card share one request.
+ * Prefers the build-time answer in previews.json; otherwise looks the card up
+ * live. Live results are cached in localStorage (capped at 500 entries, oldest
+ * evicted) so a replayed deck costs nothing, and deduplicated in memory so a
+ * prefetch and a tap for the same card share one request.
  *
  * @param {Card} card
  * @returns {Promise<ResolvedTrack|null>} null whenever the caller should fall
@@ -584,6 +639,15 @@ async function lookup(card) {
  */
 export async function resolveTrack(card) {
   if (!card || typeof card !== 'object' || (!card.title && !card.artist)) return null;
+
+  // Most cards were resolved once at build time (scripts/resolve-previews.mjs) and
+  // their answers ship in previews.json. Preferring that means the song starts the
+  // instant it is tapped, works with no network at all, and cannot re-decide the
+  // match mid-game and hand somebody a cover. Anything not in the file - a card
+  // Apple was throttling when the deck was baked - still falls through to the live
+  // lookup below, so this is purely an accelerator and never a new failure mode.
+  const baked = await bakedTrack(card);
+  if (baked) return baked;
 
   const key = cacheKey(card);
   const sig = signature(card);
