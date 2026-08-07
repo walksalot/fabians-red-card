@@ -663,7 +663,8 @@ export function streamingLinks(card) {
 let player = null;
 
 /**
- * The shared <audio> element.
+ * The one player the whole app shares. Safe to call at any time: the <audio>
+ * element behind it is not created until the first play().
  *
  * iOS only honours playback that starts inside a user gesture, and it counts
  * the *element* as blessed by that first gesture - so there is exactly one

@@ -50,7 +50,7 @@
       home                [#btn-setup-back, #btn-menu-home, #btn-win-home]
       add-player          [#btn-add-player]
       remove-player       [rows in #player-list]
-      target-dec/target-inc         [#target-cards stepper]
+      target-dec/target-inc         [#field-target-cards stepper]
       mistakes-dec/mistakes-inc     [#field-mistake-limit stepper]
       toggle-decade       [buttons in #decade-chips, data-decade="1980"]
       toggle-genre        [buttons in #genre-chips,  data-genre="pop"]
@@ -64,7 +64,7 @@
       end-game            [#btn-end-game]
       toggle-audio        [#btn-play-song]
       replay-audio        [#btn-replay]
-      show-streaming-links[#btn-show-links]
+      show-streaming-links  [#btn-show-links]
       skip-card           [#btn-skip-card]
       toggle-qr-alt       [#btn-qr-alt]
       select-gap          [gap buttons, data-gap-index="0"]
@@ -146,6 +146,16 @@
     #countdown-ring style property --ring-progress = 1 -> 0 (fraction of the
     30s preview remaining). Set with
       ring.style.setProperty('--ring-progress', String(remaining / 30))
+
+  CSS ALREADY HANDLES THESE - do not duplicate the logic in ui.js
+    #field-mistake-limit  shown only while #mode-coop is checked (setup screen).
+    #field-year-guess     shown only while body[data-mode="expert"].
+    .sheet-layer          visibility/inertness follows [data-open].
+    .screen               visibility follows body[data-screen].
+    Elements that ship [hidden] and are yours to reveal:
+      #btn-resume-game #deck-warning #audio-fallback #streaming-links
+      #qr-file-note #btn-qr-alt #qr-alt-warn #btn-buy-card-reason
+      #challenge-count #confirm-panel #challenge-step-gap #reveal-artwork
 
   LIVE REGIONS (append text, never replace the element)
     #live-status  role="status"  aria-live="polite"     token + turn changes
@@ -233,7 +243,7 @@
       <!-- target cards -->
       <fieldset class="panel" aria-labelledby="setup-target-label">
         <h2 class="panel__legend" id="setup-target-label">Cards to win</h2>
-        <div class="stepper" role="group" aria-labelledby="target-cards-label">
+        <div class="stepper" id="field-target-cards" role="group" aria-labelledby="target-cards-label">
           <span class="stepper__label" id="target-cards-label">Timeline length</span>
           <button type="button" class="stepper__btn" data-action="target-dec" aria-label="Fewer cards to win">&minus;</button>
           <output class="stepper__value" id="target-cards-value" aria-live="polite">10</output>

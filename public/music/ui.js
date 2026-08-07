@@ -533,24 +533,37 @@ function beginTurn() {
   if (!state) return showScreen('home');
   if (isGameOver(state)) return showWin();
   if (state.phase === 'turn-start') {
-    if (settings.skipPass) return drawAndPlay();
+    if (settings.skipPass) return enterPlay();
     return showScreen('pass');
   }
   if (state.phase === 'revealed' || state.phase === 'turn-end') return showReveal();
   return showScreen('play');
 }
 
-function drawAndPlay() {
-  if (state.phase === 'turn-start') {
-    dispatch({ type: ACTIONS.DRAW });
-    if (state.mode === 'expert') {
-      dispatch({ type: ACTIONS.SET_YEAR_GUESS, year: DEFAULT_YEAR_GUESS });
-    }
-  }
+function enterPlay() {
   resetCardAudio();
   showScreen('play');
   const player = currentPlayer(state);
   if (player) announce(`${player.name}'s turn. Turn ${state.turn}.`);
+}
+
+/**
+ * Draw the card, lazily.
+ *
+ * Buying is legal at the start of a turn and nowhere else, and drawing ends
+ * that window - so the turn opens on an undrawn card and the deck is only
+ * touched when the player does something that needs a song. Everything on the
+ * play screen that implies "I am going to guess this one" funnels through here
+ * first.
+ */
+function ensureCard() {
+  if (!state || state.phase !== 'turn-start') return;
+  dispatch({ type: ACTIONS.DRAW });
+  if (state.mode === 'expert') {
+    dispatch({ type: ACTIONS.SET_YEAR_GUESS, year: DEFAULT_YEAR_GUESS });
+  }
+  resetCardAudio();
+  render();
 }
 
 function showReveal() {
@@ -630,15 +643,18 @@ function resetCardAudio() {
     resolved: null,
     failed: false,
     linksShown: false,
-    status: settings.sound
-      ? 'Tap play when everyone is listening.'
-      : 'Sound is off. Turn it on in the menu.',
+    status: !state || !state.card
+      ? 'Tap play to draw the mystery song.'
+      : settings.sound
+        ? 'Tap play when everyone is listening.'
+        : 'Sound is off. Turn it on in the menu.',
   };
   view.qrAlt = false;
 }
 
 /** Tap-to-play. Every path through here starts inside a user gesture. */
 async function toggleAudio() {
+  ensureCard();
   if (!state || !state.card) return;
 
   if (settings.playbackSource !== 'preview') {
@@ -787,6 +803,8 @@ function paintQr() {
   const altBtn = el('btn-qr-alt');
   const altWarn = el('qr-alt-warn');
   if (!box) return;
+  // An empty white frame reads as a broken image, so the frame goes with the code.
+  const frame = box.closest('.qr__frame');
 
   const card = state && state.card;
   const offline = window.location.protocol === 'file:';
@@ -795,8 +813,11 @@ function paintQr() {
   pressed(altBtn, view.qrAlt);
   show(altWarn, offline && view.qrAlt);
 
+  // Nothing has been drawn yet: an empty white QR frame would just look broken.
+  show(el('qr-block'), !!card);
   if (!card) {
     box.textContent = '';
+    show(frame, false);
     show(note, false);
     return;
   }
@@ -805,6 +826,7 @@ function paintQr() {
     // A listen.html URL off the local disk is unreachable from any other phone,
     // so a code here would just be a dead end someone keeps scanning.
     box.textContent = '';
+    show(frame, false);
     if (note) note.innerHTML = fileNoteHtml;
     show(note, true);
     return;
@@ -819,6 +841,7 @@ function paintQr() {
   try {
     box.innerHTML = qrSvg(target, { margin: 3, dark: '#0b0616', light: '#ffffff' });
     const svg = box.querySelector('svg');
+    show(frame, !!svg);
     if (svg) {
       // Belt and braces: an intrinsically-sized SVG must not be able to push
       // the page wider than the viewport.
@@ -828,6 +851,7 @@ function paintQr() {
     }
   } catch {
     box.textContent = '';
+    show(frame, false);
   }
 
   if (note) {
@@ -846,10 +870,15 @@ function paintQr() {
 /* ========================================================================== */
 
 function gapLabel(gap) {
-  if (gap.left && gap.right) return `Place between ${gap.left.year} and ${gap.right.year}`;
-  if (gap.right) return `Place before ${gap.right.year}`;
-  if (gap.left) return `Place after ${gap.left.year}`;
-  return 'Place the first card';
+  return `Place ${gapShort(gap)}`;
+}
+
+/** The same idea in as few characters as possible - the hint line is narrow. */
+function gapShort(gap) {
+  if (gap.left && gap.right) return `between ${gap.left.year} and ${gap.right.year}`;
+  if (gap.right) return `before ${gap.right.year}`;
+  if (gap.left) return `after ${gap.left.year}`;
+  return 'as the first card';
 }
 
 /**
@@ -948,9 +977,7 @@ function renderPlay() {
   if (hint) {
     const gaps = gapsFor(state, active.id);
     const chosen = state.selectedGap === null ? null : gaps[state.selectedGap];
-    hint.textContent = chosen
-      ? `Tap "Place here" to lock in: ${gapLabel(chosen).toLowerCase()}`
-      : 'Tap a gap to choose a spot';
+    hint.textContent = chosen ? `Placing ${gapShort(chosen)}` : 'Tap a gap to choose a spot';
   }
 
   // Actions
@@ -971,8 +998,13 @@ function renderPlay() {
     badge.textContent = String(count);
     show(badge, count > 0);
   }
+  // Before the draw nobody "can" challenge yet (there is no card), but the
+  // button must still be live: tapping it is what draws.
   const others = state.players.filter((p) => p.id !== active.id);
-  const anyCanChallenge = others.some((p) => challengeBlockedReason(state, p.id) === null);
+  const anyCanChallenge =
+    state.phase === 'turn-start'
+      ? others.some((p) => tokensFor(state, p.id) >= 1)
+      : others.some((p) => challengeBlockedReason(state, p.id) === null);
   disable(el('btn-challenge'), !anyCanChallenge);
 
   disable(el('btn-place'), state.selectedGap === null || state.placementCommitted);
@@ -1046,7 +1078,7 @@ function nameOf(playerId) {
 
 function verdictFor(outcome) {
   if (outcome.kind === 'buy') {
-    return { verdict: 'correct', message: `Bought and slotted in - ${BUY_COST} tokens.` };
+    return { verdict: 'correct', message: `Bought and slotted in. That cost ${BUY_COST} tokens.` };
   }
   if (outcome.kind === 'skip') {
     return { verdict: 'neutral', message: 'Card skipped. No penalty.' };
@@ -1233,6 +1265,11 @@ function renderScoreboard() {
 /* Win screen                                                                 */
 /* ========================================================================== */
 
+function joinNames(names) {
+  if (names.length <= 1) return names[0] || '';
+  return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+}
+
 function renderWin() {
   const result = state && state.result;
   const won = winners(state);
@@ -1261,8 +1298,14 @@ function renderWin() {
     }
     replaceChildren(el('win-timeline'), state.sharedTimeline.map(miniCard));
   } else if (won.length > 0) {
-    eyebrow = won.length > 1 ? 'Joint winners' : result.reason === 'ended' ? 'Ahead when it ended' : 'Winner';
-    title = won.map((p) => p.name).join(' & ');
+    // "Ended" is somebody tapping End game, not a victory - say so rather than
+    // handing out a trophy nobody played for.
+    if (result.reason === 'ended') {
+      eyebrow = won.length > 1 ? 'Level when it ended' : 'Ahead when it ended';
+    } else {
+      eyebrow = won.length > 1 ? 'Joint winners' : 'Winner';
+    }
+    title = joinNames(won.map((p) => p.name));
     const lead = won[0];
     summary = `${lead.timeline.length} cards, ${lead.tokens} token${lead.tokens === 1 ? '' : 's'} left.`;
     replaceChildren(el('win-timeline'), lead.timeline.map(miniCard));
@@ -1452,6 +1495,7 @@ function chipsAll(target) {
 
 function stepYear(delta) {
   if (!state) return;
+  ensureCard();
   const current = state.yearGuess === null ? DEFAULT_YEAR_GUESS : state.yearGuess;
   const next = Math.min(YEAR_MAX, Math.max(YEAR_MIN, current + delta));
   dispatch({ type: ACTIONS.SET_YEAR_GUESS, year: next });
@@ -1574,7 +1618,7 @@ const HANDLERS = {
   'toggle-genre': (node) => toggleChip('genre', node.dataset.genre),
   'chips-all': (node) => chipsAll(node.dataset.target),
   'start-game': () => startGame(),
-  'pass-continue': () => drawAndPlay(),
+  'pass-continue': () => enterPlay(),
   'open-menu': (node) => openSheet('menu-sheet', node),
   'close-menu': () => closeSheet('menu-sheet'),
   'show-scoreboard': () => {
@@ -1604,17 +1648,20 @@ const HANDLERS = {
       view.challengeGap = index;
       render();
     } else {
+      ensureCard();
       dispatch({ type: ACTIONS.SELECT_GAP, gapIndex: index });
     }
   },
   'buy-card': () => buyCard(),
   'toggle-identify': () => {
     if (!state) return;
+    ensureCard();
     dispatch({ type: ACTIONS.SET_CLAIM_IDENTIFY, value: !state.claimIdentify });
   },
   'year-dec': () => stepYear(-1),
   'year-inc': () => stepYear(1),
   'open-challenge': (node) => {
+    ensureCard();
     view.challengerId = null;
     view.challengeGap = null;
     openSheet('challenge-sheet', node);
