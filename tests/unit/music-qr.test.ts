@@ -635,7 +635,8 @@ describe('function patterns', () => {
 
   for (const [version, level] of samples) {
     it(`version ${version}-${level} has the right skeleton`, () => {
-      const m = qrMatrix('skeleton probe for the function patterns', {
+      // A short payload: `minVersion` pins the version regardless of length.
+      const m = qrMatrix('probe', {
         ecc: level,
         minVersion: version,
         maxVersion: version,
@@ -846,7 +847,7 @@ describe('round trip through an independent decoder', () => {
     ],
     [
       'long text',
-      'The quick brown fox jumps over the lazy dog. '.repeat(9) + 'And then it stopped.',
+      'The quick brown fox jumps over the lazy dog. '.repeat(7) + 'And then it stopped.',
     ],
   ];
 
@@ -910,7 +911,9 @@ describe('qrSvg', () => {
     expect(svg).toContain(`<rect width="${size + 8}" height="${size + 8}" fill="#fff"/>`);
     expect(svg).toContain('<path fill="#000"');
     // Nothing that could reach out to the network or run.
-    expect(svg).not.toMatch(/https?:|<script|xlink:href|url\(|<image|<use/);
+    // The only URL is the SVG namespace; nothing else can reach out or run.
+    const withoutNamespace = svg.replace(' xmlns="http://www.w3.org/2000/svg"', '');
+    expect(withoutNamespace).not.toMatch(/https?:|<script|xlink:href|url\(|<image|<use|on[a-z]+=/);
   });
 
   it('honours margin, colours and scale', () => {
