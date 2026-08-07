@@ -33,6 +33,18 @@ const PORT_ATTEMPTS = 11; // the requested port plus the next 10
 // dynamically on purpose: a missing/broken qr.js should cost you a pretty
 // banner, not the ability to serve the game.
 let qrTerminal = null;
+// Node warns that public/music/qr.js sits next to a package.json without
+// "type": "module". That is on purpose — the game's modules are loaded by
+// browsers, and flipping this package to ESM would break the rest of the repo —
+// so swallow just that warning rather than open the family's first run with a
+// four-line stack trace. Node's own printer has to be removed first (an extra
+// listener does not replace it), hence the re-print — every other warning still
+// reaches stderr.
+process.removeAllListeners('warning');
+process.on('warning', (warning) => {
+  if (warning.code === 'MODULE_TYPELESS_PACKAGE_JSON') return;
+  console.warn(warning.stack ?? `${warning.name}: ${warning.message}`);
+});
 try {
   ({ qrTerminal } = await import(new URL('../public/music/qr.js', import.meta.url)));
 } catch {
@@ -62,6 +74,11 @@ const MIME = {
 };
 
 function contentType(filePath) {
+  // The web app manifest is named .json (portable across all three ways of
+  // running the game) but wants the manifest media type, not plain JSON.
+  if (path.basename(filePath).toLowerCase() === 'manifest.json') {
+    return MIME['.webmanifest'];
+  }
   return MIME[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
 }
 

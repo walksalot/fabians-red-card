@@ -178,7 +178,15 @@ body {
   transform: rotate(-90deg);
   transform-origin: center;
   transform-box: fill-box;
-  filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.45));
+  /* No drop-shadow filter here on purpose: a filtered SVG child gets its own
+     compositing layer and the blurred aurora behind it banded into a visible
+     square. The button's own glow carries the light instead. */
+}
+
+/* Nothing to count down when there is no clip - let the ring recede. */
+body[data-state="error"] .ring-progress,
+body[data-state="blank"] .ring-progress {
+  opacity: 0.3;
 }
 
 .play {
@@ -550,6 +558,30 @@ body[data-state="error"] .status {
 
   .links {
     padding: 4px 13px 14px;
+  }
+}
+
+/* Short phones (an SE is only 568px tall): shrink the dial so the disclosure
+   and the footnote stay above the fold rather than needing a scroll. */
+@media (max-height: 660px) {
+  .shell {
+    gap: 14px;
+  }
+
+  .player {
+    gap: 12px;
+  }
+
+  .dial {
+    width: min(58vw, 176px);
+  }
+
+  .card-no {
+    font-size: clamp(1.6rem, 7.5vw, 2rem);
+  }
+
+  .footnote {
+    font-size: 0.74rem;
   }
 }
 

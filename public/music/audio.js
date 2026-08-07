@@ -739,40 +739,53 @@ function createPlayer() {
     frame = globalThis.requestAnimationFrame(tick);
   };
 
-  const ensureElement = () => {
-    if (el) return el;
-    if (typeof document === 'undefined' || !document.createElement) return null;
-    el = document.createElement('audio');
-    el.preload = 'none';
-    el.playsInline = true;
-    el.setAttribute('playsinline', '');
-    el.setAttribute('webkit-playsinline', '');
-    el.setAttribute('aria-hidden', 'true');
-    el.style.display = 'none';
-    el.addEventListener('play', () => {
+  const buildElement = () => {
+    const node = /** @type {HTMLAudioElement} */ (document.createElement('audio'));
+    node.preload = 'none';
+    // playsinline in all three spellings: iOS will otherwise try to take a
+    // media element full-screen, which would cover the game.
+    node.playsInline = true;
+    node.setAttribute('playsinline', '');
+    node.setAttribute('webkit-playsinline', '');
+    node.setAttribute('aria-hidden', 'true');
+    node.style.display = 'none';
+    node.addEventListener('play', () => {
       lastError = null;
       startTicking();
       emit('play');
     });
-    el.addEventListener('pause', () => {
+    node.addEventListener('pause', () => {
       stopTicking();
       emit('pause');
     });
-    el.addEventListener('ended', () => {
+    node.addEventListener('ended', () => {
       stopTicking();
       emit('ended');
     });
-    el.addEventListener('loadedmetadata', () => emit('loaded'));
-    el.addEventListener('timeupdate', () => {
+    node.addEventListener('loadedmetadata', () => emit('loaded'));
+    node.addEventListener('timeupdate', () => {
       if (!ticking) emit('time');
     });
-    el.addEventListener('error', () => {
+    node.addEventListener('error', () => {
       stopTicking();
       lastError = new Error('audio: playback failed');
       emit('error');
     });
     const parent = document.body || document.documentElement;
-    if (parent) parent.appendChild(el);
+    if (parent && parent.appendChild) parent.appendChild(node);
+    return node;
+  };
+
+  const ensureElement = () => {
+    if (el) return el;
+    if (typeof document === 'undefined' || !document.createElement) return null;
+    try {
+      el = buildElement();
+    } catch {
+      // No usable media element (a stripped-down webview, a test double). The
+      // caller sees `false` from play() and shows the streaming fallback.
+      el = null;
+    }
     return el;
   };
 
