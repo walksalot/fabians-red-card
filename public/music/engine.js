@@ -26,8 +26,9 @@
  * Setup      Every player starts with one random card in their timeline and
  *            `startingTokens` (2) tokens. In co-op there is ONE shared timeline
  *            with one starting card and ONE shared token pool of `startingTokens`
- *            (the cap of 5 is a pool-sized number, so the pool is not multiplied
- *            by the head count).
+ *            (the cap is a pool-sized number, so the pool is not multiplied by
+ *            the head count - it is one bigger instead: 5 normally, 6 in co-op,
+ *            see `defaultTokenCap`).
  * Placement  A timeline is year-sorted. Gap `i` (0..len) is correct for `year`
  *            iff (i === 0 or year >= timeline[i-1].year) AND
  *                (i === len or year <= timeline[i].year).
@@ -45,6 +46,11 @@
  * Identify   The active player may claim they can name title AND artist. If the
  *            group confirms it: +1 token (capped), awarded whatever the placement
  *            did.
+ * Streak     An optional house rule (`streakBonus`, off unless the setup screen
+ *            turns it on). Every player carries a `streakRun`; keeping three
+ *            cards in a row pays +1 token (capped) and puts the run back to 0.
+ *            See "The streak, precisely" below - it is the one rule here with
+ *            enough edges to be worth spelling out twice.
  * Buy        3 tokens, only at the start of a turn: the top card is inserted at a
  *            correct position automatically and the turn ends.
  * Modes      classic  placement only.
@@ -58,6 +64,43 @@
  *            longest timeline wins, ties broken by tokens, and a still-tied field
  *            is a shared win. Co-op has no consolation win: an exhausted deck
  *            short of the target is simply not a win.
+ * Records    Three running counts exist only so the scoreboard and the winner
+ *            screen can say something true about the game that was just played:
+ *            `missCounts` (wrong guesses per card id), `challengeWins` (cards
+ *            stolen per player id) and `skips` (a plain total). They are
+ *            counters, never inputs - no rule above reads one, so no record can
+ *            change who wins.
+ *
+ * ---------------------------------------------------------------------------
+ * The streak, precisely
+ * ---------------------------------------------------------------------------
+ * A house rule with four edges, all of which come up at a real table, so each one
+ * is decided here rather than in whichever screen asks first.
+ *
+ *  - It counts KEPT CARDS, not correct gaps. In classic and co-op those are the
+ *    same thing; in advanced and expert a right gap with a fluffed artist loses
+ *    the card, and a green streak note under a red verdict pill would be the
+ *    game contradicting itself out loud. The run follows the verdict the table
+ *    can see.
+ *  - A wrong placement ends the run. So does a bought card: buying is a way of
+ *    not guessing, and "three RIGHT in a row" cannot be threaded through a turn
+ *    nobody got right. It costs 3 tokens precisely so it is a trade.
+ *  - A skipped card leaves the run alone - it neither advances nor breaks it.
+ *    A skip un-plays the card (the challenge tokens are refunded, the card is
+ *    never placed), and the engine already treats it as a turn that did not
+ *    happen; the run follows that.
+ *  - Paying out puts the run back to 0, so it pays on the 3rd, 6th, 9th... card.
+ *    The alternative - keep counting, pay on every multiple - reads the same at
+ *    the table but leaves the UI a number it has to take modulo before it can
+ *    draw three dots. Resetting means `streakRun` always means exactly "how far
+ *    into the next bonus you are". Earning the token while already at the cap
+ *    still spends the run: the bonus was earned and paid, and a run that could
+ *    be banked against a full pocket would be a different rule from the one on
+ *    the setup screen. (Identify already works this way; see `identifyDelta`.)
+ *
+ * Only the active player's run moves. A challenger who steals a card did not
+ * place one on their own turn, and the run is per player even in co-op, where
+ * the token it pays lands in the shared pool like every other co-op token.
  */
 
 /** Turn phases, in the order a normal turn walks through them. */
@@ -93,6 +136,52 @@ export const ACTIONS = Object.freeze({
 
 /** Cost of `BUY_CARD`, in tokens. */
 export const BUY_COST = 3;
+
+/** How many tokens a hand may hold at once. */
+export const TOKEN_CAP = 5;
+
+/**
+ * Co-op's cap. One bigger, deliberately: the co-op pool is shared by the whole
+ * table, so every player who wants to challenge is drawing on the same five,
+ * and a sixth is what stops "everybody hold still, we are saving for a buy"
+ * from being the only sane co-op strategy.
+ */
+export const COOP_TOKEN_CAP = 6;
+
+/**
+ * The cap a mode plays with unless `createGame` is told otherwise. Exported so
+ * the setup screen can draw the right number of token dots before a game exists.
+ * @param {string} mode
+ * @returns {number}
+ */
+export function defaultTokenCap(mode) {
+  return mode === 'coop' ? COOP_TOKEN_CAP : TOKEN_CAP;
+}
+
+/** Cards kept in a row that earn the streak bonus, and what it pays. */
+export const STREAK_LENGTH = 3;
+export const STREAK_REWARD = 1;
+
+/**
+ * The eight decade buckets the strength histogram is drawn from.
+ *
+ * Named `DECADE_STARTS` rather than the obvious `DECADES` because `deck.js`
+ * already exports a `DECADES` for the setup filter chips and the UI imports
+ * both modules into one scope; a clash there is a rename in a file this module
+ * does not own.
+ * @type {readonly number[]}
+ */
+export const DECADE_STARTS = Object.freeze([
+  1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020,
+]);
+
+/**
+ * Cards a player needs before "strongest decade" means anything.
+ *
+ * Everybody is dealt one card, and a lone 1984 would otherwise make every player
+ * an eighties specialist before the first turn is over.
+ */
+export const DECADE_MIN_CARDS = 3;
 
 /** Bumped whenever the state shape changes so stale saves are rejected loudly. */
 export const STATE_VERSION = 1;
@@ -208,6 +297,52 @@ function isPlainYear(year) {
   return typeof year === 'number' && Number.isFinite(year);
 }
 
+/** A tally is a plain `{ key: count }` object, so it survives JSON untouched. */
+function isTally(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function tallyOf(tally, key) {
+  if (!isTally(tally) || typeof key !== 'string') return 0;
+  const n = Object.prototype.hasOwnProperty.call(tally, key) ? tally[key] : 0;
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** `tally` with `key` raised by `by`. Returns the original when there is nothing to add. */
+function addTally(tally, key, by) {
+  if (!by || typeof key !== 'string') return tally;
+  return { ...tally, [key]: tallyOf(tally, key) + by };
+}
+
+/**
+ * The highest-counted key, or null when nothing was ever counted.
+ *
+ * `key` is the FIRST key to reach that count - object key order is insertion
+ * order and JSON preserves it, so "first" means "earliest in the game" on a
+ * restored save too. `tied` says whether anything else matched it, which is the
+ * whole reason this returns a shape instead of a string: naming one of two
+ * equal players is a slur, naming one of two equally hard songs is a headline.
+ * @param {Record<string, number>} tally
+ * @returns {{key:string, count:number, tied:boolean}|null}
+ */
+function topOfTally(tally) {
+  if (!isTally(tally)) return null;
+  let best = null;
+  let bestCount = 0;
+  let tied = false;
+  for (const key of Object.keys(tally)) {
+    const count = tallyOf(tally, key);
+    if (count > bestCount) {
+      best = key;
+      bestCount = count;
+      tied = false;
+    } else if (count === bestCount && count > 0) {
+      tied = true;
+    }
+  }
+  return bestCount === 0 ? null : { key: best, count: bestCount, tied };
+}
+
 /** Fresh per-turn scratch fields. A function, not a constant, so no two states share arrays. */
 function turnReset() {
   return {
@@ -262,6 +397,23 @@ function writeTimeline(mode, holder, playerId, timeline) {
   return {
     ...holder,
     players: holder.players.map((p) => (p.id === playerId ? { ...p, timeline } : p)),
+  };
+}
+
+/**
+ * The streak run is the one number that is ALWAYS personal - co-op shares the
+ * pile and the pool, but "three in a row" is something a person does, so these
+ * two never consult `mode` the way their timeline and token cousins do.
+ */
+function readStreakRun(holder, playerId) {
+  const player = findPlayer(holder, playerId);
+  return player && Number.isFinite(player.streakRun) ? player.streakRun : 0;
+}
+
+function writeStreakRun(holder, playerId, run) {
+  return {
+    ...holder,
+    players: holder.players.map((p) => (p.id === playerId ? { ...p, streakRun: run } : p)),
   };
 }
 
@@ -351,7 +503,7 @@ function normalisePlayers(players) {
     const photo = typeof raw.photo === 'string' && raw.photo ? raw.photo : null;
     const given = typeof raw.color === 'string' && raw.color ? raw.color : raw.colour;
     const color = typeof given === 'string' && given ? given : seatColor(index);
-    return { id, name, photo, color, timeline: [], tokens: 0 };
+    return { id, name, photo, color, timeline: [], tokens: 0, streakRun: 0 };
   });
 }
 
@@ -376,7 +528,8 @@ function normaliseDeck(deck) {
  *   players: readonly (string | {id?:string, name?:string})[],
  *   deck: readonly object[],
  *   targetCards?: number, mode?: string, mistakeLimit?: number,
- *   startingTokens?: number, tokenCap?: number, seed?: number
+ *   startingTokens?: number, tokenCap?: number, seed?: number,
+ *   streakBonus?: boolean
  * }} options
  */
 export function createGame(options) {
@@ -387,12 +540,19 @@ export function createGame(options) {
     mode = 'classic',
     mistakeLimit = 3,
     startingTokens = 2,
-    tokenCap = 5,
+    // Defaults off a mode bound earlier in the same pattern, so co-op gets its
+    // bigger pool without the caller having to know the number - and an explicit
+    // `tokenCap` still wins, in either direction.
+    tokenCap = defaultTokenCap(mode),
     seed = 1,
+    streakBonus = false,
   } = options || {};
 
   if (!MODES.includes(mode)) {
     throw new RangeError(`createGame: unknown mode "${mode}"`);
+  }
+  if (typeof streakBonus !== 'boolean') {
+    throw new TypeError('createGame: streakBonus must be a boolean');
   }
   if (!Number.isInteger(targetCards) || targetCards < 2) {
     throw new RangeError('createGame: targetCards must be an integer >= 2');
@@ -442,6 +602,7 @@ export function createGame(options) {
     mistakeLimit,
     startingTokens: openingTokens,
     tokenCap,
+    streakBonus,
     seed: seed >>> 0,
     rngState: shuffled.cursor,
     players: people,
@@ -453,6 +614,12 @@ export function createGame(options) {
     deck: shuffled.items.slice(dealt),
     discard: [],
     mistakes: 0,
+    // Tallies for the scoreboard and the winner screen. Plain `{}` rather than a
+    // Map so a save is still a straight stringify, and sparse rather than
+    // pre-zeroed so "nothing was ever missed" is just an empty object.
+    missCounts: {},
+    challengeWins: {},
+    skips: 0,
     result: null,
     lastError: null,
     ...turnReset(),
@@ -602,18 +769,66 @@ function resolveReveal(state, base) {
 
   const identifyConfirmed = state.confirmations.identify;
   const identifyAwarded = state.claimIdentify && identifyConfirmed === true;
+
+  // The streak counts KEPT cards, so it is decided by `accepted` and not by
+  // `placementCorrect` - see "The streak, precisely" at the top of the file.
+  // Everything here is computed from `base`, never from the live state, because
+  // every confirmation toggle on the reveal screen replays this function; an
+  // increment would pay the bonus again on every tap.
+  const runBefore = state.streakBonus ? readStreakRun(base, active.id) : 0;
+  // `streakBonus` gates the increment as well as the payout: with the rule off
+  // the run has to stay at 0 for everybody, or `streakRun` starts meaning
+  // "cards kept in a row under a rule nobody is playing" and the seat rail draws
+  // progress towards a token that will never arrive.
+  const runReached = state.streakBonus && accepted ? runBefore + 1 : 0;
+  const streakAwarded = state.streakBonus && runReached >= STREAK_LENGTH;
+  const streakRun = streakAwarded ? 0 : runReached;
+
   // What the player ACTUALLY receives, not what the rule nominally pays. At the
   // token cap a confirmed claim is still confirmed, but it is worth nothing -
   // and a reveal screen promising "+1" while the pills refuse to move is read at
   // a table as the game cheating somebody, so the award has to tell the truth.
+  // The two awards are stacked in the order `applyOutcome` pays them, so a hand
+  // one short of the cap reports +1 and +0 rather than +1 and +1.
   const tokensBefore = readTokens(state.mode, base, active.id);
-  const identifyDelta = identifyAwarded
-    ? clamp(tokensBefore + 1, 0, state.tokenCap) - tokensBefore
-    : 0;
+  const afterIdentify = clamp(tokensBefore + (identifyAwarded ? 1 : 0), 0, state.tokenCap);
+  const identifyDelta = afterIdentify - tokensBefore;
+  const afterStreak = clamp(
+    afterIdentify + (streakAwarded ? STREAK_REWARD : 0),
+    0,
+    state.tokenCap,
+  );
+  const streakDelta = afterStreak - afterIdentify;
 
   let destination = 'discard';
   if (accepted) destination = 'timeline';
   else if (stolenBy) destination = 'challenger';
+
+  // How hard this song turned out to be: every gap nominated for it and missed,
+  // the active player's and each challenger's alike. A challenger nominating a
+  // gap IS placing the card, and counting only the one placement would leave
+  // "hardest song" picking between a dozen cards that were each missed once.
+  const wrongGuesses =
+    (placementCorrect ? 0 : 1) + challengeResults.filter((c) => !c.correct).length;
+
+  const tokenPool = state.mode === 'coop' ? 'shared' : 'player';
+  const tokenAwards = [];
+  if (identifyAwarded) {
+    tokenAwards.push({
+      playerId: active.id,
+      delta: identifyDelta,
+      reason: 'identify',
+      pool: tokenPool,
+    });
+  }
+  if (streakAwarded) {
+    tokenAwards.push({
+      playerId: active.id,
+      delta: streakDelta,
+      reason: 'streak',
+      pool: tokenPool,
+    });
+  }
 
   return {
     kind: 'placement',
@@ -631,20 +846,15 @@ function resolveReveal(state, base) {
     claimedIdentify: state.claimIdentify,
     identifyConfirmed,
     identifyAwarded,
-    tokenAwards: identifyAwarded
-      ? [
-          {
-            playerId: active.id,
-            delta: identifyDelta,
-            reason: 'identify',
-            pool: state.mode === 'coop' ? 'shared' : 'player',
-          },
-        ]
-      : [],
+    streakAwarded,
+    /** The active player's run AFTER this card - already back to 0 if it paid. */
+    streakRun,
+    tokenAwards,
     challenges: challengeResults,
     stolenBy,
     destination,
     mistakeRecorded: state.mode === 'coop' && destination === 'discard',
+    wrongGuesses,
     tokensSpent: 0,
     replaced: null,
   };
@@ -683,6 +893,12 @@ function applyOutcome(state, base, outcome) {
   if (outcome.identifyAwarded) {
     holder = addTokens(state.mode, holder, outcome.playerId, 1, state.tokenCap);
   }
+  if (outcome.streakAwarded) {
+    holder = addTokens(state.mode, holder, outcome.playerId, STREAK_REWARD, state.tokenCap);
+  }
+  // Assigned, not incremented: `resolveReveal` worked the run out from `base`,
+  // so replaying this after a confirmation toggle lands on the same number.
+  holder = writeStreakRun(holder, outcome.playerId, outcome.streakRun);
 
   return ok(state, {
     players: holder.players,
@@ -690,6 +906,12 @@ function applyOutcome(state, base, outcome) {
     sharedTokens: holder.sharedTokens,
     discard,
     mistakes: base.mistakes + (outcome.mistakeRecorded ? 1 : 0),
+    // Both tallies are rebuilt from the snapshot for the same reason, which is
+    // why `revealBase` carries them at all.
+    missCounts: addTally(base.missCounts, outcome.card.id, outcome.wrongGuesses),
+    challengeWins: outcome.stolenBy
+      ? addTally(base.challengeWins, outcome.stolenBy, 1)
+      : base.challengeWins,
     outcome,
   });
 }
@@ -736,6 +958,9 @@ function doBuyCard(state, action) {
   const timeline = readTimeline(state.mode, holder, active.id);
   const gapIndex = insertionIndexFor(timeline, card.year);
   holder = writeTimeline(state.mode, holder, active.id, insertAt(timeline, gapIndex, card));
+  // A bought card is a turn nobody got right, so it ends the run rather than
+  // being threaded through it.
+  holder = writeStreakRun(holder, active.id, 0);
 
   return ok(state, {
     players: holder.players,
@@ -760,6 +985,8 @@ function doBuyCard(state, action) {
       claimedIdentify: false,
       identifyConfirmed: null,
       identifyAwarded: false,
+      streakAwarded: false,
+      streakRun: 0,
       tokenAwards: [
         {
           playerId: active.id,
@@ -772,6 +999,7 @@ function doBuyCard(state, action) {
       stolenBy: null,
       destination: 'timeline',
       mistakeRecorded: false,
+      wrongGuesses: 0,
       tokensSpent: BUY_COST,
       replaced: null,
     },
@@ -872,6 +1100,8 @@ function doReveal(state, action) {
     sharedTokens: state.sharedTokens,
     discard: state.discard,
     mistakes: state.mistakes,
+    missCounts: state.missCounts,
+    challengeWins: state.challengeWins,
   };
   const revealed = recomputeReveal({ ...state, revealBase: base, phase: 'revealed' }, base);
   return revealed;
@@ -924,6 +1154,7 @@ function doSkipCard(state, action) {
   const discard = state.discard.concat([state.card]);
   const replacement = state.deck.length > 0 ? state.deck[0] : null;
   const skipped = state.card;
+  const activeId = state.players[state.activeIndex].id;
 
   return ok(state, {
     ...turnReset(),
@@ -931,6 +1162,10 @@ function doSkipCard(state, action) {
     sharedTimeline: holder.sharedTimeline,
     sharedTokens: holder.sharedTokens,
     discard,
+    // Counted whether or not another card follows: a song the table waved away
+    // was skipped either way, and the scoreboard's "N skipped" would otherwise
+    // quietly under-report the last card in the deck.
+    skips: state.skips + 1,
     deck: replacement ? state.deck.slice(1) : state.deck,
     card: replacement,
     phase: replacement ? 'listening' : 'turn-end',
@@ -940,7 +1175,7 @@ function doSkipCard(state, action) {
           kind: 'skip',
           card: skipped,
           year: skipped.year,
-          playerId: state.players[state.activeIndex].id,
+          playerId: activeId,
           gapIndex: null,
           placementCorrect: null,
           titleOk: null,
@@ -952,11 +1187,16 @@ function doSkipCard(state, action) {
           claimedIdentify: false,
           identifyConfirmed: null,
           identifyAwarded: false,
+          streakAwarded: false,
+          // Unchanged: a skipped card was never placed, so it neither advances
+          // the run nor breaks it.
+          streakRun: readStreakRun(state, activeId),
           tokenAwards: [],
           challenges: [],
           stolenBy: null,
           destination: 'discard',
           mistakeRecorded: false,
+          wrongGuesses: 0,
           tokensSpent: 0,
           replaced: false,
         },
@@ -1126,6 +1366,155 @@ export function progressFor(state, playerId) {
 }
 
 /**
+ * How far into the streak bonus a player is.
+ *
+ * `enabled` is the only thing the UI has to check before drawing anything: the
+ * run is held at 0 for everybody while the house rule is off, so `run` always
+ * means "cards kept in a row towards the next token" and never a number left
+ * over from a rule nobody is playing.
+ * @returns {{enabled:boolean, run:number, needed:number, toGo:number}}
+ */
+export function streakFor(state, playerId) {
+  const enabled = state.streakBonus === true;
+  const run = enabled ? readStreakRun(state, playerId) : 0;
+  return {
+    enabled,
+    run,
+    needed: STREAK_LENGTH,
+    toGo: Math.max(0, STREAK_LENGTH - run),
+  };
+}
+
+/** How many wrong guesses a card has drawn this game. */
+export function missCountFor(state, cardId) {
+  return tallyOf(state.missCounts, cardId);
+}
+
+/** How many cards a player has taken off somebody else with a challenge. */
+export function challengeWinsFor(state, playerId) {
+  return tallyOf(state.challengeWins, playerId);
+}
+
+/** Cards the table waved away. */
+export function skippedCount(state) {
+  return Number.isFinite(state.skips) ? state.skips : 0;
+}
+
+/** Every pile a card can be sitting in, so an id can always be resolved back. */
+function cardPiles(state) {
+  const piles = [state.deck, state.discard, state.sharedTimeline];
+  for (const player of state.players) piles.push(player.timeline);
+  if (state.card) piles.push([state.card]);
+  return piles;
+}
+
+function findCard(state, cardId) {
+  for (const pile of cardPiles(state)) {
+    if (!Array.isArray(pile)) continue;
+    const hit = pile.find((c) => c && c.id === cardId);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * The song the table got wrong most often, or null when nobody missed anything.
+ *
+ * Ties go to the card that was missed first. Unlike `boldestCaller` this does
+ * NOT bail out on a tie: "hardest song" is a headline about a song, and a
+ * three-way tie at one miss each still makes one of them a fair thing to print,
+ * whereas crowning one of two equally bold players would be picking a side.
+ * @returns {{cardId:string, card:object|null, misses:number, tied:boolean}|null}
+ */
+export function hardestCard(state) {
+  const top = topOfTally(state.missCounts);
+  if (!top) return null;
+  return { cardId: top.key, card: findCard(state, top.key), misses: top.count, tied: top.tied };
+}
+
+/**
+ * The player who has stolen the most cards, or null when nobody has stolen one
+ * outright.
+ *
+ * Strictly ahead, like `leader` and for the same reason: this drives a named
+ * row on the winner screen, and a badge shared by two people is worse than no
+ * badge at all.
+ * @returns {{playerId:string, name:string, color:string, seat:number, wins:number}|null}
+ */
+export function boldestCaller(state) {
+  const top = topOfTally(state.challengeWins);
+  if (!top || top.tied) return null;
+  const seat = state.players.findIndex((p) => p.id === top.key);
+  if (seat < 0) return null;
+  const player = state.players[seat];
+  return {
+    playerId: player.id,
+    name: player.name,
+    color: typeof player.color === 'string' && player.color ? player.color : seatColor(seat),
+    seat,
+    wins: top.count,
+  };
+}
+
+/**
+ * Which decades a player's timeline is made of.
+ *
+ * The eight `counts` are raw facts and always present, in `DECADE_STARTS` order,
+ * so an eight-bar histogram can be drawn straight off them with `bestCount` as
+ * the tallest bar. The verdict fields are the ones with an opinion:
+ *
+ *   `enough`    false until `DECADE_MIN_CARDS` cards have landed in the buckets.
+ *               This is the "not enough cards yet" signal the caption needs -
+ *               everybody is dealt a card, and one 1984 is not a specialism.
+ *   `best`      the decade worth naming, or null while `enough` is false. Ties
+ *               resolve to the earliest decade so there is always something to
+ *               name; `tied` says whether that choice was forced.
+ *   `dominant`  a strict majority of the counted cards sit in `best`. The
+ *               difference between "owns the 80s" and "strong: 60s", decided
+ *               here rather than in a template, because it is a rule about the
+ *               numbers and not a fact about the words.
+ *
+ * `cards` can exceed `total` if the deck reaches outside 1950-2029; such a card
+ * is in the timeline but in none of the eight bars.
+ */
+export function decadeStrengthFor(state, playerId) {
+  const timeline = timelineFor(state, playerId);
+  const buckets = DECADE_STARTS.map((decade) => ({ decade, count: 0 }));
+  let total = 0;
+  for (const song of timeline) {
+    if (!song || !isPlainYear(song.year)) continue;
+    const start = Math.floor(song.year / 10) * 10;
+    const slot = buckets.find((b) => b.decade === start);
+    if (!slot) continue;
+    slot.count += 1;
+    total += 1;
+  }
+
+  let bestCount = 0;
+  for (const bucket of buckets) bestCount = Math.max(bestCount, bucket.count);
+  const leaders = bestCount > 0 ? buckets.filter((b) => b.count === bestCount).map((b) => b.decade) : [];
+  const enough = total >= DECADE_MIN_CARDS;
+
+  return {
+    playerId,
+    cards: timeline.length,
+    total,
+    counts: buckets,
+    bestCount,
+    leaders,
+    tied: leaders.length > 1,
+    best: enough && leaders.length > 0 ? leaders[0] : null,
+    dominant: enough && bestCount * 2 > total,
+    enough,
+  };
+}
+
+/** One `decadeStrengthFor` row per player, in seat order. */
+export function decadeStrengths(state) {
+  return state.players.map((p) => decadeStrengthFor(state, p.id));
+}
+
+/**
  * The player who plays after the active one, or null when there is nobody else.
  *
  * Seat rotation is the same in every mode, co-op included: only the timeline is
@@ -1200,6 +1589,7 @@ export function seatStandings(state) {
       timeline,
       cards: timeline.length,
       tokens: tokensFor(state, p.id),
+      streakRun: streakFor(state, p.id).run,
       cardsToGo: Math.max(0, state.targetCards - timeline.length),
       isActive: p.id === activeId,
       isNext: p.id === upNextId,
@@ -1226,6 +1616,9 @@ export function scoreboard(state) {
         timeline,
         cards: timeline.length,
         tokens: tokensFor(state, p.id),
+        // Personal even in co-op, and 0 for everybody while the house rule is
+        // off - see `streakFor`, which is the honest way to ask.
+        streakRun: streakFor(state, p.id).run,
         cardsToGo: Math.max(0, state.targetCards - timeline.length),
         isActive: p.id === activeId,
       };
@@ -1254,6 +1647,57 @@ export function winners(state) {
 export function winner(state) {
   const all = winners(state);
   return all.length === 1 ? all[0] : null;
+}
+
+/**
+ * The four facts the winner screen can close a game with.
+ *
+ * Every field is null unless it earned itself, and that is the whole contract:
+ * the screen draws a row per non-null field and nothing else, so a game where
+ * nobody challenged has no boldest call, a game where every placement landed has
+ * no hardest song, and a game nobody skipped through has no skip row. Null
+ * rather than a missing key, because the rest of this module never produces
+ * `undefined` and a caller should not have to tell the two apart.
+ *
+ * `bestDecades` is a row per player who has ENOUGH cards to have a decade at
+ * all, so it thins out rather than lying, and it is null - not [] - when that
+ * leaves nobody, so the "is there a row here" test is the same for all four.
+ * Co-op collapses to ONE row for the shared pile, marked by a null `playerId`:
+ * eight identical rows would be the same fact printed eight times.
+ *
+ * Safe to call at any point in a game; the winner screen is simply where it
+ * stops changing.
+ */
+export function recap(state) {
+  const hardest = hardestCard(state);
+  const rows = state.mode === 'coop' && state.players.length > 0
+    ? decadeStrengths(state).slice(0, 1)
+    : decadeStrengths(state);
+  const decades = rows
+    .filter((row) => row.enough && row.best !== null)
+    .map((row) => {
+      const seat = state.mode === 'coop' ? -1 : state.players.findIndex((p) => p.id === row.playerId);
+      const player = seat >= 0 ? state.players[seat] : null;
+      const own = player && typeof player.color === 'string' && player.color ? player.color : null;
+      return {
+        playerId: player ? player.id : null,
+        name: player ? player.name : null,
+        color: player ? own || seatColor(seat) : null,
+        seat: player ? seat : null,
+        decade: row.best,
+        count: row.bestCount,
+        total: row.total,
+        dominant: row.dominant,
+      };
+    });
+  const skipped = skippedCount(state);
+
+  return {
+    hardestSong: hardest,
+    bestDecades: decades.length > 0 ? decades : null,
+    boldestCall: boldestCaller(state),
+    skipped: skipped > 0 ? skipped : null,
+  };
 }
 
 /**
@@ -1321,12 +1765,17 @@ export function serialize(state) {
   return JSON.stringify(state);
 }
 
-/** Give a saved player list the `photo`/`color` fields a pre-avatar save lacks. */
+/**
+ * Give a saved player list the fields it was written too early to have: the
+ * `photo`/`color` pair from the avatar release, and the `streakRun` from the
+ * house-rule release.
+ */
 function withIdentity(players) {
   return players.map((p, index) => ({
     ...p,
     photo: typeof p.photo === 'string' && p.photo ? p.photo : null,
     color: typeof p.color === 'string' && p.color ? p.color : seatColor(index),
+    streakRun: Number.isFinite(p.streakRun) ? p.streakRun : 0,
   }));
 }
 
@@ -1348,27 +1797,45 @@ export function deserialize(json) {
   if (!Array.isArray(state.deck) || !Array.isArray(state.discard)) {
     throw new TypeError('deserialize: save has no deck');
   }
-  // Photos and seat colours arrived after the first saves did. Backfilling is
-  // cheaper than bumping STATE_VERSION, which would throw away a game that is
-  // mid-party on somebody's phone - and a missing `color` would leave the play
-  // screen with no accent at all.
+  // Photos and seat colours arrived after the first saves did, and the streak
+  // run, the two tallies and the skip count after that. Backfilling is cheaper
+  // than bumping STATE_VERSION, which would throw away a game that is mid-party
+  // on somebody's phone - and a missing `color` would leave the play screen with
+  // no accent at all.
   //
   // `revealBase` gets exactly the same treatment, and that is not belt and
   // braces: every confirmation toggle on the reveal screen replays the turn from
   // that snapshot and writes its `players` straight back over the live ones (see
   // `applyOutcome`). Backfilling only the live list means the first tap on
   // Title after resuming mid-reveal silently undoes the backfill - every seat
-  // colour and every photo gone for the rest of the game.
+  // colour and every photo gone for the rest of the game, and a `missCounts` of
+  // `undefined` spread into the next tally.
   const needsIdentity = (list) =>
     Array.isArray(list) &&
-    list.some((p) => !p || typeof p.color !== 'string' || p.photo === undefined);
+    list.some(
+      (p) => !p || typeof p.color !== 'string' || p.photo === undefined || !Number.isFinite(p.streakRun),
+    );
+  const patch = {};
+  if (typeof state.streakBonus !== 'boolean') patch.streakBonus = false;
+  if (!isTally(state.missCounts)) patch.missCounts = {};
+  if (!isTally(state.challengeWins)) patch.challengeWins = {};
+  if (!Number.isFinite(state.skips)) patch.skips = 0;
+  if (needsIdentity(state.players)) patch.players = withIdentity(state.players);
+
   const base = state.revealBase;
-  const fixPlayers = needsIdentity(state.players);
-  const fixBase = !!base && typeof base === 'object' && needsIdentity(base.players);
-  if (!fixPlayers && !fixBase) return state;
-  return {
-    ...state,
-    players: fixPlayers ? withIdentity(state.players) : state.players,
-    revealBase: fixBase ? { ...base, players: withIdentity(base.players) } : state.revealBase,
-  };
+  const hasBase = !!base && typeof base === 'object';
+  if (
+    hasBase &&
+    (needsIdentity(base.players) || !isTally(base.missCounts) || !isTally(base.challengeWins))
+  ) {
+    patch.revealBase = {
+      ...base,
+      players: needsIdentity(base.players) ? withIdentity(base.players) : base.players,
+      missCounts: isTally(base.missCounts) ? base.missCounts : {},
+      challengeWins: isTally(base.challengeWins) ? base.challengeWins : {},
+    };
+  }
+
+  if (Object.keys(patch).length === 0) return state;
+  return { ...state, ...patch };
 }
