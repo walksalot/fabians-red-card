@@ -952,6 +952,7 @@ body[data-busy="true"] .app {
 
 .player-list { display: grid; gap: var(--s-2); margin-bottom: var(--s-3); }
 .player-row {
+  position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) 44px;
   align-items: center;
@@ -996,6 +997,20 @@ body[data-busy="true"] .app {
 .player-row[data-photo-state="none"] .player-row__status { color: var(--gold); font-weight: 650; }
 .player-row__skip { flex: 0 0 auto; }
 .chip--sm { min-height: 44px; padding: 4px var(--s-3); font-size: var(--f-xs); }
+
+/* Laid out but invisible: see the note on #tpl-player-row for why this is not
+   [hidden]. It is out of the tab order and out of the a11y tree, so nothing
+   can reach it except ui.js forwarding the avatar tap. */
+.player-row__file {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  clip-path: inset(50%);
+}
 
 /* The camera mark sits inside the circle, so a 12MP portrait is never fighting
    a badge for the same corner. */
