@@ -57,6 +57,7 @@ import {
   winners,
   pendingResult,
   seatColor,
+  recap,
 } from './engine.js';
 import { DECK, DECADES, GENRES, filterDeck } from './deck.js';
 import {
@@ -80,9 +81,15 @@ import {
   loadPeople,
   rememberPerson,
   forgetPerson,
+  loadBuyin,
+  saveBuyin,
 } from './storage.js';
+import { potFor, normaliseHandle, venmoPayUrl } from './buyin.js';
 import { qrSvg } from './qr.js';
 import { burst } from './confetti.js';
+// Namespaced because the cue names (tap, select, place, win) are exactly the
+// words this file already uses for other things.
+import * as sfx from './sfx.js';
 
 /* ========================================================================== */
 /* Constants                                                                  */
@@ -92,6 +99,25 @@ import { burst } from './confetti.js';
 const PREVIEW_SECONDS = 30;
 
 const TARGET_CHOICES = [5, 10, 15];
+
+/**
+ * Roughly how long a game runs, per target, so somebody choosing the length can
+ * see what they are choosing. Measured against the design prototype's own
+ * numbers rather than guessed - a family picking "15" deserves to know that is
+ * over an hour before they start, not after.
+ */
+const SESSION_MINUTES = { 5: 20, 10: 45, 15: 70 };
+
+/**
+ * Buy-in steps in whole dollars. $2 is the default because that is what this was
+ * built for - a reunion where the pot is a joke with a winner, not a stake.
+ * The ceiling is low on purpose: this app cannot move money, so a number big
+ * enough to matter is a number somebody typed by accident.
+ */
+const BUYIN_STEP_CENTS = 100;
+const BUYIN_MIN_CENTS = 0;
+const BUYIN_MAX_CENTS = 10000;
+const BUYIN_DEFAULT_CENTS = 200;
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 8;
 const MIN_MISTAKES = 1;
@@ -189,6 +215,15 @@ const view = {
     mistakeLimit: 3,
     decades: DECADES.slice(),
     genres: GENRES.slice(),
+    /** House rule: three kept cards in a row earns a token. */
+    streakBonus: false,
+    /**
+     * The pot. `amount` is integer CENTS - see buyin.js for why dollars never
+     * appear as numbers anywhere near this. `handle` is whatever is typed in the
+     * field, raw; it is normalised at the point of use so a half-typed handle
+     * does not fight the person typing it.
+     */
+    buyin: { enabled: false, amount: BUYIN_DEFAULT_CENTS, handle: '' },
   },
   /** Per-card audio bookkeeping; reset on every draw. */
   audio: {
@@ -296,12 +331,39 @@ function seatAlpha(hex, alpha) {
 }
 
 /** Publish one player's accent onto an element for its subtree to read. */
+/** WCAG relative luminance. Only used to decide a text colour. */
+function luminance(hex) {
+  const channel = (offset) => {
+    const c = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
+
+/**
+ * Ink or white for a label sitting ON a seat colour, whichever has the better
+ * contrast against it.
+ *
+ * This has to be computed rather than fixed. The design's crayon palette runs
+ * from a dark teal to a light lime, and no single label colour survives both:
+ * white on #74b816 is 2.4:1, which is unreadable, while ink on #7048e8 is 3.0:1.
+ * Picking per seat puts every one of the eight at 4.2:1 or better - comfortably
+ * over the 3:1 WCAG asks of text this large, and over 4.5:1 for most of them.
+ */
+function seatInk(hex) {
+  const seat = luminance(hex);
+  const vsWhite = 1.05 / (seat + 0.05);
+  const vsInk = (seat + 0.05) / (luminance('#241c15') + 0.05);
+  return vsWhite >= vsInk ? '#ffffff' : '#241c15';
+}
+
 function applySeat(node, color) {
   if (!node) return;
   const hex = typeof color === 'string' && color ? color : seatColor(0);
   node.style.setProperty('--seat', hex);
   node.style.setProperty('--seat-soft', seatAlpha(hex, 0.18));
   node.style.setProperty('--seat-glow', seatAlpha(hex, 0.45));
+  node.style.setProperty('--seat-ink', seatInk(hex));
 }
 
 /**
@@ -699,6 +761,10 @@ function applySettings() {
   if (settings.reducedMotion) document.body.dataset.motion = 'reduce';
   else delete document.body.dataset.motion;
 
+  // The Sound switch governs the interface cues as well as the previews - a
+  // player who turned sound off in a quiet room meant all of it.
+  sfx.setEnabled(!!settings.sound);
+
   const skip = el('opt-skip-pass');
   if (skip) skip.checked = !!settings.skipPass;
   const sound = el('opt-sound');
@@ -814,6 +880,16 @@ function savedGame() {
 }
 
 function renderHome() {
+  // The deck figures ship baked into the markup so the line is honest with no
+  // JS at all; this keeps them honest after the deck grows.
+  const years = DECK.reduce(
+    (span, card) => [Math.min(span[0], card.year), Math.max(span[1], card.year)],
+    [Infinity, -Infinity],
+  );
+  if (Number.isFinite(years[0])) {
+    text('home-deck-stat', `${DECK.length} songs · ${years[0]}–${years[1]}`);
+  }
+
   const saved = savedGame();
   const button = el('btn-resume-game');
   show(button, !!saved);
@@ -848,6 +924,21 @@ function loadSavedPlayers() {
     .filter((entry) => entry !== null)
     .slice(0, MAX_PLAYERS);
   if (roster.length >= MIN_PLAYERS) view.setup.players = roster;
+}
+
+/**
+ * Restore the stake. Also the reason the winner screen can still name a pot
+ * after a reload: nothing about the buy-in lives in game state, so this is
+ * where it comes back from.
+ */
+function loadSavedBuyin() {
+  const saved = loadBuyin();
+  if (!saved) return;
+  view.setup.buyin = {
+    enabled: saved.enabled,
+    amount: saved.amount,
+    handle: saved.handle || '',
+  };
 }
 
 /** Rebuild the chip rows from deck.js, which is the authority on what exists. */
@@ -971,6 +1062,35 @@ function eligibleDeck() {
   return filterDeck(DECK, { decades: view.setup.decades, genres: view.setup.genres });
 }
 
+/**
+ * The buy-in row on the setup screen.
+ *
+ * The pot line is the whole point of this block: two dollars a head is abstract
+ * until you see "Pot: $8 with 4 players", and seeing it is what stops the
+ * argument later. Everything here is display only - no money moves in this app,
+ * and the copy underneath says so.
+ */
+function paintBuyin() {
+  const buyin = view.setup.buyin;
+  const toggle = el('opt-buyin');
+  if (toggle) toggle.checked = buyin.enabled;
+  show(el('buyin-block'), buyin.enabled);
+
+  // Whole dollars in the stepper: cents are the internal representation, not
+  // something anyone should be asked to tap out one penny at a time.
+  text('buyin-amount-value', Math.round(buyin.amount / 100));
+
+  const field = el('buyin-venmo');
+  // Only write the field when it disagrees, or every render would jump the
+  // caret to the end while somebody is still typing their handle.
+  if (field && field.value !== buyin.handle) field.value = buyin.handle;
+
+  const pot = potFor({ amount: buyin.amount, playerCount: view.setup.players.length });
+  // potFor returns null rather than a wrong number; there is nothing honest to
+  // put in the line in that case, so it says nothing.
+  text('buyin-pot', pot ? pot.label : '');
+}
+
 function renderSetup() {
   document.body.dataset.mode = view.setup.mode;
   paintPeople();
@@ -978,6 +1098,14 @@ function renderSetup() {
 
   text('target-cards-value', view.setup.target);
   text('mistake-limit-value', view.setup.mistakeLimit);
+
+  // How long this will take, next to the number that decides it.
+  const minutes = SESSION_MINUTES[view.setup.target];
+  text('target-cards-hint', minutes ? `≈ ${minutes} min` : '');
+
+  const streak = el('opt-streak-bonus');
+  if (streak) streak.checked = view.setup.streakBonus;
+  paintBuyin();
 
   const radio = el(`mode-${view.setup.mode}`);
   if (radio) radio.checked = true;
@@ -1080,12 +1208,22 @@ function startGame() {
       targetCards: view.setup.target,
       mode: view.setup.mode,
       mistakeLimit: view.setup.mistakeLimit,
+      streakBonus: view.setup.streakBonus,
       seed,
     });
   } catch (error) {
     alertUser(error && error.message ? error.message : 'That game could not be set up.');
     return;
   }
+  // The stake is remembered per device, not per game: the same reunion plays
+  // several rounds and nobody wants to retype a Venmo handle on a phone each
+  // time. Normalised on the way out so what we store is a handle, not whatever
+  // shape it was pasted in.
+  saveBuyin({
+    enabled: view.setup.buyin.enabled,
+    amount: view.setup.buyin.amount,
+    handle: normaliseHandle(view.setup.buyin.handle),
+  });
   persist();
   beginTurn();
 }
@@ -1141,6 +1279,17 @@ function showReveal() {
   view.qrAlt = false;
   showScreen('reveal');
   runFlip();
+  // One cue per reveal, fired on the transition rather than in renderReveal -
+  // that function runs again on every repaint (a confirmation vote, a rotate),
+  // and a verdict sound that replayed each time would be maddening.
+  const outcome = state && state.outcome;
+  if (!outcome) return;
+  if (outcome.accepted) sfx.win();
+  else sfx.lose();
+  // The token cue rides on top, and only when the pool actually moved: a claim
+  // confirmed at the cap awards zero, and chiming for it announces a reward
+  // that visibly did not arrive.
+  if (outcome.tokenAwards.some((award) => award.delta > 0)) sfx.token();
 }
 
 function runFlip() {
@@ -1810,6 +1959,22 @@ function renderPlay() {
     badge.textContent = String(count);
     show(badge, count > 0);
   }
+  // A challenge is a token already spent on a guess nobody else can see. Naming
+  // the challengers on the play screen is what turns that from a hidden count
+  // into table talk - and it is the placing player's cue that this one matters.
+  const locks = el('challenge-locks');
+  if (locks) {
+    const pills = state.challenges
+      .map((challenge) => {
+        const node = clone('tpl-challenge-lock');
+        if (!node) return null;
+        fill(node, { label: `${nameOf(challenge.playerId)} challenged` });
+        return node;
+      })
+      .filter(Boolean);
+    replaceChildren(locks, pills);
+    show(locks, pills.length > 0);
+  }
   // Before the draw nobody "can" challenge yet (there is no card), but the
   // button must still be live: tapping it is what draws.
   const others = state.players.filter((p) => p.id !== active.id);
@@ -2013,6 +2178,22 @@ function renderReveal() {
 
   renderAwards(outcome);
   renderOutcomes(outcome);
+  renderRevealStrip(outcome);
+
+  // "Between 1971 and 1983" is the sentence that turns a bare year into a
+  // placement people can argue about, and it is the whole reason the strip
+  // below it exists. Only shown when the card was actually kept - a discarded
+  // card belongs nowhere, and saying otherwise would read as a consolation.
+  const belongs = el('reveal-belongs');
+  if (belongs) {
+    const neighbours = outcome.accepted ? stripNeighbours(outcome) : null;
+    if (neighbours) belongs.textContent = neighbours;
+    show(belongs, !!neighbours);
+  }
+
+  // The house rule only speaks when it pays. A note that says "1 of 3" every
+  // turn is noise; a note that appears exactly when a token lands is a reward.
+  show(el('reveal-streak'), outcome.streakAwarded === true);
 
   const pending = pendingResult(state);
   const next = el('btn-next-player');
@@ -2076,6 +2257,68 @@ function renderAwards(outcome) {
   show(panel, rows.length > 0);
 }
 
+/**
+ * Where the card ended up, whoever ended up with it. Searched rather than
+ * derived from `outcome.playerId`, because a won challenge moves the card to
+ * the challenger and the strip has to follow the card, not the turn.
+ * @returns {{timeline: Array<*>, index: number}|null}
+ */
+function placedContext(outcome) {
+  if (!outcome || !outcome.accepted || !outcome.card) return null;
+  const id = outcome.card.id;
+  if (state.mode === 'coop') {
+    const index = state.sharedTimeline.findIndex((c) => c.id === id);
+    return index < 0 ? null : { timeline: state.sharedTimeline, index };
+  }
+  for (const p of state.players) {
+    const index = p.timeline.findIndex((c) => c.id === id);
+    if (index >= 0) return { timeline: p.timeline, index };
+  }
+  return null;
+}
+
+/** "Between 1971 and 1983", or the honest thing to say at either end. */
+function stripNeighbours(outcome) {
+  const found = placedContext(outcome);
+  if (!found) return null;
+  const { timeline, index } = found;
+  if (timeline.length < 2) return null;
+  const before = index > 0 ? timeline[index - 1] : null;
+  const after = index < timeline.length - 1 ? timeline[index + 1] : null;
+  if (before && after) return `Between ${before.year} and ${after.year}`;
+  if (after) return `Earliest so far - before ${after.year}`;
+  if (before) return `Latest so far - after ${before.year}`;
+  return null;
+}
+
+/**
+ * Three cards of context around the one just placed. The whole timeline is a tap
+ * away on the scoreboard; what the reveal needs is the neighbours, big enough to
+ * read at arm's length across a table.
+ */
+function renderRevealStrip(outcome) {
+  const strip = el('reveal-strip');
+  if (!strip) return;
+  const found = placedContext(outcome);
+  if (!found || found.timeline.length < 2) {
+    replaceChildren(strip, []);
+    show(strip, false);
+    return;
+  }
+  const { timeline, index } = found;
+  const from = Math.max(0, index - 1);
+  const to = Math.min(timeline.length, index + 2);
+  const nodes = [];
+  for (let i = from; i < to; i++) {
+    const node = miniCard(timeline[i]);
+    if (!node) continue;
+    if (i === index) node.dataset.highlight = 'true';
+    nodes.push(node);
+  }
+  replaceChildren(strip, nodes);
+  show(strip, nodes.length > 0);
+}
+
 function renderOutcomes(outcome) {
   const list = el('challenge-outcomes');
   if (!list) return;
@@ -2130,6 +2373,17 @@ function renderScoreboard() {
     return node;
   });
   replaceChildren(list, rows);
+
+  // How much game is left. The scoreboard is where somebody checks whether it is
+  // worth starting another round before dinner, and "9 cards left" answers that
+  // better than any of the rows do. Skips are counted in the same line because
+  // they are the other reason the deck shrinks without anybody scoring.
+  const left = state.deck.length;
+  const skipped = state.skips;
+  const parts = [plural(left, 'card') + ' left in the deck'];
+  if (skipped > 0) parts.push(`${plural(skipped, 'card')} skipped`);
+  text('scoreboard-meta', parts.join(' · '));
+  show(el('scoreboard-meta'), true);
 }
 
 /* ========================================================================== */
@@ -2216,7 +2470,117 @@ function renderWin() {
   text('win-eyebrow', eyebrow);
   text('win-player-name', title);
   text('win-summary', summary);
+  renderRecap();
+  renderPot();
   announce(`${eyebrow}: ${title}. ${summary}`);
+}
+
+/**
+ * The four things worth remembering about a game that is now over. The engine
+ * returns null for any of them that did not earn itself - nobody challenged, no
+ * song caught two people out - and a row that says "Boldest call: nobody" is
+ * worse than no row, so those simply do not appear. All four null and the whole
+ * list goes.
+ */
+function renderRecap() {
+  const list = el('win-recap');
+  if (!list) return;
+  const summary = recap(state);
+  const rows = [];
+
+  const push = (key, value) => {
+    const node = clone('tpl-recap-row');
+    if (!node) return;
+    fill(node, { key, value });
+    rows.push(node);
+  };
+
+  if (summary.hardestSong) {
+    // `card` is looked up from the timelines and the discard, so a card that
+    // left the game by a route neither covers comes back null. Name what we can.
+    const { card, misses } = summary.hardestSong;
+    const title = card && card.title ? card.title : 'One song';
+    push('Hardest song', `${title} - missed ${misses === 1 ? 'once' : `${misses} times`}`);
+  }
+  // One decade row, not one per player. The engine reports every player's best
+  // decade, and printing all of them turns the recap into a table nobody reads -
+  // four rows of "3 cards of 10" say nothing. The line is worth having only when
+  // somebody actually stood out, so this takes the single strongest claim: a
+  // dominant player first, then the biggest concentration, and nothing at all
+  // when two people tie, following the engine's own rule that a badge shared by
+  // two is worse than no badge.
+  const decades = summary.bestDecades || [];
+  const pool = decades.filter((row) => row.dominant);
+  const contenders = pool.length > 0 ? pool : decades;
+  // Rank on the raw count first - "4 cards in the 80s" beats "3 in the 70s"
+  // however long the timelines are - then on the share, because two people on
+  // three cards each are not equally specialised if one of them holds ten cards
+  // and the other holds nine. Counting alone leaves four players tied often
+  // enough that the row simply never appeared.
+  const rank = (row) => [row.count, row.total > 0 ? row.count / row.total : 0];
+  const better = (a, b) => {
+    const [ac, as] = rank(a);
+    const [bc, bs] = rank(b);
+    return ac !== bc ? ac > bc : as > bs;
+  };
+  const top = contenders.reduce(
+    (best, row) => (best === null || better(row, best) ? row : best),
+    /** @type {typeof contenders[0]|null} */ (null),
+  );
+  // Dead level on both count and share: nobody stood out, so nobody is named.
+  const shared =
+    top !== null &&
+    contenders.filter((row) => !better(row, top) && !better(top, row)).length > 1;
+  if (top && !shared) {
+    const decade = `${String(top.decade).slice(2)}s`;
+    // "Owns the 80s" is a claim; make it only when the engine says the lead is
+    // big enough to be one, otherwise state the fact and let it speak.
+    const value = top.dominant
+      ? `owns the ${decade}`
+      : `${decade} - ${plural(top.count, 'card')} of ${top.total}`;
+    push(top.name ? `${top.name}'s decade` : 'Best decade', value);
+  }
+  if (summary.boldestCall) {
+    const { name, wins } = summary.boldestCall;
+    push('Boldest call', `${name} - ${plural(wins, 'challenge')} won`);
+  }
+  if (summary.skipped) {
+    push('Skipped', plural(summary.skipped, 'card'));
+  }
+
+  replaceChildren(list, rows);
+  show(list, rows.length > 0);
+}
+
+/**
+ * The payout. Deliberately not a transaction: this app has no server and holds
+ * no money, so the most it can honestly do is put the right number and the right
+ * handle in front of the room, and open Venmo with both filled in.
+ *
+ * With no handle saved there is still a pot worth naming - the room can settle
+ * it however it likes - so the amount stays and only the button and the QR go.
+ */
+function renderPot() {
+  const box = el('win-pot');
+  if (!box) return;
+  const payout = payoutFor();
+  show(box, !!payout);
+  if (!payout) return;
+
+  fill(box, { pot: payout.total, venmo: payout.handle ? `@${payout.handle}` : 'whoever is holding it' });
+  show(el('btn-venmo'), !!payout.url);
+
+  const qr = el('win-qr');
+  if (qr) {
+    // The QR is one buy-in, same as the button, so a cousin across the table can
+    // scan it and pay their own share without typing a handle.
+    qr.innerHTML = payout.url ? qrSvg(payout.url) : '';
+    if (payout.url) {
+      qr.setAttribute('aria-label', `Scan to send ${payout.perPlayer} to @${payout.handle}`);
+    }
+  }
+  const frame = qr && qr.closest('.pot__frame');
+  show(frame, !!payout.url);
 }
 
 /* ========================================================================== */
@@ -2389,6 +2753,47 @@ function stepMistakes(delta) {
     Math.max(MIN_MISTAKES, view.setup.mistakeLimit + delta),
   );
   render();
+}
+
+function stepBuyin(delta) {
+  const next = view.setup.buyin.amount + delta * BUYIN_STEP_CENTS;
+  view.setup.buyin.amount = Math.min(BUYIN_MAX_CENTS, Math.max(BUYIN_MIN_CENTS, next));
+  render();
+}
+
+/**
+ * What one person owes, where it goes, and a link that opens Venmo with all of
+ * it filled in. Null whenever any part of that is unknown, so the caller can
+ * hide the offer rather than show a button that goes somewhere wrong.
+ */
+function payoutFor() {
+  const buyin = view.setup.buyin;
+  if (!buyin.enabled) return null;
+  const handle = normaliseHandle(buyin.handle);
+  const pot = potFor({ amount: buyin.amount, playerCount: state ? state.players.length : 0 });
+  if (!pot || pot.totalCents <= 0) return null;
+
+  const won = winners(state);
+  const champion = state.mode === 'coop' || won.length === 0 ? null : won[0];
+  const note = champion ? `Timeline - ${champion.name} took the pot` : 'Timeline - the pot';
+  // The amount on the link is ONE buy-in, not the pot. Whoever taps this is a
+  // person who owes their own share; a link pre-filled with the total would ask
+  // every single player to pay for everybody, which is the one number here that
+  // is certainly wrong.
+  return {
+    total: pot.total,
+    perPlayer: pot.perPlayer,
+    handle,
+    url: handle ? venmoPayUrl({ handle, amount: pot.perPlayerCents, note }) : null,
+  };
+}
+
+function openVenmo() {
+  const payout = payoutFor();
+  if (!payout || !payout.url) return;
+  // noopener because this leaves for a payments site; noreferrer keeps the game
+  // URL, which carries no secrets but is nobody's business, out of the referer.
+  window.open(payout.url, '_blank', 'noopener,noreferrer');
 }
 
 function toggleChip(kind, value) {
@@ -2581,6 +2986,9 @@ const HANDLERS = {
   'target-inc': () => stepTarget(1),
   'mistakes-dec': () => stepMistakes(-1),
   'mistakes-inc': () => stepMistakes(1),
+  'buyin-dec': () => stepBuyin(-1),
+  'buyin-inc': () => stepBuyin(1),
+  'pay-venmo': () => openVenmo(),
   'toggle-decade': (node) => toggleChip('decade', Number(node.dataset.decade)),
   'toggle-genre': (node) => toggleChip('genre', node.dataset.genre),
   'chips-all': (node) => chipsAll(node.dataset.target),
@@ -2670,6 +3078,15 @@ const HANDLERS = {
   },
 };
 
+/** Which cue a given data-action gets. Anything unlisted gets the plain tap. */
+const ACTION_CUES = {
+  'select-gap': sfx.select,
+  'commit-placement': sfx.place,
+  'buy-card': sfx.place,
+  'start-game': sfx.start,
+  'play-again': sfx.start,
+};
+
 function onClick(event) {
   const target = event.target;
   if (!target || typeof target.closest !== 'function') return;
@@ -2680,6 +3097,12 @@ function onClick(event) {
   if (!handler) return;
   event.preventDefault();
   alertUser('');
+  // Both of these have to happen here, synchronously, before the handler runs.
+  // iOS only lets an AudioContext start inside a user gesture, and it stops
+  // counting as one the moment we await anything - the same restriction that
+  // shapes toggleAudio(). unlock() is cheap and idempotent after the first tap.
+  sfx.unlock();
+  (ACTION_CUES[node.dataset.action] || sfx.tap)();
   handler(node);
 }
 
@@ -2728,6 +3151,22 @@ function onInput(event) {
   if (node.id === 'playback-source' || node.id === 'opt-playback-source') {
     updateSettings({ playbackSource: node.value });
     if (view.screen === 'play') render();
+    return;
+  }
+  if (node.id === 'opt-streak-bonus') {
+    view.setup.streakBonus = node.checked;
+    return;
+  }
+  if (node.id === 'opt-buyin') {
+    view.setup.buyin.enabled = node.checked;
+    render();
+    return;
+  }
+  if (node.id === 'buyin-venmo') {
+    // Stored raw and normalised only where it is used. Normalising on every
+    // keystroke would delete the "@" the moment somebody typed it, and fight a
+    // person halfway through their own name.
+    view.setup.buyin.handle = node.value;
     return;
   }
   if (node.id === 'opt-skip-pass') updateSettings({ skipPass: node.checked });
@@ -2800,6 +3239,7 @@ function init() {
   loadSavedSettings();
   applySettings();
   loadSavedPlayers();
+  loadSavedBuyin();
   buildChips();
 
   document.addEventListener('click', onClick);
