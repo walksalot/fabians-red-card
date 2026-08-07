@@ -1,12 +1,12 @@
 /*
-  listen.js — drives listen.html, the "scan the card, hear the song" page.
+  listen.js - drives listen.html, the "scan the card, hear the song" page.
 
   The whole design constraint here is secrecy. The scanning phone is handed the
   song in the URL hash (base64url JSON, deliberately without the year), and this
   module keeps it out of the DOM: the title and artist are only ever used as
   arguments to the resolver and as href text inside the disclosure the player
-  opens on purpose. Everything else — status copy, aria labels, the document
-  title — stays generic.
+  opens on purpose. Everything else - status copy, aria labels, the document
+  title - stays generic.
 
   Audio always starts from a tap (iOS refuses otherwise), so the track is
   resolved eagerly on load and the shared <audio> element is created inside the
@@ -43,7 +43,7 @@ const dom = {
 /**
  * Decode base64url to bytes. `atob` only speaks standard base64, and the
  * classic `unescape(encodeURIComponent(...))` trick mangles anything outside
- * Latin-1 — song titles are full of accents, so go through TextDecoder.
+ * Latin-1 - song titles are full of accents, so go through TextDecoder.
  * @param {string} value
  * @returns {Uint8Array}
  */
@@ -101,7 +101,7 @@ function cardId(title, artist) {
   const slug = (s) =>
     s
       .normalize("NFKD")
-      .replace(/[̀-ͯ]/g, "")
+      .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");
@@ -318,7 +318,7 @@ function finish() {
 
 /**
  * The friendly dead end. Highlights the streaming disclosure without opening
- * it — the player still chooses when the title appears on screen.
+ * it - the player still chooses when the title appears on screen.
  */
 function stumble(retryable) {
   stopTicking();
@@ -350,7 +350,7 @@ function onPlayTap() {
   if (!track) {
     if (state === "loading") {
       wantsPlay = true;
-      dom.status.textContent = "Starting as soon as it loads…";
+      dom.status.textContent = "Starting as soon as it loads...";
     }
     return;
   }
@@ -449,7 +449,7 @@ async function load() {
   dom.notice.hidden = true;
   dom.player.hidden = false;
   dom.reveal.hidden = false;
-  setState("loading", "Getting the clip ready…");
+  setState("loading", "Getting the clip ready...");
 
   let found = null;
   try {

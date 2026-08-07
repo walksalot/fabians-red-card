@@ -197,9 +197,20 @@ function lanUrls(port) {
  */
 function listen(server, port, attemptsLeft) {
   return new Promise((resolve, reject) => {
+    // Both listeners come off before retrying: a stale 'listening' handler from
+    // the failed attempt would fire on the *next* port and resolve with the old
+    // number, so the banner would advertise a port nothing is listening on.
+    const cleanup = () => {
+      server.removeListener('error', onError);
+      server.removeListener('listening', onListening);
+    };
+    const onListening = () => {
+      cleanup();
+      resolve(port);
+    };
     const onError = (err) => {
+      cleanup();
       if (err.code === 'EADDRINUSE' && attemptsLeft > 1) {
-        server.removeListener('error', onError);
         console.log(`Port ${port} is busy — trying ${port + 1}...`);
         listen(server, port + 1, attemptsLeft - 1).then(resolve, reject);
         return;
@@ -207,10 +218,8 @@ function listen(server, port, attemptsLeft) {
       reject(err);
     };
     server.once('error', onError);
-    server.listen(port, '0.0.0.0', () => {
-      server.removeListener('error', onError);
-      resolve(port);
-    });
+    server.once('listening', onListening);
+    server.listen(port, '0.0.0.0');
   });
 }
 

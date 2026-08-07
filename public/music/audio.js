@@ -7,7 +7,7 @@
 // blocked; the `callback=` form is served as text/javascript with
 // `access-control-allow-origin: *`, which a <script> tag has always been able
 // to read. That is the only transport that works in all three ways this app is
-// meant to run, so it is the one we implement -carefully, with a hard timeout
+// meant to run, so it is the one we implement - carefully, with a hard timeout
 // and guaranteed cleanup of both the injected tag and the global it needs.
 //
 // Two rules shape everything below:
@@ -17,13 +17,13 @@
 //     (`matchedYear`) is named so that rendering it before the reveal reads as
 //     an obvious mistake in review. Nothing here writes the card's own year.
 //  2. Every failure path ends at `null`. No network, blocked script, garbage
-//     JSON, nothing that scores well enough -the caller gets null and shows
+//     JSON, nothing that scores well enough - the caller gets null and shows
 //     the streaming-link fallback instead. Resolution is never load-bearing.
 
 /** Where the search lives. Only ever hit over https; JSONP is script injection. */
 const SEARCH_ENDPOINT = 'https://itunes.apple.com/search';
 
-/** Preview resolutions live here -deliberately outside storage.js's key
+/** Preview resolutions live here - deliberately outside storage.js's key
  * namespace because this is a disposable cache with its own eviction policy,
  * and storage.js is allowed to delete it wholesale to survive a quota error. */
 export const PREVIEW_CACHE_KEY = 'music-timeline:preview:v1';
@@ -152,13 +152,24 @@ function withCallback(url, name) {
 
 /* ------------------------------------------------------- text normalising */
 
-const COMBINING_MARKS = /[̀-ͯ]/g;
+/** @param {number} code */
+function chr(code) {
+  return String.fromCharCode(code);
+}
 
-/** Lowercase + strip diacritics, so "Beyonce" matches "Beyoncé". */
+// Built from char codes rather than written literally so every file in
+// public/music/ stays plain ASCII: U+0300..U+036F are the combining marks NFD
+// splits accents into, U+2013/U+2014 are the dashes iTunes titles use.
+const COMBINING_MARKS = new RegExp(`[${chr(0x300)}-${chr(0x36f)}]`, 'g');
+const LONG_DASHES = new RegExp(`[${chr(0x2013)}${chr(0x2014)}]`, 'g');
+
+/** Lowercase, strip diacritics and flatten dashes, so a folded "Beyonce"
+ * matches the accented spelling the catalogue actually uses. */
 function fold(value) {
   return String(value == null ? '' : value)
     .normalize('NFD')
     .replace(COMBINING_MARKS, '')
+    .replace(LONG_DASHES, '-')
     .toLowerCase();
 }
 
@@ -178,7 +189,7 @@ function stripBrackets(value) {
 /** Remove a trailing " - 2011 Remaster" style suffix, which iTunes loves. */
 function stripDashSuffix(value) {
   return value.replace(
-    /\s[-–—]\s.*\b(remaster|remastered|version|mix|edit|mono|stereo|single|album|live|radio|remix|take|demo|deluxe|anniversary|reissue|soundtrack|theme|from)\b.*$/,
+    /\s-\s.*\b(remaster|remastered|version|mix|edit|mono|stereo|single|album|live|radio|remix|take|demo|deluxe|anniversary|reissue|soundtrack|theme|from)\b.*$/,
     ' ',
   );
 }
@@ -213,7 +224,7 @@ function similarity(a, b) {
     left.set(gram, (left.get(gram) || 0) + 1);
   }
   let hits = 0;
-  let total = a.length - 1 + (b.length - 1);
+  const total = a.length - 1 + (b.length - 1);
   for (let i = 0; i < b.length - 1; i += 1) {
     const gram = b.slice(i, i + 2);
     const seen = left.get(gram) || 0;
@@ -281,9 +292,11 @@ const ALBUM_MARKERS = [
   '8 bit',
 ];
 
+// Whole-word match. Both sides have been through squash(), so every marker is
+// lowercase alphanumerics separated by single spaces and nothing needs
+// escaping. Word boundaries matter: "Alive" must not read as "live".
 function hasMarker(haystack, marker) {
-  const pattern = new RegExp(`(^| )${marker.split(' ').join(' ')}( |$)`);
-  return pattern.test(haystack);
+  return new RegExp(`(^| )${marker}( |$)`).test(haystack);
 }
 
 /**
@@ -392,7 +405,7 @@ function chooseBest(results, card) {
     return inEra[0].score >= MIN_SCORE ? inEra[0].track : null;
   }
   // Nothing in era. Often that just means iTunes only stocks the reissue, so a
-  // very strong title+artist match is still worth taking -but only that.
+  // very strong title+artist match is still worth taking - but only that.
   return scored[0].score >= MIN_SCORE_OUT_OF_ERA ? scored[0].track : null;
 }
 
@@ -582,7 +595,7 @@ export async function resolveTrack(card) {
 /**
  * Warm the next card's resolution while the current one is playing, so the
  * turn change feels instant. Shares the cache and the in-flight map with
- * resolveTrack, and never rejects -a failed prefetch is not an error.
+ * resolveTrack, and never rejects - a failed prefetch is not an error.
  *
  * @param {Card} card
  * @returns {Promise<ResolvedTrack|null>}
@@ -630,7 +643,7 @@ let player = null;
  * The shared <audio> element.
  *
  * iOS only honours playback that starts inside a user gesture, and it counts
- * the *element* as blessed by that first gesture -so there is exactly one
+ * the *element* as blessed by that first gesture - so there is exactly one
  * element for the whole app, it is not created until someone taps play, and it
  * is never replaced. `preload` stays "none" until we have a URL to want, so
  * merely opening the play screen costs no bandwidth. play()'s promise is

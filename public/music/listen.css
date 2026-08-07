@@ -1,10 +1,10 @@
 /*
-  listen.css — the entire look of listen.html.
+  listen.css - the entire look of listen.html.
 
   Self-contained on purpose: the scanning phone loads this page cold off a QR
   code, so it must not depend on the game's app.css (or anything else) being
-  cached. It borrows the same late-night language — near-black ground, one
-  electric violet-to-hot-pink accent — so the two screens feel like one app.
+  cached. It borrows the same late-night language - near-black ground, one
+  electric violet-to-hot-pink accent - so the two screens feel like one app.
 */
 
 :root {
@@ -394,7 +394,7 @@ body[data-state="error"] .status {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-/* When streaming fails, the disclosure is the way out — lift it out of the
+/* When streaming fails, the disclosure is the way out - lift it out of the
    background chrome, but never open it for the player: the title is theirs
    to reveal. */
 .reveal[data-surfaced] {

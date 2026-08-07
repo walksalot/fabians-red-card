@@ -28,7 +28,7 @@ export const KEYS = Object.freeze({
 
 // audio.js owns this key and its eviction policy; storage.js only knows about
 // it because it is the one payload we are happy to sacrifice to make room when
-// a write hits the quota. It is a pure cache -dropping it costs a refetch.
+// a write hits the quota. It is a pure cache - dropping it costs a refetch.
 const SACRIFICIAL_KEYS = [`${NAMESPACE}:preview:v1`];
 
 /** Session-scoped stand-in used when the real localStorage is unusable. */
@@ -144,8 +144,8 @@ function envelope(value) {
 }
 
 /**
- * Unwrap an envelope. Anything unexpected -unparseable JSON, a payload from an
- * older VERSION, a hand-edited value -is treated as "not there".
+ * Unwrap an envelope. Anything unexpected - unparseable JSON, a payload from an
+ * older VERSION, a hand-edited value - is treated as "not there".
  * @returns {unknown}
  */
 function unwrap(text) {

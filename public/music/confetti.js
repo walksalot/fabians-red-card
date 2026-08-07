@@ -104,7 +104,7 @@ export function burst(canvas, options = {}) {
   // terminal-velocity flutter (gravity / drag ≈ 130-200 px/s) so the pieces
   // are still drifting when the fade starts instead of gone in a second.
   const power = minDim * 2.6;
-  const gravity = minDim * 1.15;
+  const gravity = minDim * 0.95;
 
   const particles = [];
   for (let i = 0; i < pieces; i += 1) {
@@ -201,15 +201,19 @@ export function burst(canvas, options = {}) {
   if (prefersReducedMotion) {
     // Settle every piece where a burst would have left it, draw it once, and
     // fade the whole thing out. No storm, no tumbling, no sustained motion.
+    // v / drag is exactly where a piece coasts to, so this is the resting
+    // scatter the animation would have produced — arrived at instantly.
+    // Wrap rather than clamp, or every overshooting piece stacks into a
+    // column against the edge instead of scattering.
+    const wrap = (v, lo, hi) => lo + (((v - lo) % (hi - lo)) + (hi - lo)) % (hi - lo);
     for (let i = 0; i < particles.length; i += 1) {
       const p = particles[i];
-      // v / drag is exactly where a piece coasts to, so this is the resting
-      // scatter the animation would have produced — arrived at instantly.
       const pad = p.w;
-      p.x = Math.max(pad, Math.min(width - pad, p.x + p.vx / p.drag));
-      p.y = Math.max(
+      p.x = wrap(p.x + p.vx / p.drag, pad, Math.max(pad + 1, width - pad));
+      p.y = wrap(
+        p.y + p.vy / p.drag + (gravity / p.drag) * 1.1,
         pad,
-        Math.min(height - pad, p.y + p.vy / p.drag + (gravity / p.drag) * 1.1),
+        Math.max(pad + 1, height - pad),
       );
     }
 
