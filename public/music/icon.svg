@@ -2,10 +2,10 @@
   Home-screen icon for the Music Timeline game.
 
   Maskable, so everything that matters lives inside the central 80% safe circle
-  (r = 205 around 256,256) — Android crops this to a circle, a squircle or a
+  (r = 205 around 256,256) - Android crops this to a circle, a squircle or a
   teardrop depending on the launcher, and anything outside that circle is fair
   game to lose. Deliberately text-free: it has to stay readable at 48px, where
-  letters turn to mud. The picture is the game itself — three song cards sitting
+  letters turn to mud. The picture is the game itself - three song cards sitting
   on a timeline, the one being placed lit up in the app's violet-to-pink accent.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Three song cards on a timeline">

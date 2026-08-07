@@ -2,7 +2,7 @@
 // offline so a game already loaded keeps working when the wifi hiccups, and so
 // it can be added to a phone's home screen and opened like a real app.
 //
-// NOT REGISTERED HERE — ui.js owns registration. The snippet it needs, for
+// NOT REGISTERED HERE - ui.js owns registration. The snippet it needs, for
 // reference (only outside file://, where service workers are unavailable and
 // the call throws):
 //
@@ -28,7 +28,7 @@ const CACHE = `music-timeline-${VERSION}`;
 const CACHE_PREFIX = 'music-timeline-';
 
 // Relative so the same worker serves the game at "/" (scripts/music-server.mjs)
-// and at "/music/" (the Next app) without edits — these resolve against this
+// and at "/music/" (the Next app) without edits - these resolve against this
 // file's own URL.
 const SHELL = [
   './',
@@ -72,14 +72,14 @@ self.addEventListener('install', (event) => {
       // without listen.js yet) should not leave players with no worker at all.
       // Anything missed here is picked up by the runtime cache on first use.
       // `cache: 'reload'` skips the HTTP cache, which the LAN server marks
-      // immutable — this is how a new VERSION actually gets new bytes.
+      // immutable - this is how a new VERSION actually gets new bytes.
       await Promise.all(
         SHELL.map(async (path) => {
           try {
             const response = await fetch(new Request(path, { cache: 'reload' }));
             if (response.ok) await cache.put(path, response);
           } catch {
-            /* offline or missing file — runtime caching will fill it in */
+            /* offline or missing file - runtime caching will fill it in */
           }
         }),
       );
@@ -105,7 +105,7 @@ self.addEventListener('activate', (event) => {
 });
 
 // Lets a page tell a waiting worker to take over right away (e.g. an
-// "update available — tap to reload" affordance in ui.js).
+// "update available - tap to reload" affordance in ui.js).
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
