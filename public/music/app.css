@@ -99,7 +99,7 @@
      the faces are the first thing that has to give. --roster-dim is what keeps
      seven other players present but unmistakably not the one holding the phone. */
   --roster-face:      36px;
-  --roster-face-lg:   46px;
+  --roster-face-lg:   44px;
   --roster-dim:       0.44;
   --roster-dim-next:  0.85;
   --roster-badge:     #1b1430;
@@ -678,6 +678,9 @@ body[data-busy="true"] .app {
   align-items: center;
   gap: 5px;
   min-width: 0;
+  /* The pills themselves cannot shrink, so a shrinkable list would simply spill
+     its contents over whatever sits next to it in the top bar. */
+  flex: 0 0 auto;
 }
 .token-pill {
   width: 13px;
@@ -898,7 +901,9 @@ body[data-busy="true"] .app {
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  padding: 2px 0;
+  /* No padding of its own: the scroller inside carries it, because overflow
+     clips at ITS padding box and the crowns and flags hang outside the faces. */
+  padding: 0;
   border-bottom: 1px solid var(--line);
   background-color: rgba(8, 6, 15, 0.5);
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 70%);
@@ -926,9 +931,9 @@ body[data-busy="true"] .app {
   gap: var(--s-2);
   flex: 1 1 auto;
   min-width: 0;
-  /* The bottom padding is not decoration: overflow-y clips at the padding box,
-     and the NEXT flag hangs below the faces. */
-  padding: 3px var(--gut-r) 10px var(--gut-l);
+  /* The block padding is not decoration: overflow-y clips at the padding box,
+     the crown sits above the faces and the NEXT flag hangs below them. */
+  padding: 5px var(--gut-r) 8px var(--gut-l);
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x proximity;
@@ -937,10 +942,13 @@ body[data-busy="true"] .app {
   -ms-overflow-style: none;
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16px,
-                                      #000 calc(100% - 16px), transparent 100%);
-          mask-image: linear-gradient(90deg, transparent 0, #000 16px,
-                                      #000 calc(100% - 16px), transparent 100%);
+  /* The fade is exactly as wide as the gutter, so the first and last chips sit
+     at full strength when the rail is at either end and only ever dim once
+     there really is something more to scroll to. */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 var(--pad),
+                                      #000 calc(100% - var(--pad)), transparent 100%);
+          mask-image: linear-gradient(90deg, transparent 0, #000 var(--pad),
+                                      #000 calc(100% - var(--pad)), transparent 100%);
 }
 .roster__seats::-webkit-scrollbar { display: none; }
 
@@ -949,8 +957,7 @@ body[data-busy="true"] .app {
   display: grid;
   place-items: center;
   min-width: 46px;
-  min-height: 46px;
-  padding: 2px;
+  min-height: 44px;
   opacity: var(--roster-dim);
   transition: opacity var(--t-mid) var(--ease);
 }
@@ -1010,7 +1017,7 @@ body[data-busy="true"] .app {
 .roster__flag {
   position: absolute;
   left: 50%;
-  bottom: -6px;
+  bottom: -5px;
   transform: translateX(-50%);
   display: none;
   padding: 1px 5px;
@@ -1062,7 +1069,7 @@ body[data-busy="true"] .app {
 }
 body[data-mode="coop"] .roster__team { display: flex; }
 body[data-mode="coop"] .roster__count { display: none; }
-body[data-mode="coop"] .roster__seats { padding-left: var(--s-2); }
+body[data-mode="coop"] .roster__seats { padding-left: var(--pad); }
 
 /* --- standings list (pass screen) --- */
 .standings { margin: 0 var(--gut-r) 0 var(--gut-l); text-align: left; }
@@ -2360,11 +2367,13 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
 @media (max-width: 359px) {
   :root {
     --pad: 12px;
-    /* Two pixels off each face buys a whole extra chip on a 320px screen. */
+    /* Two pixels off each face buys a whole extra chip on a 320px screen, and
+       the band gives four back to the play area. */
     --roster-face: 34px;
-    --roster-face-lg: 43px;
+    --roster-face-lg: 42px;
   }
-  .roster__chip { min-width: 44px; min-height: 44px; }
+  .roster__chip { min-width: 44px; min-height: 42px; }
+  .roster__seats { padding-block: 4px 8px; }
   .standing__name { font-size: var(--f-sm); }
   .dial { width: 138px; height: 138px; }
   .dial__icon { width: 32px; height: 32px; }
@@ -2382,6 +2391,45 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
      colour and the rows are in seat order. */
   .player-row__num { display: none; }
   .chip--sm { padding: 4px var(--s-2); }
+}
+
+/* Short phones - a 568px-tall SE, or anything held in landscape. The rail costs
+   the play screen around 56px, and this is where they come back from: every
+   piece of furniture gives up a few pixels so the dial, the one control a
+   player has to reach, stays on screen instead of below the fold. */
+@media (max-height: 640px) {
+  .topbar {
+    padding-top: calc(4px + var(--sa-t));
+    padding-bottom: var(--s-2);
+  }
+  .topbar__row--meta { margin-top: var(--s-1); }
+  .screen--play .avatar--md { --avatar-size: 44px; }
+  .topbar__name { font-size: var(--f-lg); }
+  .roster__seats { padding-block: 4px 8px; }
+  .play__scroll { padding-top: var(--s-1); gap: var(--s-2); }
+  .mystery { padding: var(--s-2) var(--s-3) var(--s-3); }
+  .mystery__label { font-size: var(--f-3xs); letter-spacing: 0.14em; }
+  .mystery__status { margin-top: var(--s-1); }
+  .dial { width: 108px; height: 108px; margin-block: var(--s-1); }
+  .dial__icon { width: 28px; height: 28px; }
+  .dial__btn { inset: 10px; }
+  .dial__label { font-size: var(--f-xs); }
+  .timeline { padding-top: var(--s-2); }
+  /* One line, whatever the mode: a wrapped header costs the dial 20px. */
+  .timeline__head { gap: var(--s-2); }
+  .timeline__title { white-space: nowrap; }
+  .timeline__hint {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .strip { padding-block: var(--s-1) var(--s-2); }
+  .tl-card { padding: var(--s-2); }
+  /* One line of title instead of two: the year is what a timeline is read by. */
+  .tl-card__title { -webkit-line-clamp: 1; }
+  .strip:empty { min-height: 92px; }
+  .actions { padding-block: var(--s-2) calc(var(--s-2) + var(--sa-b)); }
 }
 
 /* Landscape phones and small tablets: the play screen gets two columns so the

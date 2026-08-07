@@ -105,8 +105,27 @@ async function noSideScroll(page, where) {
 }
 
 async function shoot(page, name, opts = {}) {
-  await page.waitForTimeout(120);
+  await page.waitForTimeout(400);
   await noSideScroll(page, name);
+  if (name.includes('play')) {
+    const dial = await page.evaluate(() => {
+      const btn = document.getElementById('btn-play-song');
+      const r = btn.getBoundingClientRect();
+      const rail = document.getElementById('play-roster').getBoundingClientRect();
+      const scroll = document.querySelector('.play__scroll').getBoundingClientRect();
+      return {
+        top: Math.round(r.top),
+        bottom: Math.round(r.bottom),
+        fold: Math.round(scroll.bottom),
+        h: window.innerHeight,
+        rail: Math.round(rail.height),
+      };
+    });
+    console.log(`  ${name}: dial ${dial.top}-${dial.bottom}, fold ${dial.fold} of ${dial.h}, rail ${dial.rail}px`);
+    if (dial.bottom > dial.fold) {
+      problems.push(`[${name}] play button clipped by the fold: ${JSON.stringify(dial)}`);
+    }
+  }
   await page.screenshot({ path: `${OUT}/${name}.png`, ...opts });
 }
 

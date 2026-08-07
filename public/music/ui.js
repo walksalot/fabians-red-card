@@ -1412,14 +1412,39 @@ function paintRoster(seats, team) {
     });
   }
 
-  // Only chase the active chip when the active player actually changed:
-  // scrolling somebody's own browsing out from under them on every repaint
-  // would be worse than the chip being briefly off-screen.
+  // Only chase the active chip when the turn moved on - or when the rail itself
+  // changed size, which is a rotated phone. Doing it on every repaint would
+  // scroll somebody's own browsing out from under them.
   const active = currentPlayer(state);
-  if (active && seats.dataset.activeSeat !== active.id) {
-    seats.dataset.activeSeat = active.id;
+  const fit = active ? `${active.id}@${seats.clientWidth}` : '';
+  if (active && seats.dataset.activeSeat !== fit) {
+    seats.dataset.activeSeat = fit;
     const chip = seats.querySelector('[data-rank="active"]');
-    if (chip) scrollIntoStrip(seats, chip);
+    if (chip) scrollSeatIntoView(seats, chip);
+  }
+}
+
+/**
+ * Bring a chip into view with the SMALLEST scroll that does it.
+ *
+ * Deliberately not centred like the timeline strip: the rail is a seating plan,
+ * and shoving the first two seats off the left edge to centre the third throws
+ * away the very thing the rail is for.
+ */
+function scrollSeatIntoView(seats, chip) {
+  if (typeof seats.scrollTo !== 'function') return;
+  const margin = 12;
+  const left = chip.offsetLeft - margin;
+  const right = chip.offsetLeft + chip.offsetWidth + margin;
+  let target = seats.scrollLeft;
+  if (left < seats.scrollLeft) target = left;
+  else if (right > seats.scrollLeft + seats.clientWidth) target = right - seats.clientWidth;
+  target = Math.max(0, Math.min(target, seats.scrollWidth - seats.clientWidth));
+  if (Math.abs(seats.scrollLeft - target) < 2) return;
+  try {
+    seats.scrollTo({ left: target, behavior: motionIsReduced() ? 'auto' : 'smooth' });
+  } catch {
+    seats.scrollLeft = target;
   }
 }
 
@@ -1498,7 +1523,9 @@ function renderPlay() {
   paintRoster(el('play-roster-seats'), el('play-roster-team'));
 
   const heading = el('timeline-heading');
-  if (heading) heading.textContent = state.mode === 'coop' ? 'The shared timeline' : 'Your timeline';
+  // "Shared", not "The shared": at 320px the longer version wraps the header
+  // onto a second line and pushes the mystery card's Play button off screen.
+  if (heading) heading.textContent = state.mode === 'coop' ? 'Shared timeline' : 'Your timeline';
 
   const timeline = timelineFor(state, active.id);
   paintStrip(el('timeline-strip'), gapsFor(state, active.id), timeline, state.selectedGap);
@@ -2342,6 +2369,23 @@ function onInput(event) {
   }
 }
 
+/**
+ * A rotated phone changes how many faces fit, and the rail would otherwise keep
+ * a scroll offset that leaves the active one off screen for the rest of the
+ * turn. Debounced and rail-only: a full render() here would redraw the QR code
+ * every time a mobile browser's address bar slid away.
+ */
+let railResizeTimer = null;
+function onResize() {
+  if (railResizeTimer !== null) return;
+  railResizeTimer = window.setTimeout(() => {
+    railResizeTimer = null;
+    if (!state) return;
+    if (view.screen === 'play') paintRoster(el('play-roster-seats'), el('play-roster-team'));
+    else if (view.screen === 'reveal') paintRoster(el('reveal-roster-seats'), el('reveal-roster-team'));
+  }, 180);
+}
+
 function onKeydown(event) {
   if (event.key !== 'Escape') return;
   if (view.challengeOpen) {
@@ -2393,6 +2437,7 @@ function init() {
   document.addEventListener('input', onInput);
   document.addEventListener('change', onInput);
   document.addEventListener('keydown', onKeydown);
+  window.addEventListener('resize', onResize);
 
   // Nothing here should ever throw, but if something does the player gets a
   // sentence instead of a frozen screen.
