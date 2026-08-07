@@ -17,6 +17,12 @@
  * ---------------------------------------------------------------------------
  * The rules, stated once so the code below can stay terse
  * ---------------------------------------------------------------------------
+ * Identity   Every player carries a `photo` (a data URL, or null when they chose
+ *            the generated fallback) and a `color` taken from SEAT_COLORS by
+ *            seat index. Neither is a rule - they are here so the UI can read a
+ *            player's face and accent straight off the state it already has,
+ *            instead of maintaining a second map that can drift out of sync with
+ *            a save file. The engine never looks at either.
  * Setup      Every player starts with one random card in their timeline and
  *            `startingTokens` (2) tokens. In co-op there is ONE shared timeline
  *            with one starting card and ONE shared token pool of `startingTokens`
@@ -93,6 +99,44 @@ export const STATE_VERSION = 1;
 
 const MIN_PLAYERS = 1;
 const MAX_PLAYERS = 8;
+
+/* -------------------------------------------------------------------------- */
+/* Seat colours                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One accent per seat, hand-picked rather than generated.
+ *
+ * Why hand-picked: a hashed hue lands on mud, on the token gold, or on the
+ * verdict red often enough to matter, and "whose turn is it" is the one question
+ * this app has to answer at a glance across a dim room. These eight are spread
+ * around the wheel, every one of them clears 7:1 against the near-black
+ * background, and none of them is the token gold (#ffc247), the correct green
+ * (#3ce6a0) or the wrong red (#ff5a76) - those three keep meaning what they
+ * mean. Neighbouring seats are deliberately far apart in hue, because the people
+ * most likely to be compared are the ones sitting next to each other.
+ * @type {readonly string[]}
+ */
+export const SEAT_COLORS = Object.freeze([
+  '#a97cff', // violet
+  '#45e0a8', // jade
+  '#ff6bb5', // pink
+  '#4fc3ff', // sky
+  '#ffb03a', // amber
+  '#c6ee5a', // lime
+  '#ff7a5c', // coral
+  '#8b9bff', // periwinkle
+]);
+
+/**
+ * The accent for a seat. Wraps, so it is total for any index.
+ * @param {number} index seat index, 0-based
+ * @returns {string} a hex colour
+ */
+export function seatColor(index) {
+  const seat = Number.isInteger(index) && index >= 0 ? index : 0;
+  return SEAT_COLORS[seat % SEAT_COLORS.length];
+}
 
 /* -------------------------------------------------------------------------- */
 /* Seeded randomness                                                           */
@@ -300,7 +344,14 @@ function normalisePlayers(players) {
     if (seen.has(id)) throw new RangeError(`createGame: duplicate player id "${id}"`);
     seen.add(id);
     const name = typeof raw.name === 'string' && raw.name ? raw.name : `Player ${index + 1}`;
-    return { id, name, timeline: [], tokens: 0 };
+    // `photo` is null, never undefined: the state has to survive JSON.stringify
+    // and an undefined would silently vanish from a save. `colour` is accepted
+    // alongside `color` because the rest of the repo is written in British
+    // English and the mismatch is otherwise a five-minute bug.
+    const photo = typeof raw.photo === 'string' && raw.photo ? raw.photo : null;
+    const given = typeof raw.color === 'string' && raw.color ? raw.color : raw.colour;
+    const color = typeof given === 'string' && given ? given : seatColor(index);
+    return { id, name, photo, color, timeline: [], tokens: 0 };
   });
 }
 
@@ -1075,6 +1126,11 @@ export function scoreboard(state) {
       return {
         playerId: p.id,
         name: p.name,
+        // Carried so a row can be drawn from this one object. Rows are sorted by
+        // score, so `seat` is the only honest source for the accent - the array
+        // index here is a ranking, not a seat.
+        photo: p.photo === undefined ? null : p.photo,
+        color: typeof p.color === 'string' && p.color ? p.color : seatColor(seat),
         seat,
         timeline,
         cards: timeline.length,
@@ -1192,5 +1248,20 @@ export function deserialize(json) {
   if (!Array.isArray(state.deck) || !Array.isArray(state.discard)) {
     throw new TypeError('deserialize: save has no deck');
   }
-  return state;
+  // Photos and seat colours arrived after the first saves did. Backfilling is
+  // cheaper than bumping STATE_VERSION, which would throw away a game that is
+  // mid-party on somebody's phone - and a missing `color` would leave the play
+  // screen with no accent at all.
+  const needsIdentity = state.players.some(
+    (p) => !p || typeof p.color !== 'string' || p.photo === undefined,
+  );
+  if (!needsIdentity) return state;
+  return {
+    ...state,
+    players: state.players.map((p, index) => ({
+      ...p,
+      photo: typeof p.photo === 'string' && p.photo ? p.photo : null,
+      color: typeof p.color === 'string' && p.color ? p.color : seatColor(index),
+    })),
+  };
 }

@@ -266,13 +266,36 @@ export function clearAll() {
 }
 
 /**
+ * Strip the player photos out of anything holding a `players` array.
+ *
+ * Photos are far and away the biggest thing we store - a handful of base64
+ * JPEGs dwarfs the entire rest of a save - and they are also the only part we
+ * can lose without wrecking the evening. So when the quota says no, they are
+ * what goes. Returns null when there was nothing to drop, which lets callers
+ * skip a pointless second write.
+ */
+function withoutPhotos(value) {
+  const players = value && typeof value === 'object' ? value.players : null;
+  if (!Array.isArray(players)) return null;
+  if (!players.some((p) => p && typeof p === 'object' && p.photo)) return null;
+  return {
+    ...value,
+    players: players.map((p) => (p && typeof p === 'object' ? { ...p, photo: null } : p)),
+  };
+}
+
+/**
  * Persist the in-progress game state (whatever engine.js hands us).
  * @param {object} state
  * @returns {boolean}
  */
 export function saveGame(state) {
   if (!state || typeof state !== 'object') return false;
-  return set(KEYS.game, state);
+  if (set(KEYS.game, state)) return true;
+  // Losing the avatars is survivable. Losing the game is not - so try again
+  // without the faces before we accept a memory-only save.
+  const lean = withoutPhotos(state);
+  return lean ? set(KEYS.game, lean) : false;
 }
 
 /**
@@ -308,14 +331,21 @@ export function loadSettings() {
 }
 
 /**
- * Remember the player names from the last setup so the next game starts with
- * the same family instead of "Player 1..4" every time.
+ * Remember the last setup's roster - names, and the photo taken for each one -
+ * so a regular group does not re-shoot the whole family every week.
+ *
+ * The photos live here and in the saved game and nowhere else. They are never
+ * uploaded, never sent anywhere and never go in the QR payload; this is a
+ * private, on-device record of who was playing. If the quota bites, the names
+ * are written on their own rather than losing the roster entirely.
  * @param {Array<*>} players
  * @returns {boolean}
  */
 export function savePlayers(players) {
   if (!Array.isArray(players)) return false;
-  return set(KEYS.players, players);
+  if (set(KEYS.players, players)) return true;
+  const lean = withoutPhotos({ players });
+  return lean ? set(KEYS.players, lean.players) : false;
 }
 
 /** @returns {Array<*>|null} */

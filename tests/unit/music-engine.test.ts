@@ -35,7 +35,9 @@ import {
   pendingResult,
   progressFor,
   reduce,
+  SEAT_COLORS,
   scoreboard,
+  seatColor,
   serialize,
   shuffle,
   timelineFor,
@@ -405,6 +407,111 @@ describe('createGame', () => {
     expect(resultOf(state).shared).toBe(true);
     expect(winner(state)).toBeNull();
     expect(winners(state).map((p) => p.id).sort()).toEqual(['p1', 'p2']);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Player identity (photo + seat colour)                                       */
+/* -------------------------------------------------------------------------- */
+
+describe('player identity', () => {
+  const PHOTO = 'data:image/jpeg;base64,AAAA';
+
+  it('defaults every player to no photo and their seat colour', () => {
+    const state = createGame({ players: ['Ann', 'Bo', 'Cy'], deck: deckOf([1960, 1970, 1980, 1990]) });
+    expect(state.players.map((p) => p.photo)).toEqual([null, null, null]);
+    expect(state.players.map((p) => p.color)).toEqual([
+      SEAT_COLORS[0],
+      SEAT_COLORS[1],
+      SEAT_COLORS[2],
+    ]);
+  });
+
+  it('offers at least eight distinct, wrapping seat colours', () => {
+    expect(SEAT_COLORS.length).toBeGreaterThanOrEqual(8);
+    expect(new Set(SEAT_COLORS).size).toBe(SEAT_COLORS.length);
+    for (const colour of SEAT_COLORS) expect(colour).toMatch(/^#[0-9a-f]{6}$/);
+    expect(seatColor(0)).toBe(SEAT_COLORS[0]);
+    expect(seatColor(SEAT_COLORS.length)).toBe(SEAT_COLORS[0]);
+    // Total for junk, so a corrupt seat index can never render a colourless UI.
+    expect(seatColor(-3)).toBe(SEAT_COLORS[0]);
+    expect(seatColor(1.5 as number)).toBe(SEAT_COLORS[0]);
+  });
+
+  it('carries a photo through and accepts either spelling of colour', () => {
+    const state = createGame({
+      players: [
+        { name: 'Ann', photo: PHOTO },
+        { name: 'Bo', colour: '#123456' },
+        { name: 'Cy', color: '#654321' },
+      ],
+      deck: deckOf([1960, 1970, 1980, 1990]),
+    });
+    expect(state.players[0].photo).toBe(PHOTO);
+    expect(state.players[0].color).toBe(SEAT_COLORS[0]);
+    expect(state.players[1].color).toBe('#123456');
+    expect(state.players[2].color).toBe('#654321');
+  });
+
+  it('normalises a junk photo to null rather than undefined', () => {
+    const state = createGame({
+      players: [
+        { name: 'Ann', photo: '' },
+        { name: 'Bo', photo: 42 as unknown as string },
+      ],
+      deck: deckOf([1960, 1970, 1980]),
+    });
+    for (const p of state.players) {
+      expect(p.photo).toBeNull();
+      expect(Object.prototype.hasOwnProperty.call(p, 'photo')).toBe(true);
+    }
+    // The whole point of null over undefined: it survives the save round trip.
+    expect(deserialize(serialize(state)).players.map((p) => p.photo)).toEqual([null, null]);
+  });
+
+  it('round-trips photos and colours through serialize/deserialize', () => {
+    const state = createGame({
+      players: [{ name: 'Ann', photo: PHOTO }, { name: 'Bo' }],
+      deck: deckOf([1960, 1970, 1980]),
+    });
+    const back = deserialize(serialize(state));
+    expect(back.players[0].photo).toBe(PHOTO);
+    expect(back.players[0].color).toBe(SEAT_COLORS[0]);
+    expect(back.players[1].photo).toBeNull();
+    expect(back.players[1].color).toBe(SEAT_COLORS[1]);
+  });
+
+  it('backfills a save written before avatars existed', () => {
+    const state = createGame({ players: ['Ann', 'Bo'], deck: deckOf([1960, 1970, 1980]) });
+    const legacy = JSON.parse(serialize(state)) as GameState;
+    for (const p of legacy.players) {
+      delete (p as Partial<typeof p>).photo;
+      delete (p as Partial<typeof p>).color;
+    }
+    const back = deserialize(legacy);
+    expect(back.players.map((p) => p.photo)).toEqual([null, null]);
+    expect(back.players.map((p) => p.color)).toEqual([SEAT_COLORS[0], SEAT_COLORS[1]]);
+    // Backfilling must not disturb anything else about the save.
+    expect(back.turn).toBe(state.turn);
+    expect(back.deck.map((c) => c.id)).toEqual(state.deck.map((c) => c.id));
+    // ...and it must not mutate the object it was handed.
+    expect((legacy.players[0] as Partial<GameState['players'][number]>).color).toBeUndefined();
+  });
+
+  it('puts the photo and the seat colour on every scoreboard row', () => {
+    const state = game({
+      players: ['Ann', 'Bo', 'Cy'],
+      timelines: [[1960], [1960, 1970, 1980], [1960, 1970]],
+    });
+    const withPhoto = {
+      ...state,
+      players: state.players.map((p, i) => (i === 0 ? { ...p, photo: PHOTO } : p)),
+    };
+    const rows = scoreboard(withPhoto);
+    // Rows come back ranked, so the accent has to follow the seat, not the row.
+    expect(rows.map((r) => r.playerId)).toEqual(['p2', 'p3', 'p1']);
+    expect(rows.map((r) => r.color)).toEqual([SEAT_COLORS[1], SEAT_COLORS[2], SEAT_COLORS[0]]);
+    expect(rows.map((r) => r.photo)).toEqual([null, null, PHOTO]);
   });
 });
 

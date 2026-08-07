@@ -43,6 +43,10 @@ export interface Card extends YearCard {
 export interface Player {
   id: string;
   name: string;
+  /** A square JPEG data URL, or null when this player uses the generated initial. */
+  photo: string | null;
+  /** Accent for this seat, from SEAT_COLORS unless createGame was given one. */
+  color: string;
   /** Always empty in co-op — the group builds `state.sharedTimeline` instead. */
   timeline: Card[];
   /** Always 0 in co-op — the group spends `state.sharedTokens` instead. */
@@ -172,8 +176,18 @@ export interface Action {
   artist?: boolean;
 }
 
+export interface PlayerSeed {
+  id?: string;
+  name?: string;
+  /** Data URL. Anything else (including undefined) becomes null. */
+  photo?: string | null;
+  /** Either spelling is accepted; the state always ends up with `color`. */
+  color?: string;
+  colour?: string;
+}
+
 export interface CreateGameOptions {
-  players: ReadonlyArray<string | { id?: string; name?: string }>;
+  players: ReadonlyArray<string | PlayerSeed>;
   deck: ReadonlyArray<Card>;
   targetCards?: number;
   mode?: Mode;
@@ -192,6 +206,8 @@ export interface Gap {
 export interface ScoreRow {
   playerId: string;
   name: string;
+  photo: string | null;
+  color: string;
   seat: number;
   timeline: Card[];
   cards: number;
@@ -211,6 +227,9 @@ export declare const MODES: readonly Mode[];
 export declare const ACTIONS: Readonly<Record<ActionType, ActionType>>;
 export declare const BUY_COST: number;
 export declare const STATE_VERSION: number;
+export declare const SEAT_COLORS: readonly string[];
+
+export declare function seatColor(index: number): string;
 
 export declare function mulberry32(seed: number): () => number;
 export declare function shuffle<T>(items: readonly T[], cursor: number): { items: T[]; cursor: number };

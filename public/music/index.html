@@ -30,6 +30,40 @@
                         same effect as prefers-reduced-motion: reduce.
     body[data-busy]   = 'true'    -> dims + blocks pointer events on #app.
 
+  SEAT COLOUR (--seat)
+    Every player owns an accent, engine.js hands it out from SEAT_COLORS by seat
+    index and it rides on the player object (player.color) and on every
+    scoreboard row. The UI never picks a colour itself; it only publishes what
+    the state says into three custom properties:
+      --seat        the raw hex
+      --seat-soft   the same hue at ~18% alpha (fills, tints)
+      --seat-glow   the same hue at ~45% alpha (rings, shadows)
+    Set them on document.body for the ACTIVE player - the play, pass and reveal
+    screens all read them from there - and inline on any element that has to
+    show somebody else: #win (the winner), each .score-row, each
+    .challenge-option, each .player-row. Every rule falls back to the house
+    violet, so an unset --seat is ugly, never broken.
+
+  AVATARS
+    One block, used in seven places. The root carries data-photo:
+      <span class="avatar avatar--md" data-photo="true|false">
+        <img class="avatar__img" data-field="photo" alt="">
+        <span class="avatar__initial" data-field="initial" aria-hidden="true">A</span>
+      </span>
+    data-photo="true"  -> the <img> shows (set .src from player.photo)
+    data-photo="false" -> the initial shows on the seat colour. This is a real
+                          fallback, not a placeholder: a player who declines a
+                          photo gets it for the whole game and it must look
+                          deliberate. Never leave .src set when data-photo is
+                          "false" - a stale src is a broken-image request.
+    Sizes: avatar--sm (scoreboard, challenge sheet), avatar--md (play top bar,
+    reveal), avatar--lg (setup rows), avatar--xl (pass, win).
+    Fixed ones in the markup: #play-avatar #pass-avatar #reveal-avatar
+    #win-avatar. The rest come from templates.
+    Photos are a square JPEG data URL, private to this device: they live in
+    localStorage only, they are never uploaded, and they are never in the QR
+    payload (see listenUrl() in ui.js).
+
   SHEETS (menu + challenge) - NOT screens, they layer over whatever is showing
     #menu-sheet, #challenge-sheet: set dataset.open = 'true' | 'false'.
     Open  -> el.dataset.open = 'true';  move focus into the sheet.
@@ -50,6 +84,10 @@
       home                [#btn-setup-back, #btn-menu-home, #btn-win-home]
       add-player          [#btn-add-player]
       remove-player       [rows in #player-list]
+      pick-photo          [the .avatar button in each #player-list row - opens
+                           that row's [data-role="player-photo"] file input]
+      skip-photo          [the .player-row__skip toggle in each row
+                           (aria-pressed): on = use the generated initial]
       target-dec/target-inc         [#field-target-cards stepper]
       mistakes-dec/mistakes-inc     [#field-mistake-limit stepper]
       toggle-decade       [buttons in #decade-chips, data-decade="1980"]
