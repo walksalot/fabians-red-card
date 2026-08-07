@@ -115,3 +115,62 @@ Also in the box (all optional, all free, no API keys):
   `npm run backup` does it on demand.
 
 Not included by design: payment processing (the pot is display-only).
+
+## Bonus: the Music Timeline game
+
+For the evenings between matchdays, there's a second, completely separate game
+hiding in this folder: **Music Timeline**. A song plays, you don't see the year,
+and you have to slot it into your row of songs — older than that one, newer than
+this one. Get it right and you keep the card. First person to build ten songs in
+the correct order wins.
+
+It's built for a group sitting round a table with their phones out. No accounts,
+no sign-up, nothing to do with the league or your picks — anyone in the room can
+play, and once it has loaded once it keeps working even if the wifi drops.
+
+**Three ways to start it**
+
+1. **Everyone's own phone, over your wifi** — the good one:
+
+   ```bash
+   npm run music
+   ```
+
+   It prints a web address and a big QR code right there in the terminal. Point
+   a phone camera at it, tap the link, and you're in. Everyone else opens the
+   same address (it's printed too, in case someone's camera is being difficult).
+   Nothing leaves your house and no internet is needed except for the song
+   clips. `Ctrl+C` stops it. If something's already using the port it just hops
+   to the next free one and tells you.
+
+2. **Inside the league site** — if the pool website is already running, open
+   **/music** on it (e.g. `http://localhost:3000/music`). Same game, same
+   address everyone already has. It's deliberately outside the login, so guests
+   don't need a league account to play.
+
+3. **Just open the file** — double-click `public/music/index.html`. Works
+   instantly on one device, no commands at all; it's the pass-the-phone way to
+   play. (The scan-to-listen QR can't work in this mode, and the game says so.)
+
+**The QR bit** — this is the trick that replaces physical cards. On the play
+screen there's a QR code next to the mystery song. Whoever's turn it is scans it
+with their own phone and the clip plays there instead, on a tiny page that shows
+nothing but a play button — no year, no title, no artist, so scanning can't
+spoil the answer for anyone. (This needs option 1 or 2 above —
+another phone can't open a file sitting on your laptop.)
+
+**House rules, briefly**
+
+- Everyone starts with one song face-up in front of them and two tokens.
+- On your turn: play the song, slot it into your row, then reveal the year.
+  Right — you keep it. Wrong — it's discarded and you try again next time.
+- **Tokens** are the salt. Spend one to *challenge* someone else's placement
+  before the reveal (if they're wrong and you're right, the song comes to you).
+  Say you can name the title **and** artist and get it right, and you win a
+  token back. Save up three and you can simply *buy* a card, placed correctly
+  for you, no guessing.
+- **Modes:** *classic* is placement only; *advanced* also makes you name the
+  song and artist; *expert* wants the exact year on top of that; *co-op* is one
+  shared timeline where everyone's on the same side and three mistakes lose it.
+- Pick 5, 10 or 15 cards as the target, filter the deck by decade or genre if
+  the kids have never heard of the seventies, and the phone keeps score.
