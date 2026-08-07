@@ -13,31 +13,45 @@ import { describe, expect, it } from 'vitest';
 import {
   ACTIONS,
   BUY_COST,
+  COOP_TOKEN_CAP,
+  DECADE_MIN_CARDS,
+  DECADE_STARTS,
   MODES,
   PHASES,
   STATE_VERSION,
+  STREAK_LENGTH,
+  STREAK_REWARD,
+  TOKEN_CAP,
+  boldestCaller,
   canBuy,
   canChallenge,
   challengeBlockedReason,
   challengeFor,
+  challengeWinsFor,
   correctGapsFor,
   createGame,
   currentPlayer,
   currentPlayerId,
   deckRemaining,
+  decadeStrengthFor,
+  decadeStrengths,
+  defaultTokenCap,
   deserialize,
   gapsFor,
+  hardestCard,
   insertionIndexFor,
   isGameOver,
   isGapCorrect,
   leader,
   leaderId,
   legalActions,
+  missCountFor,
   mulberry32,
   nextPlayer,
   nextPlayerId,
   pendingResult,
   progressFor,
+  recap,
   reduce,
   SEAT_COLORS,
   scoreboard,
@@ -45,6 +59,8 @@ import {
   seatStandings,
   serialize,
   shuffle,
+  skippedCount,
+  streakFor,
   timelineFor,
   tokensFor,
   winner,
@@ -115,7 +131,9 @@ interface SetupOptions {
   targetCards?: number;
   mistakeLimit?: number;
   startingTokens?: number;
+  /** Left undefined the engine picks per mode: 5, or 6 in co-op. */
   tokenCap?: number;
+  streakBonus?: boolean;
   /** Years for each player's timeline, in seat order. */
   timelines?: number[][];
   tokens?: number[];
@@ -140,7 +158,8 @@ function game(options: SetupOptions = {}): GameState {
     targetCards: options.targetCards ?? 10,
     mistakeLimit: options.mistakeLimit ?? 3,
     startingTokens: options.startingTokens ?? 2,
-    tokenCap: options.tokenCap ?? 5,
+    tokenCap: options.tokenCap,
+    streakBonus: options.streakBonus ?? false,
     seed: 7,
   });
 
@@ -1293,6 +1312,823 @@ describe('modes', () => {
       shared: false,
       coopWon: false,
     });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Token cap                                                                   */
+/* -------------------------------------------------------------------------- */
+
+describe('token cap', () => {
+  const DECK = () => deckOf([1960, 1970, 1980, 1990]);
+
+  it('is five, and six for the shared co-op pool', () => {
+    expect(TOKEN_CAP).toBe(5);
+    expect(COOP_TOKEN_CAP).toBe(6);
+    for (const mode of MODES) {
+      expect(defaultTokenCap(mode)).toBe(mode === 'coop' ? 6 : 5);
+    }
+    for (const mode of MODES) {
+      const state = createGame({ players: ['Ann', 'Bo'], deck: DECK(), mode });
+      expect(state.tokenCap).toBe(mode === 'coop' ? 6 : 5);
+    }
+  });
+
+  it('lets an explicit cap win in either direction', () => {
+    const small = createGame({ players: ['Ann', 'Bo'], deck: DECK(), mode: 'coop', tokenCap: 5 });
+    expect(small.tokenCap).toBe(5);
+    const big = createGame({ players: ['Ann', 'Bo'], deck: DECK(), tokenCap: 9 });
+    expect(big.tokenCap).toBe(9);
+  });
+
+  it('lets the co-op pool actually reach six', () => {
+    const state = game({
+      mode: 'coop',
+      sharedTimeline: [1980],
+      sharedTokens: 5,
+      deck: [card(1985)],
+    });
+    expect(state.tokenCap).toBe(6);
+    const confirmed = dispatch(
+      playTo(state, 1, [{ type: ACTIONS.SET_CLAIM_IDENTIFY, value: true }]),
+      [{ type: ACTIONS.CONFIRM_IDENTIFY, ok: true }],
+    );
+    expect(confirmed.sharedTokens).toBe(6);
+    expect(outcomeOf(confirmed).tokenAwards).toEqual([
+      { playerId: 'p1', delta: 1, reason: 'identify', pool: 'shared' },
+    ]);
+  });
+
+  it('still holds a competitive hand at five', () => {
+    const state = game({ tokens: [5, 2, 2], deck: [card(1985)] });
+    expect(state.tokenCap).toBe(5);
+    const confirmed = dispatch(
+      playTo(state, 1, [{ type: ACTIONS.SET_CLAIM_IDENTIFY, value: true }]),
+      [{ type: ACTIONS.CONFIRM_IDENTIFY, ok: true }],
+    );
+    expect(tokensFor(confirmed, 'p1')).toBe(5);
+    expect(outcomeOf(confirmed).tokenAwards[0].delta).toBe(0);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Streak bonus (house rule)                                                   */
+/* -------------------------------------------------------------------------- */
+
+describe('streak bonus', () => {
+  /** One player, so every turn is the same player's - the honest way to build a run. */
+  function solo(over: Partial<SetupOptions> = {}): GameState {
+    return game({
+      players: ['Ann'],
+      streakBonus: true,
+      timelines: [[1980]],
+      deck: deckOf([1985, 1986, 1987, 1988, 1989, 1990]),
+      ...over,
+    });
+  }
+
+  /** Commit the first gap that fits the card already in play, then reveal. */
+  function commitRight(state: GameState): GameState {
+    const activeId = currentPlayerId(state) as string;
+    const gap = correctGapsFor(timelineFor(state, activeId), state.card?.year as number)[0];
+    return dispatch(state, [
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: gap },
+      { type: ACTIONS.REVEAL },
+    ]);
+  }
+
+  function placeRight(state: GameState): GameState {
+    return commitRight(reduce(state, { type: ACTIONS.DRAW }));
+  }
+
+  function placeWrong(state: GameState): GameState {
+    const drawn = reduce(state, { type: ACTIONS.DRAW });
+    const activeId = currentPlayerId(drawn) as string;
+    const timeline = timelineFor(drawn, activeId);
+    const fits = new Set(correctGapsFor(timeline, drawn.card?.year as number));
+    const gap = [...Array(timeline.length + 1).keys()].find((i) => !fits.has(i));
+    if (gap === undefined) throw new Error('every gap fits this card');
+    return dispatch(drawn, [
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: gap },
+      { type: ACTIONS.REVEAL },
+    ]);
+  }
+
+  const endTurn = (state: GameState): GameState => reduce(state, { type: ACTIONS.NEXT_TURN });
+  const nameIt: Action[] = [{ type: ACTIONS.CONFIRM_TITLE_ARTIST, title: true, artist: true }];
+
+  it('is off unless the setup screen asks for it', () => {
+    expect(createGame({ players: ['Ann'], deck: deckOf([1960, 1970]) }).streakBonus).toBe(false);
+    expect(() =>
+      createGame({
+        players: ['Ann'],
+        deck: deckOf([1960, 1970]),
+        streakBonus: 'yes' as unknown as boolean,
+      }),
+    ).toThrow(TypeError);
+  });
+
+  it('counts nothing at all while it is off', () => {
+    let state = solo({ streakBonus: false });
+    for (let i = 0; i < 4; i += 1) state = endTurn(placeRight(state));
+    expect(tokensFor(state, 'p1')).toBe(2);
+    expect(state.players[0].streakRun).toBe(0);
+    expect(streakFor(state, 'p1')).toEqual({
+      enabled: false,
+      run: 0,
+      needed: STREAK_LENGTH,
+      toGo: STREAK_LENGTH,
+    });
+  });
+
+  it('pays on the third card kept in a row and starts the run again', () => {
+    expect(STREAK_LENGTH).toBe(3);
+    expect(STREAK_REWARD).toBe(1);
+    let state = solo();
+
+    const first = placeRight(state);
+    expect(outcomeOf(first).streakRun).toBe(1);
+    expect(outcomeOf(first).streakAwarded).toBe(false);
+    expect(streakFor(first, 'p1')).toEqual({ enabled: true, run: 1, needed: 3, toGo: 2 });
+    state = endTurn(first);
+
+    const second = placeRight(state);
+    expect(outcomeOf(second).streakRun).toBe(2);
+    expect(tokensFor(second, 'p1')).toBe(2);
+    state = endTurn(second);
+
+    const third = placeRight(state);
+    expect(outcomeOf(third).streakAwarded).toBe(true);
+    expect(tokensFor(third, 'p1')).toBe(3);
+    expect(outcomeOf(third).tokenAwards).toEqual([
+      { playerId: 'p1', delta: 1, reason: 'streak', pool: 'player' },
+    ]);
+    // Reset on payout: the run means "how far into the NEXT bonus you are".
+    expect(outcomeOf(third).streakRun).toBe(0);
+    expect(streakFor(third, 'p1')).toEqual({ enabled: true, run: 0, needed: 3, toGo: 3 });
+    state = endTurn(third);
+
+    // ...so the fourth right card in a row pays nothing.
+    const fourth = placeRight(state);
+    expect(outcomeOf(fourth).streakAwarded).toBe(false);
+    expect(outcomeOf(fourth).streakRun).toBe(1);
+    expect(tokensFor(fourth, 'p1')).toBe(3);
+  });
+
+  it('ends the run on a wrong placement, and starts the next one from scratch', () => {
+    let state = endTurn(placeRight(endTurn(placeRight(solo()))));
+    expect(state.players[0].streakRun).toBe(2);
+
+    const missed = placeWrong(state);
+    expect(outcomeOf(missed).placementCorrect).toBe(false);
+    expect(outcomeOf(missed).streakRun).toBe(0);
+    expect(outcomeOf(missed).streakAwarded).toBe(false);
+    expect(tokensFor(missed, 'p1')).toBe(2);
+
+    state = endTurn(missed);
+    const back = placeRight(state);
+    expect(outcomeOf(back).streakRun).toBe(1);
+    expect(tokensFor(back, 'p1')).toBe(2);
+  });
+
+  it('ends the run on a bought card - buying is a way of not guessing', () => {
+    const state = endTurn(placeRight(endTurn(placeRight(solo({ tokens: [3] })))));
+    expect(state.players[0].streakRun).toBe(2);
+
+    const bought = reduce(state, { type: ACTIONS.BUY_CARD });
+    expect(outcomeOf(bought).kind).toBe('buy');
+    expect(outcomeOf(bought).streakAwarded).toBe(false);
+    expect(outcomeOf(bought).streakRun).toBe(0);
+    expect(bought.players[0].streakRun).toBe(0);
+    expect(tokensFor(bought, 'p1')).toBe(0);
+  });
+
+  it('leaves the run exactly where it was on a skipped card', () => {
+    const state = endTurn(placeRight(endTurn(placeRight(solo()))));
+    const skipped = dispatch(state, [{ type: ACTIONS.DRAW }, { type: ACTIONS.SKIP_CARD }]);
+    expect(skipped.phase).toBe('listening');
+    expect(skipped.players[0].streakRun).toBe(2);
+
+    // Neither advanced nor broken: the replacement card still completes the run.
+    const third = commitRight(skipped);
+    expect(outcomeOf(third).streakAwarded).toBe(true);
+    expect(tokensFor(third, 'p1')).toBe(3);
+  });
+
+  it('leaves the run alone when a skip ends the turn for want of a card', () => {
+    const state = endTurn(placeRight(solo({ deck: deckOf([1985, 1986]) })));
+    expect(state.players[0].streakRun).toBe(1);
+    const skipped = dispatch(state, [{ type: ACTIONS.DRAW }, { type: ACTIONS.SKIP_CARD }]);
+    expect(skipped.phase).toBe('turn-end');
+    expect(outcomeOf(skipped).kind).toBe('skip');
+    expect(outcomeOf(skipped).streakRun).toBe(1);
+    expect(skipped.players[0].streakRun).toBe(1);
+  });
+
+  it('counts kept cards, so advanced does not reward a lucky gap', () => {
+    let state = solo({ mode: 'advanced' });
+    state = endTurn(dispatch(placeRight(state), nameIt));
+    state = endTurn(dispatch(placeRight(state), nameIt));
+    expect(state.players[0].streakRun).toBe(2);
+
+    // Right gap, fluffed artist: the card is lost, and so is the run. A green
+    // streak note under a red verdict would be the game contradicting itself.
+    const fluffed = reduce(placeRight(state), {
+      type: ACTIONS.CONFIRM_TITLE_ARTIST,
+      title: true,
+      artist: false,
+    });
+    expect(outcomeOf(fluffed).placementCorrect).toBe(true);
+    expect(outcomeOf(fluffed).accepted).toBe(false);
+    expect(outcomeOf(fluffed).streakAwarded).toBe(false);
+    expect(outcomeOf(fluffed).streakRun).toBe(0);
+    expect(tokensFor(fluffed, 'p1')).toBe(2);
+
+    // Naming it keeps the card, so the same gap does pay.
+    const named = dispatch(placeRight(state), nameIt);
+    expect(outcomeOf(named).streakAwarded).toBe(true);
+    expect(tokensFor(named, 'p1')).toBe(3);
+  });
+
+  it('recomputes the bonus on every vote toggle instead of paying it again', () => {
+    let state = solo({ mode: 'advanced' });
+    state = endTurn(dispatch(placeRight(state), nameIt));
+    state = endTurn(dispatch(placeRight(state), nameIt));
+
+    const paid = dispatch(placeRight(state), [...nameIt, ...nameIt]);
+    expect(tokensFor(paid, 'p1')).toBe(3);
+    expect(outcomeOf(paid).streakAwarded).toBe(true);
+
+    const undone = reduce(paid, { type: ACTIONS.CONFIRM_TITLE_ARTIST, artist: false });
+    expect(tokensFor(undone, 'p1')).toBe(2);
+    expect(outcomeOf(undone).streakAwarded).toBe(false);
+    expect(outcomeOf(undone).streakRun).toBe(0);
+
+    const redone = reduce(undone, { type: ACTIONS.CONFIRM_TITLE_ARTIST, artist: true });
+    expect(tokensFor(redone, 'p1')).toBe(3);
+    expect(outcomeOf(redone).streakAwarded).toBe(true);
+    expect(redone.players[0].streakRun).toBe(0);
+  });
+
+  it('holds the bonus at the cap but still spends the run', () => {
+    const state = endTurn(placeRight(endTurn(placeRight(solo({ tokens: [5] })))));
+    const third = placeRight(state);
+    expect(outcomeOf(third).streakAwarded).toBe(true);
+    expect(tokensFor(third, 'p1')).toBe(5);
+    // Earned, paid, worth nothing - and the award says so rather than promising
+    // a token the dots refuse to draw.
+    expect(outcomeOf(third).tokenAwards).toEqual([
+      { playerId: 'p1', delta: 0, reason: 'streak', pool: 'player' },
+    ]);
+    expect(outcomeOf(third).streakRun).toBe(0);
+  });
+
+  it('stacks with the identify award in the order the tokens are actually paid', () => {
+    const state = endTurn(placeRight(endTurn(placeRight(solo({ tokens: [4] })))));
+    const revealed = commitRight(
+      dispatch(reduce(state, { type: ACTIONS.DRAW }), [
+        { type: ACTIONS.SET_CLAIM_IDENTIFY, value: true },
+      ]),
+    );
+    const confirmed = reduce(revealed, { type: ACTIONS.CONFIRM_IDENTIFY, ok: true });
+    expect(tokensFor(confirmed, 'p1')).toBe(5);
+    // One token of room and two awards: the second one has to report the truth.
+    expect(outcomeOf(confirmed).tokenAwards).toEqual([
+      { playerId: 'p1', delta: 1, reason: 'identify', pool: 'player' },
+      { playerId: 'p1', delta: 0, reason: 'streak', pool: 'player' },
+    ]);
+
+    const roomy = endTurn(placeRight(endTurn(placeRight(solo({ tokens: [3] })))));
+    const both = reduce(
+      commitRight(
+        dispatch(reduce(roomy, { type: ACTIONS.DRAW }), [
+          { type: ACTIONS.SET_CLAIM_IDENTIFY, value: true },
+        ]),
+      ),
+      { type: ACTIONS.CONFIRM_IDENTIFY, ok: true },
+    );
+    expect(tokensFor(both, 'p1')).toBe(5);
+    expect(outcomeOf(both).tokenAwards.map((a) => a.delta)).toEqual([1, 1]);
+  });
+
+  it('keeps every run personal, so interleaved turns never merge', () => {
+    let state = game({
+      players: ['Ann', 'Bo'],
+      streakBonus: true,
+      timelines: [[1980], [1980]],
+      deck: deckOf([1985, 1986, 1987, 1988, 1989, 1990]),
+    });
+    // Ann, Bo, Ann, Bo - four right cards, and nobody has three in a row yet.
+    for (let i = 0; i < 4; i += 1) state = endTurn(placeRight(state));
+    expect(state.players.map((p) => p.streakRun)).toEqual([2, 2]);
+    expect(state.players.map((p) => p.tokens)).toEqual([2, 2]);
+
+    const annPays = placeRight(state);
+    expect(currentPlayerId(state)).toBe('p1');
+    expect(outcomeOf(annPays).streakAwarded).toBe(true);
+    expect(tokensFor(annPays, 'p1')).toBe(3);
+    expect(annPays.players[1].streakRun).toBe(2);
+    expect(tokensFor(annPays, 'p2')).toBe(2);
+  });
+
+  it('does not hand a challenger the run along with the card', () => {
+    const table = game({
+      players: ['Ann', 'Bo'],
+      streakBonus: true,
+      timelines: [[1980], [1980]],
+      deck: [card(1990)],
+    });
+    // Bo is two cards into a run of his own when he steals Ann's card.
+    const primed = {
+      ...table,
+      players: table.players.map((p, i) => (i === 1 ? { ...p, streakRun: 2 } : p)),
+    };
+    const revealed = dispatch(primed, [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 0 },
+      { type: ACTIONS.ADD_CHALLENGE, playerId: 'p2', gapIndex: 1 },
+      { type: ACTIONS.REVEAL },
+    ]);
+    expect(outcomeOf(revealed).stolenBy).toBe('p2');
+    expect(years(timelineFor(revealed, 'p2'))).toEqual([1980, 1990]);
+    // The card moved; the run did not, in either direction.
+    expect(revealed.players[0].streakRun).toBe(0);
+    expect(revealed.players[1].streakRun).toBe(2);
+    expect(tokensFor(revealed, 'p2')).toBe(1);
+    expect(outcomeOf(revealed).tokenAwards).toEqual([]);
+  });
+
+  it('pays a co-op run into the shared pool and leaves personal tokens at zero', () => {
+    const table = game({
+      mode: 'coop',
+      sharedTimeline: [1980],
+      sharedTokens: 2,
+      streakBonus: true,
+      deck: deckOf([1985, 1986]),
+    });
+    const primed = {
+      ...table,
+      players: table.players.map((p, i) => (i === 0 ? { ...p, streakRun: 2 } : p)),
+    };
+    const revealed = placeRight(primed);
+    expect(outcomeOf(revealed).streakAwarded).toBe(true);
+    expect(revealed.sharedTokens).toBe(3);
+    expect(outcomeOf(revealed).tokenAwards).toEqual([
+      { playerId: 'p1', delta: 1, reason: 'streak', pool: 'shared' },
+    ]);
+    expect(revealed.players.map((p) => p.tokens)).toEqual([0, 0, 0]);
+    expect(revealed.players.map((p) => p.streakRun)).toEqual([0, 0, 0]);
+  });
+
+  it('shows the run on the seat rail and the scoreboard', () => {
+    const state = endTurn(placeRight(solo({ players: ['Ann', 'Bo'], timelines: [[1980], [1980]] })));
+    expect(state.players[0].streakRun).toBe(1);
+    expect(seatStandings(state).map((r) => r.streakRun)).toEqual([1, 0]);
+    expect(scoreboard(state).map((r) => r.streakRun)).toEqual([1, 0]);
+  });
+
+  it('survives the save, and a save written before the rule existed', () => {
+    const state = endTurn(placeRight(solo()));
+    expect(state.players[0].streakRun).toBe(1);
+    const back = deserialize(serialize(state));
+    expect(back.streakBonus).toBe(true);
+    expect(back.players[0].streakRun).toBe(1);
+    expect(back).toEqual(state);
+
+    const legacy = JSON.parse(serialize(state)) as GameState;
+    delete (legacy as Partial<GameState>).streakBonus;
+    for (const p of legacy.players) delete (p as Partial<typeof p>).streakRun;
+    const old = deserialize(legacy);
+    expect(old.streakBonus).toBe(false);
+    expect(old.players.map((p) => p.streakRun)).toEqual([0]);
+    // ...and the backfill did not touch the object it was handed.
+    expect((legacy.players[0] as Partial<GameState['players'][number]>).streakRun).toBeUndefined();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Per-song miss counts                                                        */
+/* -------------------------------------------------------------------------- */
+
+describe('per-song miss counts', () => {
+  const FOUR = ['Ann', 'Bo', 'Cy', 'Dee'];
+
+  function table(over: Partial<SetupOptions> = {}): GameState {
+    return game({
+      players: FOUR,
+      timelines: [[1980], [1970], [1970], [1970]],
+      deck: [card(1990)],
+      ...over,
+    });
+  }
+
+  it('records nothing while everybody is right', () => {
+    const state = table();
+    const revealed = dispatch(state, [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 1 },
+      { type: ACTIONS.ADD_CHALLENGE, playerId: 'p2', gapIndex: 1 },
+      { type: ACTIONS.REVEAL },
+    ]);
+    expect(outcomeOf(revealed).placementCorrect).toBe(true);
+    expect(outcomeOf(revealed).wrongGuesses).toBe(0);
+    expect(revealed.missCounts).toEqual({});
+    expect(hardestCard(revealed)).toBeNull();
+  });
+
+  it('counts the placement and every wrong challenge against the song', () => {
+    const revealed = dispatch(table(), [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 0 },
+      { type: ACTIONS.ADD_CHALLENGE, playerId: 'p2', gapIndex: 1 },
+      { type: ACTIONS.ADD_CHALLENGE, playerId: 'p3', gapIndex: 0 },
+      { type: ACTIONS.ADD_CHALLENGE, playerId: 'p4', gapIndex: 0 },
+      { type: ACTIONS.REVEAL },
+    ]);
+    const cardId = outcomeOf(revealed).card.id;
+    // Ann put it before 1980 and two challengers put it before 1970: three
+    // people got this song's spot wrong.
+    expect(outcomeOf(revealed).wrongGuesses).toBe(3);
+    expect(revealed.missCounts).toEqual({ [cardId]: 3 });
+    expect(missCountFor(revealed, cardId)).toBe(3);
+    expect(missCountFor(revealed, 'no-such-card')).toBe(0);
+  });
+
+  it('counts a wrong challenge even when the placement itself was right', () => {
+    const revealed = dispatch(table(), [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 1 },
+      { type: ACTIONS.ADD_CHALLENGE, playerId: 'p2', gapIndex: 0 },
+      { type: ACTIONS.REVEAL },
+    ]);
+    expect(outcomeOf(revealed).placementCorrect).toBe(true);
+    expect(outcomeOf(revealed).wrongGuesses).toBe(1);
+    expect(missCountFor(revealed, outcomeOf(revealed).card.id)).toBe(1);
+  });
+
+  it('never counts a bought or a skipped card', () => {
+    const bought = reduce(table({ tokens: [3, 2, 2, 2], deck: deckOf([1990, 1995]) }), {
+      type: ACTIONS.BUY_CARD,
+    });
+    expect(outcomeOf(bought).wrongGuesses).toBe(0);
+    expect(bought.missCounts).toEqual({});
+
+    const skipped = dispatch(table({ deck: deckOf([1990, 1995]) }), [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.SKIP_CARD },
+    ]);
+    expect(skipped.missCounts).toEqual({});
+  });
+
+  it('counts once however often the reveal is recomputed', () => {
+    const state = table({ mode: 'advanced' });
+    let revealed = dispatch(state, [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 0 },
+      { type: ACTIONS.ADD_CHALLENGE, playerId: 'p2', gapIndex: 0 },
+      { type: ACTIONS.REVEAL },
+    ]);
+    const cardId = outcomeOf(revealed).card.id;
+    expect(revealed.missCounts).toEqual({ [cardId]: 2 });
+    for (const artist of [true, false, true]) {
+      revealed = reduce(revealed, { type: ACTIONS.CONFIRM_TITLE_ARTIST, title: true, artist });
+      expect(revealed.missCounts).toEqual({ [cardId]: 2 });
+    }
+  });
+
+  it('adds up across turns and finds the hardest song wherever it ended up', () => {
+    let state = table({ deck: deckOf([1990, 1995]) });
+    state = reduce(
+      dispatch(state, [
+        { type: ACTIONS.DRAW },
+        { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 0 },
+        { type: ACTIONS.ADD_CHALLENGE, playerId: 'p2', gapIndex: 0 },
+        { type: ACTIONS.REVEAL },
+      ]),
+      { type: ACTIONS.NEXT_TURN },
+    );
+    const firstId = state.discard[0].id;
+    expect(state.missCounts).toEqual({ [firstId]: 2 });
+
+    const second = dispatch(state, [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 0 },
+      { type: ACTIONS.REVEAL },
+    ]);
+    const secondId = outcomeOf(second).card.id;
+    expect(second.missCounts).toEqual({ [firstId]: 2, [secondId]: 1 });
+
+    const hardest = hardestCard(second);
+    expect(hardest?.cardId).toBe(firstId);
+    expect(hardest?.misses).toBe(2);
+    expect(hardest?.tied).toBe(false);
+    // The card object comes back too, out of whichever pile it landed in.
+    expect(hardest?.card?.id).toBe(firstId);
+    expect(hardest?.card?.year).toBe(1990);
+  });
+
+  it('breaks a tie on the earliest miss rather than refusing to name one', () => {
+    const a = card(1970, 'song-a');
+    const b = card(1990, 'song-b');
+    const base = game({ deck: [a, b] });
+    const tied = { ...base, missCounts: { 'song-a': 2, 'song-b': 2 } };
+    expect(hardestCard(tied)).toEqual({ cardId: 'song-a', card: a, misses: 2, tied: true });
+
+    const clear = { ...base, missCounts: { 'song-a': 1, 'song-b': 4 } };
+    expect(hardestCard(clear)).toEqual({ cardId: 'song-b', card: b, misses: 4, tied: false });
+
+    // A count for a card no pile holds still reports the count, honestly.
+    const orphan = { ...base, missCounts: { ghost: 3 } };
+    expect(hardestCard(orphan)).toEqual({ cardId: 'ghost', card: null, misses: 3, tied: false });
+  });
+
+  it('round-trips the tally through a save', () => {
+    const revealed = dispatch(table(), [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 0 },
+      { type: ACTIONS.REVEAL },
+    ]);
+    const back = deserialize(serialize(revealed));
+    expect(back.missCounts).toEqual(revealed.missCounts);
+    expect(back).toEqual(revealed);
+
+    // A save from before the tallies existed comes back empty, not undefined.
+    const legacy = JSON.parse(serialize(revealed)) as GameState;
+    delete (legacy as Partial<GameState>).missCounts;
+    delete (legacy as Partial<GameState>).challengeWins;
+    delete (legacy as Partial<GameState>).skips;
+    delete (legacy.revealBase as Partial<NonNullable<GameState['revealBase']>>).missCounts;
+    delete (legacy.revealBase as Partial<NonNullable<GameState['revealBase']>>).challengeWins;
+    const old = deserialize(legacy);
+    expect(old.missCounts).toEqual({});
+    expect(old.challengeWins).toEqual({});
+    expect(old.skips).toBe(0);
+    expect(old.revealBase?.missCounts).toEqual({});
+    // ...and the next recompute writes a real tally rather than spreading undefined.
+    const toggled = reduce(old, { type: ACTIONS.CONFIRM_IDENTIFY, ok: true });
+    expect(toggled.lastError).not.toBeNull();
+    expect(JSON.parse(serialize(old)).missCounts).toEqual({});
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Decade strengths                                                            */
+/* -------------------------------------------------------------------------- */
+
+describe('decade strengths', () => {
+  function strengthOf(timeline: number[]): ReturnType<typeof decadeStrengthFor> {
+    return decadeStrengthFor(
+      game({ timelines: [timeline, [1970], [1990]] }),
+      'p1',
+    );
+  }
+
+  it('offers the eight buckets the histogram is drawn from', () => {
+    expect([...DECADE_STARTS]).toEqual([1950, 1960, 1970, 1980, 1990, 2000, 2010, 2020]);
+    expect(DECADE_MIN_CARDS).toBe(3);
+  });
+
+  it('buckets a timeline into eight counts, in order, always', () => {
+    const row = strengthOf([1962, 1965, 1984, 1999, 2001]);
+    expect(row.counts.map((c) => c.decade)).toEqual([...DECADE_STARTS]);
+    expect(row.counts.map((c) => c.count)).toEqual([0, 2, 0, 1, 1, 1, 0, 0]);
+    expect(row.cards).toBe(5);
+    expect(row.total).toBe(5);
+    expect(row.playerId).toBe('p1');
+  });
+
+  it('says "not enough yet" until three cards have landed', () => {
+    for (const timeline of [[1984], [1962, 1984]]) {
+      const row = strengthOf(timeline);
+      expect(row.enough).toBe(false);
+      expect(row.best).toBeNull();
+      expect(row.dominant).toBe(false);
+      // The bars are still real facts, so the histogram has something to draw.
+      expect(row.bestCount).toBe(1);
+    }
+    expect(strengthOf([1962, 1984, 1999]).enough).toBe(true);
+  });
+
+  it('separates a decade somebody owns from one they are merely strongest in', () => {
+    const strong = strengthOf([1962, 1965, 1971, 1988]);
+    expect(strong.best).toBe(1960);
+    expect(strong.bestCount).toBe(2);
+    expect(strong.total).toBe(4);
+    expect(strong.dominant).toBe(false);
+
+    const owned = strengthOf([1981, 1984, 1988, 1999]);
+    expect(owned.best).toBe(1980);
+    expect(owned.dominant).toBe(true);
+    expect(owned.tied).toBe(false);
+
+    // Exactly half is not a majority, so it is not ownership.
+    const half = strengthOf([1981, 1984, 1999, 2001]);
+    expect(half.dominant).toBe(false);
+  });
+
+  it('names the earliest of a tie, and admits it was a tie', () => {
+    const row = strengthOf([1962, 1965, 1971, 1974]);
+    expect(row.leaders).toEqual([1960, 1970]);
+    expect(row.tied).toBe(true);
+    expect(row.best).toBe(1960);
+    expect(row.dominant).toBe(false);
+  });
+
+  it('keeps a card from outside the eight buckets out of the bars', () => {
+    const row = strengthOf([1942, 1962, 1965, 1971]);
+    expect(row.cards).toBe(4);
+    expect(row.total).toBe(3);
+    expect(row.counts.map((c) => c.count)).toEqual([0, 2, 1, 0, 0, 0, 0, 0]);
+    expect(row.best).toBe(1960);
+  });
+
+  it('has nothing to report for an empty timeline', () => {
+    const row = decadeStrengthFor(game({ mode: 'coop' }), 'p1');
+    expect(row.cards).toBe(1);
+    const empty = decadeStrengthFor({ ...game(), players: game().players.map((p) => ({ ...p, timeline: [] })) }, 'p1');
+    expect(empty.total).toBe(0);
+    expect(empty.bestCount).toBe(0);
+    expect(empty.leaders).toEqual([]);
+    expect(empty.tied).toBe(false);
+    expect(empty.best).toBeNull();
+    expect(empty.enough).toBe(false);
+  });
+
+  it('reports the shared pile for every player in co-op', () => {
+    const state = game({ mode: 'coop', sharedTimeline: [1981, 1984, 1988, 1999] });
+    const rows = decadeStrengths(state);
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row.best).toBe(1980);
+      expect(row.dominant).toBe(true);
+      expect(row.total).toBe(4);
+    }
+    expect(rows.map((r) => r.playerId)).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('is a pure read that works on a frozen state', () => {
+    const state = deepFreeze(game({ timelines: [[1962, 1965, 1971], [1970], [1990]] }));
+    expect(decadeStrengthFor(state, 'p1').best).toBe(1960);
+    expect(decadeStrengths(state)).toHaveLength(3);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Skips, challenge wins and the game recap                                    */
+/* -------------------------------------------------------------------------- */
+
+describe('skipped cards', () => {
+  it('counts every skip, with or without a card to swap in', () => {
+    const state = game({ deck: deckOf([1985, 1995]) });
+    expect(skippedCount(state)).toBe(0);
+
+    const once = dispatch(state, [{ type: ACTIONS.DRAW }, { type: ACTIONS.SKIP_CARD }]);
+    expect(skippedCount(once)).toBe(1);
+    expect(once.phase).toBe('listening');
+
+    // The last card in the deck has no replacement, and is skipped all the same.
+    const twice = reduce(once, { type: ACTIONS.SKIP_CARD });
+    expect(skippedCount(twice)).toBe(2);
+    expect(twice.phase).toBe('turn-end');
+    expect(deserialize(serialize(twice)).skips).toBe(2);
+  });
+});
+
+describe('challenge wins', () => {
+  const FOUR = ['Ann', 'Bo', 'Cy', 'Dee'];
+
+  it('credits only the challenger who actually took the card', () => {
+    const revealed = dispatch(
+      game({
+        players: FOUR,
+        timelines: [[1980], [1970], [1970], [1970]],
+        deck: [card(1990)],
+      }),
+      [
+        { type: ACTIONS.DRAW },
+        { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 0 },
+        { type: ACTIONS.ADD_CHALLENGE, playerId: 'p2', gapIndex: 1 },
+        { type: ACTIONS.ADD_CHALLENGE, playerId: 'p3', gapIndex: 1 },
+        { type: ACTIONS.REVEAL },
+      ],
+    );
+    expect(outcomeOf(revealed).stolenBy).toBe('p2');
+    expect(revealed.challengeWins).toEqual({ p2: 1 });
+    expect(challengeWinsFor(revealed, 'p2')).toBe(1);
+    // Right, but late: no card, no credit.
+    expect(challengeWinsFor(revealed, 'p3')).toBe(0);
+    expect(deserialize(serialize(revealed)).challengeWins).toEqual({ p2: 1 });
+  });
+
+  it('names the boldest caller only when one player is strictly ahead', () => {
+    const base = game({ players: FOUR });
+    expect(boldestCaller(base)).toBeNull();
+    expect(boldestCaller({ ...base, challengeWins: { p2: 2, p3: 2 } })).toBeNull();
+    expect(boldestCaller({ ...base, challengeWins: { p2: 2, p3: 1 } })).toEqual({
+      playerId: 'p2',
+      name: 'Bo',
+      color: SEAT_COLORS[1],
+      seat: 1,
+      wins: 2,
+    });
+  });
+});
+
+describe('game recap', () => {
+  it('has nothing to say about a game nobody has played yet', () => {
+    const fresh = createGame({
+      players: ['Ann', 'Bo'],
+      deck: deckOf([1960, 1970, 1980, 1990]),
+    });
+    expect(recap(fresh)).toEqual({
+      hardestSong: null,
+      bestDecades: null,
+      boldestCall: null,
+      skipped: null,
+    });
+  });
+
+  it('omits each row until it has earned itself', () => {
+    const state = game({
+      players: ['Ann', 'Bo'],
+      timelines: [[1962, 1965, 1971], [1970]],
+    });
+    const rows = recap(state);
+    // One player has enough cards for a decade; nobody has missed, challenged
+    // or skipped anything, so those three rows must not exist.
+    expect(rows.hardestSong).toBeNull();
+    expect(rows.boldestCall).toBeNull();
+    expect(rows.skipped).toBeNull();
+    expect(rows.bestDecades).toEqual([
+      {
+        playerId: 'p1',
+        name: 'Ann',
+        color: SEAT_COLORS[0],
+        seat: 0,
+        decade: 1960,
+        count: 2,
+        total: 3,
+        dominant: true,
+      },
+    ]);
+  });
+
+  it('reports null rather than an empty list when no decade qualifies', () => {
+    const state = game({ players: ['Ann', 'Bo'], timelines: [[1962], [1970]] });
+    expect(recap(state).bestDecades).toBeNull();
+  });
+
+  it('collapses co-op to a single unowned row', () => {
+    const state = game({ mode: 'coop', sharedTimeline: [1981, 1984, 1988] });
+    const rows = recap(state).bestDecades;
+    expect(rows).toEqual([
+      {
+        playerId: null,
+        name: null,
+        color: null,
+        seat: null,
+        decade: 1980,
+        count: 3,
+        total: 3,
+        dominant: true,
+      },
+    ]);
+  });
+
+  it('fills in every row for a game that earned them all', () => {
+    const hard = card(1990, 'hard-song');
+    let state = game({
+      players: ['Ann', 'Bo', 'Cy'],
+      timelines: [[1962, 1965, 1971], [1970], [2005]],
+      deck: [hard, card(1995), card(2005)],
+    });
+    // Ann places it wrong, Cy challenges wrong, Bo challenges right and takes it.
+    state = reduce(
+      dispatch(state, [
+        { type: ACTIONS.DRAW },
+        { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 0 },
+        { type: ACTIONS.ADD_CHALLENGE, playerId: 'p2', gapIndex: 1 },
+        { type: ACTIONS.ADD_CHALLENGE, playerId: 'p3', gapIndex: 1 },
+        { type: ACTIONS.REVEAL },
+      ]),
+      { type: ACTIONS.NEXT_TURN },
+    );
+    state = dispatch(state, [{ type: ACTIONS.DRAW }, { type: ACTIONS.SKIP_CARD }]);
+    const over = reduce(state, { type: ACTIONS.END_GAME });
+
+    const rows = recap(over);
+    expect(rows.hardestSong).toEqual({
+      cardId: 'hard-song',
+      card: hard,
+      misses: 2,
+      tied: false,
+    });
+    expect(rows.boldestCall).toMatchObject({ playerId: 'p2', name: 'Bo', wins: 1 });
+    expect(rows.skipped).toBe(1);
+    expect(rows.bestDecades?.map((r) => r.playerId)).toEqual(['p1']);
+    expect(rows.bestDecades?.[0]).toMatchObject({ decade: 1960, count: 2, dominant: true });
+    // The recap is a read: it says the same thing before and after the save.
+    expect(recap(deserialize(serialize(over)))).toEqual(rows);
   });
 });
 

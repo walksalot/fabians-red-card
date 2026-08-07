@@ -44,6 +44,15 @@ let mod: StorageModule;
 /** A tiny but structurally valid data URL - the module only checks the prefix. */
 const photo = (tag: string) => `data:image/jpeg;base64,${tag}`;
 
+/**
+ * storage.js wraps every value as `{v: VERSION, d: payload}` and hands back the
+ * fallback for anything it does not recognise. A test that plants a payload has
+ * to use the real envelope, or the module rejects it at the version check and
+ * the test passes for the wrong reason - never reaching the validation it means
+ * to exercise.
+ */
+const wrapped = (payload: unknown) => JSON.stringify({ v: 1, d: payload });
+
 beforeEach(async () => {
   store = new FakeStorage();
   vi.stubGlobal('localStorage', store);
@@ -190,22 +199,112 @@ describe('guest list', () => {
 
   it('ignores a blank name and a non-array payload', () => {
     expect(mod.rememberPerson({ name: '   ' })).toBe(false);
-    store.setItem('music-timeline:v1:people', JSON.stringify({ value: { not: 'an array' } }));
+    store.setItem('music-timeline:v1:people', wrapped({ not: 'an array' }));
     expect(mod.loadPeople()).toEqual([]);
   });
 
   it('drops malformed rows rather than seating a nameless player', () => {
-    mod.rememberPerson({ name: 'Paula', photo: photo('a') });
-    const raw = JSON.parse(store.getItem('music-timeline:v1:people') as string);
-    const body = raw.value ?? raw.d ?? raw.v ?? raw;
-    const list = Array.isArray(body) ? body : null;
-    if (list) {
-      list.push({ name: '' }, { nope: true }, null, { name: 'Fabian', photo: 'javascript:x' });
-      store.setItem('music-timeline:v1:people', JSON.stringify(raw));
-      const people = mod.loadPeople();
-      expect(people.map((p) => p.name)).toEqual(['Paula', 'Fabian']);
-      // A non-image "photo" must not survive into an <img src>.
-      expect(people[1].photo).toBeNull();
-    }
+    const list = [
+      { name: 'Paula', photo: photo('a') },
+      { name: '' },
+      { nope: true },
+      null,
+      { name: 'Fabian', photo: 'javascript:x' },
+    ];
+    store.setItem('music-timeline:v1:people', wrapped(list));
+    const people = mod.loadPeople();
+    expect(people.map((p) => p.name)).toEqual(['Paula', 'Fabian']);
+    // A non-image "photo" must not survive into an <img src>.
+    expect(people[1].photo).toBeNull();
+  });
+});
+
+// The buy-in is one line of typing that has to survive every reload of a
+// reunion weekend, and it is the one payload that must never hand back a
+// fractional amount: buyin.js does all its arithmetic in integer cents, and a
+// stale value from an older build is the only way a float could get back in.
+describe('buy-in', () => {
+  it('round-trips the stake', () => {
+    expect(mod.saveBuyin({ enabled: true, amount: 200, handle: 'paula' })).toBe(true);
+    expect(mod.loadBuyin()).toEqual({ enabled: true, amount: 200, handle: 'paula' });
+  });
+
+  it('reports nothing at all before anyone has set a stake', () => {
+    expect(mod.loadBuyin()).toBeNull();
+  });
+
+  // Both layers sanitise on purpose: saveBuyin guards what this build writes,
+  // loadBuyin guards what some other build already wrote. That redundancy means
+  // a test going in through save and out through load passes even when one of
+  // the two guards is gone - each masks the other. So these read the raw bytes
+  // to pin down what save wrote, and plant raw bytes to pin down what load
+  // tolerates, one layer at a time.
+  const rawBuyin = () => JSON.parse(store.getItem('music-timeline:v1:buyin') as string).d;
+
+  it('writes a fractional amount as zero rather than rounding it', () => {
+    // 2.5 cents is not money. Rounding it would invent a number the user never
+    // typed; zeroing it shows an obviously wrong pot they will notice and fix.
+    mod.saveBuyin({ enabled: true, amount: 2.5 as number, handle: 'paula' });
+    expect(rawBuyin().amount).toBe(0);
+  });
+
+  it('writes a negative stake as zero', () => {
+    mod.saveBuyin({ enabled: true, amount: -500, handle: 'paula' });
+    expect(rawBuyin().amount).toBe(0);
+  });
+
+  it('reads a fractional or negative amount back as zero', () => {
+    store.setItem('music-timeline:v1:buyin', wrapped({ enabled: true, amount: 2.5, handle: null }));
+    expect(mod.loadBuyin()?.amount).toBe(0);
+    store.setItem('music-timeline:v1:buyin', wrapped({ enabled: true, amount: -500, handle: null }));
+    expect(mod.loadBuyin()?.amount).toBe(0);
+  });
+
+  it('drops a handle longer than Venmo allows, on the way in and on the way out', () => {
+    mod.saveBuyin({ enabled: true, amount: 200, handle: 'x'.repeat(31) });
+    expect(rawBuyin().handle).toBeNull();
+    mod.saveBuyin({ enabled: true, amount: 200, handle: 'x'.repeat(30) });
+    expect(rawBuyin().handle).toBe('x'.repeat(30));
+
+    store.setItem(
+      'music-timeline:v1:buyin',
+      wrapped({ enabled: true, amount: 200, handle: 'x'.repeat(31) }),
+    );
+    expect(mod.loadBuyin()?.handle).toBeNull();
+  });
+
+  it('treats a blank handle as no handle, on the way in and on the way out', () => {
+    mod.saveBuyin({ enabled: true, amount: 200, handle: '   ' });
+    expect(rawBuyin().handle).toBeNull();
+
+    store.setItem('music-timeline:v1:buyin', wrapped({ enabled: true, amount: 200, handle: '  ' }));
+    expect(mod.loadBuyin()?.handle).toBeNull();
+  });
+
+  it('trims a handle someone pasted with a trailing space', () => {
+    mod.saveBuyin({ enabled: true, amount: 200, handle: ' paula ' });
+    expect(rawBuyin().handle).toBe('paula');
+  });
+
+  it('survives a corrupt payload written by another build', () => {
+    store.setItem('music-timeline:v1:buyin', wrapped('nope'));
+    expect(mod.loadBuyin()).toBeNull();
+    store.setItem(
+      'music-timeline:v1:buyin',
+      wrapped({ enabled: 'yes', amount: '200', handle: 42 }),
+    );
+    // Every field is coerced to something the UI can render without checking.
+    expect(mod.loadBuyin()).toEqual({ enabled: true, amount: 0, handle: null });
+  });
+
+  it('forgets the stake on request', () => {
+    mod.saveBuyin({ enabled: true, amount: 200, handle: 'paula' });
+    expect(mod.clearBuyin()).toBe(true);
+    expect(mod.loadBuyin()).toBeNull();
+  });
+
+  it('refuses a non-object rather than storing junk', () => {
+    expect(mod.saveBuyin(null as never)).toBe(false);
+    expect(mod.saveBuyin('$2' as never)).toBe(false);
   });
 });

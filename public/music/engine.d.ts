@@ -51,7 +51,15 @@ export interface Player {
   timeline: Card[];
   /** Always 0 in co-op — the group spends `state.sharedTokens` instead. */
   tokens: number;
+  /**
+   * Cards kept in a row towards the streak bonus. Personal in every mode, co-op
+   * included; held at 0 for everybody while `streakBonus` is off.
+   */
+  streakRun: number;
 }
+
+/** A JSON-safe running total, keyed by card id or player id. */
+export type Tally = Record<string, number>;
 
 export interface Challenge {
   playerId: string;
@@ -72,7 +80,7 @@ export interface TokenAward {
   playerId: string;
   /** What the pool actually moved by - 0 for an award that hit `tokenCap`. */
   delta: number;
-  reason: 'identify' | 'buy';
+  reason: 'identify' | 'buy' | 'streak';
   pool: 'player' | 'shared';
 }
 
@@ -102,11 +110,17 @@ export interface Outcome {
   claimedIdentify: boolean;
   identifyConfirmed: boolean | null;
   identifyAwarded: boolean;
+  /** True when this card completed a run of `STREAK_LENGTH` and paid the bonus. */
+  streakAwarded: boolean;
+  /** The active player's run AFTER this card - already back to 0 if it paid. */
+  streakRun: number;
   tokenAwards: TokenAward[];
   challenges: ChallengeResult[];
   stolenBy: string | null;
   destination: 'timeline' | 'challenger' | 'discard';
   mistakeRecorded: boolean;
+  /** Wrong gaps this card drew: the placement plus every wrong challenge. */
+  wrongGuesses: number;
   tokensSpent: number;
   replaced: boolean | null;
 }
@@ -126,6 +140,9 @@ export interface RevealBase {
   sharedTokens: number;
   discard: Card[];
   mistakes: number;
+  /** Snapshotted so a replayed reveal re-derives the tallies instead of adding to them. */
+  missCounts: Tally;
+  challengeWins: Tally;
 }
 
 export interface RejectedAction {
@@ -140,6 +157,8 @@ export interface GameState {
   mistakeLimit: number;
   startingTokens: number;
   tokenCap: number;
+  /** The house rule: three cards kept in a row pays a token. Off unless asked for. */
+  streakBonus: boolean;
   seed: number;
   rngState: number;
   players: Player[];
@@ -151,6 +170,12 @@ export interface GameState {
   deck: Card[];
   discard: Card[];
   mistakes: number;
+  /** Wrong guesses per card id. Sparse: a card nobody missed has no entry. */
+  missCounts: Tally;
+  /** Cards stolen with a challenge, per player id. Sparse in the same way. */
+  challengeWins: Tally;
+  /** Cards the table waved away. */
+  skips: number;
   result: GameResult | null;
   lastError: RejectedAction | null;
   card: Card | null;
@@ -194,8 +219,11 @@ export interface CreateGameOptions {
   mode?: Mode;
   mistakeLimit?: number;
   startingTokens?: number;
+  /** Defaults to `defaultTokenCap(mode)`: 5, or 6 in co-op. */
   tokenCap?: number;
   seed?: number;
+  /** The optional house rule. Defaults to false. */
+  streakBonus?: boolean;
 }
 
 export interface Gap {
@@ -213,6 +241,8 @@ export interface ScoreRow {
   timeline: Card[];
   cards: number;
   tokens: number;
+  /** Cards kept in a row; always 0 while `streakBonus` is off. */
+  streakRun: number;
   cardsToGo: number;
   isActive: boolean;
 }
@@ -231,14 +261,95 @@ export interface Progress {
   cardsToGo: number;
 }
 
+export interface Streak {
+  /** False while the house rule is off - draw nothing, `run` will be 0. */
+  enabled: boolean;
+  run: number;
+  /** Always STREAK_LENGTH, so a dot row can be sized from this object alone. */
+  needed: number;
+  toGo: number;
+}
+
+export interface DecadeCount {
+  /** The decade's first year: 1950, 1960, ... 2020. */
+  decade: number;
+  count: number;
+}
+
+export interface DecadeStrength {
+  playerId: string;
+  /** Cards in the timeline, including any outside the eight buckets. */
+  cards: number;
+  /** Cards that landed in one of the eight buckets - the sum of `counts`. */
+  total: number;
+  /** Always eight entries, in DECADE_STARTS order. */
+  counts: DecadeCount[];
+  /** The tallest bar's height. 0 for an empty timeline. */
+  bestCount: number;
+  /** Every decade at `bestCount` - draw them all solid. */
+  leaders: number[];
+  tied: boolean;
+  /** The decade worth naming, or null when `enough` is false. */
+  best: number | null;
+  /** A strict majority of the counted cards sit in `best`: "owns the 80s". */
+  dominant: boolean;
+  /** False until DECADE_MIN_CARDS cards have landed: "warming up". */
+  enough: boolean;
+}
+
+export interface HardestCard {
+  cardId: string;
+  /** The card itself, or null if a save no longer holds it anywhere. */
+  card: Card | null;
+  misses: number;
+  /** True when other cards were missed just as often. */
+  tied: boolean;
+}
+
+export interface BoldestCall {
+  playerId: string;
+  name: string;
+  color: string;
+  seat: number;
+  wins: number;
+}
+
+/** Co-op reports one row for the shared pile, with a null `playerId`. */
+export interface RecapDecade {
+  playerId: string | null;
+  name: string | null;
+  color: string | null;
+  seat: number | null;
+  decade: number;
+  count: number;
+  total: number;
+  dominant: boolean;
+}
+
+/** Every field is null unless it earned itself; draw a row per non-null field. */
+export interface Recap {
+  hardestSong: HardestCard | null;
+  bestDecades: RecapDecade[] | null;
+  boldestCall: BoldestCall | null;
+  skipped: number | null;
+}
+
 export declare const PHASES: readonly Phase[];
 export declare const MODES: readonly Mode[];
 export declare const ACTIONS: Readonly<Record<ActionType, ActionType>>;
 export declare const BUY_COST: number;
+export declare const TOKEN_CAP: number;
+export declare const COOP_TOKEN_CAP: number;
+export declare const STREAK_LENGTH: number;
+export declare const STREAK_REWARD: number;
+/** Named around `deck.js`, which already exports a `DECADES` the UI imports. */
+export declare const DECADE_STARTS: readonly number[];
+export declare const DECADE_MIN_CARDS: number;
 export declare const STATE_VERSION: number;
 export declare const SEAT_COLORS: readonly string[];
 
 export declare function seatColor(index: number): string;
+export declare function defaultTokenCap(mode: Mode | string): number;
 
 export declare function mulberry32(seed: number): () => number;
 export declare function shuffle<T>(items: readonly T[], cursor: number): { items: T[]; cursor: number };
@@ -266,6 +377,15 @@ export declare function canChallenge(state: GameState, playerId: string): boolea
 export declare function challengeFor(state: GameState, playerId: string): Challenge | null;
 export declare function deckRemaining(state: GameState): number;
 export declare function progressFor(state: GameState, playerId: string): Progress;
+export declare function streakFor(state: GameState, playerId: string): Streak;
+export declare function missCountFor(state: GameState, cardId: string): number;
+export declare function challengeWinsFor(state: GameState, playerId: string): number;
+export declare function skippedCount(state: GameState): number;
+export declare function hardestCard(state: GameState): HardestCard | null;
+export declare function boldestCaller(state: GameState): BoldestCall | null;
+export declare function decadeStrengthFor(state: GameState, playerId: string): DecadeStrength;
+export declare function decadeStrengths(state: GameState): DecadeStrength[];
+export declare function recap(state: GameState): Recap;
 export declare function scoreboard(state: GameState): ScoreRow[];
 export declare function nextPlayer(state: GameState): Player | null;
 export declare function nextPlayerId(state: GameState): string | null;

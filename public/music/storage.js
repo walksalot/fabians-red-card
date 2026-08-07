@@ -19,13 +19,14 @@ export const VERSION = 1;
 
 const PREFIX = `${NAMESPACE}:v${VERSION}:`;
 
-/** The four things worth surviving a reload, as unprefixed key names. */
+/** Everything worth surviving a reload, as unprefixed key names. */
 export const KEYS = Object.freeze({
   game: 'game',
   settings: 'settings',
   players: 'players',
   avatars: 'avatars',
   people: 'people',
+  buyin: 'buyin',
 });
 
 /** How many faces to keep per name, and how many names to remember at all. */
@@ -536,4 +537,64 @@ export function forgetPerson(name) {
     set(KEYS.avatars, library);
   }
   return set(KEYS.people, next);
+}
+
+/* ---------------------------------------------------------------------------
+ * The buy-in
+ * ------------------------------------------------------------------------ */
+
+/**
+ * The reunion's stake: whether we are playing for money at all, how much a
+ * head, and the Venmo handle collecting it.
+ *
+ * This gets its own key rather than riding along in `settings` because it is
+ * the one thing here a person types with their thumbs on a phone, and it is
+ * the same answer every game. Separate key means a settings shape change (a
+ * new toggle, a renamed field) can never take the handle down with it.
+ *
+ * `amount` is integer CENTS, matching buyin.js - the whole module refuses to
+ * let a dollar float anywhere near the pot, and this is the boundary where a
+ * float would sneak back in through a stale localStorage payload written by an
+ * older build. A non-integer amount is dropped, not rounded.
+ *
+ * The handle is stored exactly as `normaliseHandle` returned it. This module
+ * deliberately does not re-validate the handle's characters: buyin.js owns that
+ * rule, and duplicating a regex here would mean two places to fix when Venmo
+ * changes it. All we enforce is "a non-empty string of plausible length", which
+ * is the part that protects the JSON blob rather than the payment.
+ * @returns {{enabled: boolean, amount: number, handle: string|null}|null}
+ */
+export function loadBuyin() {
+  const value = get(KEYS.buyin, null);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = /** @type {{enabled?: unknown, amount?: unknown, handle?: unknown}} */ (value);
+  const amount =
+    Number.isInteger(raw.amount) && /** @type {number} */ (raw.amount) >= 0
+      ? /** @type {number} */ (raw.amount)
+      : 0;
+  const handle =
+    typeof raw.handle === 'string' && raw.handle.trim() && raw.handle.length <= 30
+      ? raw.handle.trim()
+      : null;
+  return { enabled: !!raw.enabled, amount, handle };
+}
+
+/**
+ * Remember the stake for next time.
+ * @param {{enabled?: boolean, amount?: number, handle?: string|null}} buyin
+ * @returns {boolean}
+ */
+export function saveBuyin(buyin) {
+  if (!buyin || typeof buyin !== 'object') return false;
+  const amount = Number.isInteger(buyin.amount) && buyin.amount >= 0 ? buyin.amount : 0;
+  const handle =
+    typeof buyin.handle === 'string' && buyin.handle.trim() && buyin.handle.length <= 30
+      ? buyin.handle.trim()
+      : null;
+  return set(KEYS.buyin, { enabled: !!buyin.enabled, amount, handle });
+}
+
+/** Forget the stake entirely - the "no money this time" escape hatch. */
+export function clearBuyin() {
+  return remove(KEYS.buyin);
 }

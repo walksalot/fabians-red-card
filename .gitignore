@@ -56,3 +56,6 @@ FABIAN-ADMIN-GUIDE.pdf
 
 # Claude Code harness state (session worktrees carry their own .next output)
 .claude/
+
+# Playwright drivers and screenshots from local verification runs.
+/scratch/
