@@ -96,12 +96,24 @@ function readCardFromHash(hash) {
   return { ok: true, card: { id: cardId(title, artist), title, artist }, turn };
 }
 
-/** Same kebab slug the deck uses, so resolver caching lines up across screens. */
+/**
+ * Same kebab slug the deck uses, so the id we hand the resolver is the id the
+ * baked previews are keyed by.
+ *
+ * The apostrophe rule is the whole point: the deck DELETES it rather than
+ * treating it as a separator, so the card is "aint-that-a-shame", never
+ * "ain-t-that-a-shame". Collapsing it like any other punctuation silently
+ * mismatched every "Ain't", "Can't", "I'm" and "Rapper's" in the deck - about
+ * one card in nine - which cost each of them its build-time preview and sent
+ * the scanning phone off to a live iTunes lookup that a table on LAN or offline
+ * can never answer. Checked against every id in deck.js.
+ */
 function cardId(title, artist) {
   const slug = (s) =>
     s
       .normalize("NFKD")
       .replace(/[\u0300-\u036f]/g, "")
+      .replace(/['\u2019\u02bc]/g, "")
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "");

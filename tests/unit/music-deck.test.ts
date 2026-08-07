@@ -2,8 +2,13 @@
 // the truth, so these assertions are less about code and more about guarding the data:
 // a duplicate, a bad genre or a decade that disagrees with its year would quietly make
 // the game unfair rather than crash it.
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DECADES, DECK, GENRES, filterDeck } from '../../public/music/deck.js';
+
+const previews: Record<string, { preview?: string } | undefined> = JSON.parse(
+  readFileSync(new URL('../../public/music/previews.json', import.meta.url), 'utf8'),
+);
 
 const slug = (s: string) =>
   s
@@ -58,13 +63,17 @@ describe('deck data', () => {
     for (const c of DECK) expect(GENRES, c.id).toContain(c.genre);
   });
 
-  it('never leans on one artist — three cards is the cap', () => {
+  it('never leans on one artist — four cards is the cap', () => {
     const counts = new Map<string, number>();
     for (const c of DECK) {
       const key = slug(c.artist);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-    const offenders = [...counts.entries()].filter(([, n]) => n > 3);
+    // Four, not three: at 300 cards a third card by one artist was 1% of the
+    // deck, and the cap was cutting genuinely famous songs. At 1080 it is under
+    // half a percent, so the cap can afford to breathe without the deck starting
+    // to feel like somebody's favourites list.
+    const offenders = [...counts.entries()].filter(([, n]) => n > 4);
     expect(offenders).toEqual([]);
   });
 
@@ -77,6 +86,16 @@ describe('deck data', () => {
       expect(perDecade.get(decade) ?? 0, `${decade}s`).toBeGreaterThanOrEqual(25);
     }
     expect(DECADES.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('can play every single card', () => {
+    // The whole game is "listen to this, then guess". A card with no audio is
+    // not a hard card, it is a dead turn - the player has to skip it and draw
+    // again. Two cards had to be cut to make this true (Garth Brooks keeps his
+    // catalogue out of the source Apple search, and one Green Day track is not
+    // indexed there), and this is what stops another one creeping back in.
+    const silent = DECK.filter((c) => !previews[c.id]?.preview);
+    expect(silent.map((c) => c.id)).toEqual([]);
   });
 
   it('does not let rock and pop swallow the deck', () => {

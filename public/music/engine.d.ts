@@ -70,6 +70,7 @@ export interface ChallengeResult extends Challenge {
 
 export interface TokenAward {
   playerId: string;
+  /** What the pool actually moved by - 0 for an award that hit `tokenCap`. */
   delta: number;
   reason: 'identify' | 'buy';
   pool: 'player' | 'shared';

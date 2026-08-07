@@ -1047,9 +1047,18 @@ async function toggleAudio() {
   const quick = bakedTrackSync(state.card);
   if (quick) {
     view.audio.resolved = quick;
+    const quickToken = view.audio.token;
     const started = await p.play(quick.previewUrl);
+    // A play() that resolves after the turn moved on must not write anything:
+    // its status would land on the NEXT player's screen, about a card they have
+    // not heard. The slow path already guarded this; the fast one did not.
+    if (quickToken !== view.audio.token) return;
     if (!started) failAudio('That preview would not play here.');
     else {
+      // A retry that works has to clear the failure, or the song plays under a
+      // banner still saying it would not - and, worse, under the streaming
+      // links, which spell out the title nobody has guessed yet.
+      view.audio.failed = false;
       view.audio.status = 'Playing the preview.';
       render();
       warmNextCard();
@@ -1082,6 +1091,9 @@ async function toggleAudio() {
   if (token !== view.audio.token) return;
   if (!started) failAudio('That preview would not play here.');
   else {
+    // See the note on the fast path: a working retry must clear the failure, or
+    // the streaming links stay on screen with the title in them.
+    view.audio.failed = false;
     view.audio.status = 'Playing the preview.';
     render();
     warmNextCard();
@@ -1550,7 +1562,16 @@ function renderPlay() {
   if (hint) {
     const gaps = gapsFor(state, active.id);
     const chosen = state.selectedGap === null ? null : gaps[state.selectedGap];
-    hint.textContent = chosen ? `Placing ${gapShort(chosen)}` : 'Tap a gap to choose a spot';
+    // Once the strip is longer than the screen, "tap a gap" is only half the
+    // instruction - the gap you want may be off to one side, and a player who
+    // does not know it scrolls will place the card in the wrong half of their
+    // own timeline.
+    const scrolls = timeline.length > 3;
+    hint.textContent = chosen
+      ? `Placing ${gapShort(chosen)}`
+      : scrolls
+        ? 'Swipe, then tap a gap'
+        : 'Tap a gap to choose a spot';
   }
 
   // Actions
@@ -1580,7 +1601,11 @@ function renderPlay() {
       : others.some((p) => challengeBlockedReason(state, p.id) === null);
   disable(el('btn-challenge'), !anyCanChallenge);
 
-  disable(el('btn-place'), state.selectedGap === null || state.placementCommitted);
+  disable(
+    el('btn-place'),
+    state.selectedGap === null || state.placementCommitted,
+    state.placementCommitted ? 'Already placed this card' : 'Tap a gap in your timeline first',
+  );
 
   // Audio + QR
   const status = el('audio-status');
@@ -1588,8 +1613,18 @@ function renderPlay() {
   disable(el('btn-play-song'), view.audio.resolving);
   disable(el('btn-replay'), !view.audio.resolved);
   show(el('audio-fallback'), view.audio.failed);
-  show(el('streaming-links'), view.audio.failed && view.audio.linksShown);
-  if (view.audio.failed && view.audio.linksShown) paintStreamingLinks();
+  const linksOpen = view.audio.failed && view.audio.linksShown;
+  show(el('streaming-links'), linksOpen);
+  if (linksOpen) paintStreamingLinks();
+  // A toggle has to say which way it is pointing. It read "Show streaming
+  // links" with the links already showing, so the only way to put the title
+  // back out of sight was to guess that the same button did it.
+  const linksBtn = el('btn-show-links');
+  if (linksBtn) {
+    pressed(linksBtn, linksOpen);
+    const label = linksOpen ? 'Hide streaming links' : 'Show streaming links';
+    if (linksBtn.textContent.trim() !== label) linksBtn.textContent = label;
+  }
   paintAudio();
   paintQr();
 }
@@ -1671,6 +1706,18 @@ function verdictFor(outcome) {
   }
   if (outcome.accepted) return { verdict: 'correct', message: 'Correct. The card is yours.' };
   if (outcome.placementCorrect && !outcome.requirementsMet) {
+    // Expert fails the same placement two very different ways, and the year is
+    // the one the reveal never shows - "you had to name it too" is simply untrue
+    // for somebody who named it and missed 1994 by a year.
+    if (outcome.titleOk === true && outcome.artistOk === true && outcome.yearGuessCorrect === false) {
+      return {
+        verdict: 'wrong',
+        message:
+          outcome.yearGuess === null
+            ? 'Right spot and you named it - but expert wants the exact year.'
+            : `Right spot and you named it - but it was not ${outcome.yearGuess}.`,
+      };
+    }
     return { verdict: 'wrong', message: 'Right spot, but you had to name it too.' };
   }
   if (outcome.stolenBy) {
@@ -1762,10 +1809,20 @@ function renderAwards(outcome) {
   for (const award of outcome.tokenAwards) {
     const node = clone('tpl-award-item');
     if (!node) continue;
-    node.dataset.delta = award.delta >= 0 ? 'gain' : 'loss';
+    // The engine reports what the pool really moved by, so a claim confirmed at
+    // the cap arrives as 0. Say why, rather than printing a gold "+1" next to a
+    // token row that visibly did not change.
+    // Three states, not two: a claim confirmed at the token cap moves the pool
+    // by zero, and painting that in verdict red announces a loss that did not
+    // happen. Nothing was gained and nothing was taken.
+    node.dataset.delta = award.delta > 0 ? 'gain' : award.delta < 0 ? 'loss' : 'none';
+    let what = 'Bought a card';
+    if (award.reason === 'identify') {
+      what = award.delta === 0 ? 'Named it - tokens already full' : 'Named the song';
+    }
     fill(node, {
       who: state.mode === 'coop' ? 'Shared pool' : nameOf(award.playerId),
-      what: award.reason === 'identify' ? 'Named the song' : 'Bought a card',
+      what,
       delta: award.delta > 0 ? `+${award.delta}` : String(award.delta),
     });
     rows.push(node);
@@ -1866,6 +1923,11 @@ function joinNames(names) {
   return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
 }
 
+/** "1 card" / "3 cards". The win screen is the one line that gets read aloud. */
+function plural(count, noun) {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
 function renderWin() {
   const result = state && state.result;
   const won = winners(state);
@@ -1894,16 +1956,23 @@ function renderWin() {
 
   if (state.mode === 'coop') {
     const cards = state.sharedTimeline.length;
+    const mistakes = `${state.mistakes} of ${state.mistakeLimit} mistakes used`;
     if (result && result.coopWon) {
       eyebrow = 'Co-op win';
       title = 'Everybody';
-      summary = `${cards} cards together with ${state.mistakes} of ${state.mistakeLimit} mistakes used.`;
+      summary = `${plural(cards, 'card')} together with ${mistakes}.`;
+    } else if (result && result.reason === 'ended') {
+      // Somebody tapped End game. There is a deck left and there are mistakes
+      // left; saying the deck ran dry would be inventing a defeat nobody had.
+      eyebrow = 'Game over';
+      title = 'Stopped early';
+      summary = `${plural(cards, 'card')} of ${state.targetCards}, with ${mistakes}.`;
     } else {
       eyebrow = 'Game over';
       title = 'So close';
       summary =
         result && result.reason === 'mistake-limit'
-          ? `${state.mistakeLimit} mistakes reached on ${cards} cards.`
+          ? `${state.mistakeLimit} mistakes reached on ${plural(cards, 'card')}.`
           : `The deck ran dry on ${cards} of ${state.targetCards} cards.`;
     }
     replaceChildren(el('win-timeline'), state.sharedTimeline.map(miniCard));
@@ -1917,7 +1986,7 @@ function renderWin() {
     }
     title = joinNames(won.map((p) => p.name));
     const lead = won[0];
-    summary = `${lead.timeline.length} cards, ${lead.tokens} token${lead.tokens === 1 ? '' : 's'} left.`;
+    summary = `${plural(lead.timeline.length, 'card')}, ${plural(lead.tokens, 'token')} left.`;
     replaceChildren(el('win-timeline'), lead.timeline.map(miniCard));
   } else {
     eyebrow = 'Game over';
@@ -2008,11 +2077,19 @@ function renderChallengeSheet() {
         fill(button, {
           name: p.name,
           tokens: existing
-            ? 'Challenge locked in'
+            ? 'Locked in - tap to take it back'
             : blocked || `${tokens} token${tokens === 1 ? '' : 's'}`,
         });
         pressed(button, view.challengerId === p.id);
-        disable(button, blocked !== null, blocked || undefined);
+        if (existing) {
+          // Still a live control, doing the opposite thing. Leaving it disabled
+          // stranded a player with a spent token and a placement they knew was
+          // wrong, which is the least fun a token can buy.
+          button.dataset.action = 'remove-challenge';
+          disable(button, false);
+        } else {
+          disable(button, blocked !== null, blocked || undefined);
+        }
         return node;
       });
     replaceChildren(list, rows);
@@ -2153,6 +2230,24 @@ function gated() {
   return state.mode === 'advanced' || state.mode === 'expert';
 }
 
+/**
+ * Re-derive the group's Title/Artist vote from the engine after a reload.
+ *
+ * In classic and co-op those two buttons are pure view state: the engine only
+ * stores the single "they named it" verdict the pair adds up to. A reload
+ * therefore came back to a confirmed claim with both buttons unpressed, and the
+ * next tap sent `ok: false` and took back a token the group had already
+ * awarded - the reveal screen would even still be listing the "+1". The only
+ * vote that can produce a confirmed claim is both-ticked, so restore exactly
+ * that. Advanced and expert keep their votes in `state.confirmations` and need
+ * nothing here.
+ */
+function restoreIdentifyVote() {
+  if (!state || gated()) return;
+  const confirmed = state.confirmations && state.confirmations.identify === true;
+  view.identifyVote = { title: confirmed, artist: confirmed };
+}
+
 /** True when the group has ticked that box, whichever store is in charge. */
 function voted(which) {
   return gated() ? state.confirmations[which] === true : view.identifyVote[which];
@@ -2210,6 +2305,7 @@ const HANDLERS = {
     }
     state = saved;
     resetCardAudio();
+    restoreIdentifyVote();
     beginTurn();
   },
   'show-rules': () => {
@@ -2306,6 +2402,21 @@ const HANDLERS = {
   'pick-challenger': (node) => {
     view.challengerId = node.dataset.playerId;
     view.challengeGap = null;
+    render();
+  },
+  // A challenge is a token spent on a guess, and the guess is made by tapping a
+  // tiny gap on somebody else's timeline. Getting it wrong was unrecoverable:
+  // the row went disabled and the token was gone. The engine has always
+  // supported taking it back with a refund - nothing was exposing it.
+  'remove-challenge': (node) => {
+    const playerId = node.dataset.playerId;
+    if (!playerId) return;
+    dispatch({ type: ACTIONS.REMOVE_CHALLENGE, playerId });
+    if (view.challengerId === playerId) {
+      view.challengerId = null;
+      view.challengeGap = null;
+    }
+    announce(`${nameOf(playerId)}'s challenge taken back. Token refunded.`);
     render();
   },
   'confirm-challenge': () => confirmChallenge(),

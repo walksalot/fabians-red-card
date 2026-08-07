@@ -750,6 +750,40 @@ describe('token economy', () => {
     const confirmed = reduce(revealed, { type: ACTIONS.CONFIRM_IDENTIFY, ok: true });
     expect(tokensFor(confirmed, 'p1')).toBe(5);
     expect(outcomeOf(confirmed).identifyAwarded).toBe(true);
+    // The claim was honoured, but the pool did not move - and the award has to
+    // say so. A reveal screen promising "+1" next to a token row that visibly
+    // stayed at five reads, at a table, as the game quietly robbing somebody.
+    expect(outcomeOf(confirmed).tokenAwards).toEqual([
+      { playerId: 'p1', delta: 0, reason: 'identify', pool: 'player' },
+    ]);
+  });
+
+  it('reports the shared pool the same way when co-op is already at the cap', () => {
+    const state = game({
+      mode: 'coop',
+      sharedTimeline: [1980],
+      sharedTokens: 5,
+      tokenCap: 5,
+      deck: [card(1985)],
+    });
+    const confirmed = dispatch(
+      playTo(state, 1, [{ type: ACTIONS.SET_CLAIM_IDENTIFY, value: true }]),
+      [{ type: ACTIONS.CONFIRM_IDENTIFY, ok: true }],
+    );
+    expect(confirmed.sharedTokens).toBe(5);
+    expect(outcomeOf(confirmed).tokenAwards).toEqual([
+      { playerId: 'p1', delta: 0, reason: 'identify', pool: 'shared' },
+    ]);
+  });
+
+  it('still reports the full award when there is room for it', () => {
+    const state = game({ tokens: [4, 2, 2], tokenCap: 5, deck: [card(1985)] });
+    const confirmed = dispatch(
+      playTo(state, 1, [{ type: ACTIONS.SET_CLAIM_IDENTIFY, value: true }]),
+      [{ type: ACTIONS.CONFIRM_IDENTIFY, ok: true }],
+    );
+    expect(tokensFor(confirmed, 'p1')).toBe(5);
+    expect(outcomeOf(confirmed).tokenAwards[0].delta).toBe(1);
   });
 
   it('buys a card at exactly three tokens and ends the turn', () => {
@@ -1087,6 +1121,32 @@ describe('modes', () => {
     expect(outcomeOf(partial).accepted).toBe(false);
   });
 
+  it('says which half of expert was missed, so the reveal cannot blame the wrong one', () => {
+    const state = game({ mode: 'expert', timelines: [[1980], [1970], [1990]], deck: [card(1985)] });
+    const named: Action[] = [{ type: ACTIONS.CONFIRM_TITLE_ARTIST, title: true, artist: true }];
+
+    // Right gap, right names, wrong year. The outcome has to be separable from
+    // "you never named it" - they are the same `accepted: false` otherwise, and
+    // the reveal screen would tell somebody who nailed the artist that they had
+    // to name it too.
+    const missedYear = dispatch(playTo(state, 1, [{ type: ACTIONS.SET_YEAR_GUESS, year: 1984 }]), named);
+    const missed = outcomeOf(missedYear);
+    expect(missed.placementCorrect).toBe(true);
+    expect([missed.titleOk, missed.artistOk]).toEqual([true, true]);
+    expect(missed.yearGuessCorrect).toBe(false);
+    expect(missed.yearGuess).toBe(1984);
+    expect(missed.requirementsMet).toBe(false);
+
+    // Right gap, right year, no names: the mirror image, and it must not look
+    // like a missed year.
+    const missedName = playTo(state, 1, [{ type: ACTIONS.SET_YEAR_GUESS, year: 1985 }]);
+    const unnamed = outcomeOf(missedName);
+    expect(unnamed.placementCorrect).toBe(true);
+    expect([unnamed.titleOk, unnamed.artistOk]).toEqual([null, null]);
+    expect(unnamed.yearGuessCorrect).toBe(true);
+    expect(unnamed.requirementsMet).toBe(false);
+  });
+
   it('lets the year guess be cleared and rejects nonsense guesses', () => {
     const drawn = reduce(game({ mode: 'expert', deck: [card(1985)] }), { type: ACTIONS.DRAW });
     const guessed = reduce(drawn, { type: ACTIONS.SET_YEAR_GUESS, year: 1985 });
@@ -1380,6 +1440,40 @@ describe('winning', () => {
       expect(core(blocked)).toEqual(core(over));
     }
     expect(legalActions(over)).toEqual([]);
+  });
+
+  it('calls a co-op END_GAME an early stop, never a dry deck or a mistake limit', () => {
+    const state = game({
+      mode: 'coop',
+      sharedTimeline: [1970, 1980],
+      targetCards: 10,
+      mistakeLimit: 3,
+      deck: deckOf([1990, 1995]),
+    });
+    const over = reduce(state, { type: ACTIONS.END_GAME });
+    // The win screen picks its wording off `reason`. There are cards left and
+    // mistakes left, so anything but 'ended' invents a defeat nobody had.
+    expect(resultOf(over)).toEqual({
+      reason: 'ended',
+      winnerIds: [],
+      shared: false,
+      coopWon: false,
+    });
+    expect(over.mistakes).toBeLessThan(over.mistakeLimit);
+    expect(deckRemaining(over)).toBeGreaterThan(0);
+  });
+
+  it('does not turn an already-won co-op game into an early stop', () => {
+    const state = game({
+      mode: 'coop',
+      sharedTimeline: [1960, 1970, 1980],
+      targetCards: 3,
+      deck: deckOf([1990, 1995]),
+    });
+    const over = reduce(state, { type: ACTIONS.END_GAME });
+    expect(resultOf(over).reason).toBe('target');
+    expect(resultOf(over).coopWon).toBe(true);
+    expect(resultOf(over).winnerIds).toEqual(['p1', 'p2', 'p3']);
   });
 });
 
@@ -1702,6 +1796,84 @@ describe('serialize / deserialize', () => {
   it('accepts an already-parsed object as well as a string', () => {
     const state = game();
     expect(deserialize(JSON.parse(serialize(state)))).toEqual(state);
+  });
+
+  it('backfills identity into the reveal snapshot, not only the live players', () => {
+    const state = midGame();
+    expect(state.revealBase).not.toBeNull();
+    // A save written before avatars existed, caught mid-reveal.
+    const legacy = JSON.parse(serialize(state)) as GameState;
+    for (const p of [...legacy.players, ...(legacy.revealBase?.players ?? [])]) {
+      delete (p as Partial<typeof p>).photo;
+      delete (p as Partial<typeof p>).color;
+    }
+    const back = deserialize(legacy);
+    expect(back.revealBase?.players.map((p) => p.color)).toEqual([
+      SEAT_COLORS[0],
+      SEAT_COLORS[1],
+      SEAT_COLORS[2],
+      SEAT_COLORS[3],
+    ]);
+    expect(back.revealBase?.players.map((p) => p.photo)).toEqual([null, null, null, null]);
+    expect((legacy.revealBase?.players[0] as Partial<GameState['players'][number]>).color)
+      .toBeUndefined();
+  });
+
+  it('survives a confirmation toggle after a legacy save is resumed mid-reveal', () => {
+    // Every confirmation replays the turn from `revealBase` and writes its
+    // players back over the live ones. Backfilling only the live list means the
+    // first tap on Title wipes every seat colour and every photo for the rest of
+    // the game - and `undefined` does not even survive the next save.
+    const face = 'data:image/jpeg;base64,AAAA';
+    const state = {
+      ...midGame(),
+      players: midGame().players.map((p, i) => (i === 0 ? { ...p, photo: face } : p)),
+    };
+    const withPhotoBase = {
+      ...state,
+      revealBase: state.revealBase && { ...state.revealBase, players: state.players },
+    };
+    const legacy = JSON.parse(serialize(withPhotoBase)) as GameState;
+    for (const p of [...legacy.players, ...(legacy.revealBase?.players ?? [])]) {
+      delete (p as Partial<typeof p>).color;
+    }
+    const back = deserialize(legacy);
+    const toggled = reduce(back, { type: ACTIONS.CONFIRM_TITLE_ARTIST, artist: false });
+    expect(toggled.players.map((p) => p.color)).toEqual([
+      SEAT_COLORS[0],
+      SEAT_COLORS[1],
+      SEAT_COLORS[2],
+      SEAT_COLORS[3],
+    ]);
+    expect(toggled.players[0].photo).toBe(face);
+    expect(seatStandings(toggled).map((r) => r.color)).toEqual(
+      toggled.players.map((p) => p.color),
+    );
+    // ...and it is still plain JSON, with no `undefined` to lose on the way out.
+    expect(JSON.parse(serialize(toggled)).players).toEqual(toggled.players);
+  });
+
+  it('re-derives a confirmed identify claim from a restored save', () => {
+    // The classic/co-op reveal keeps its Title+Artist vote in the UI, not in the
+    // state; all the engine records is the verdict the pair added up to. A
+    // reload therefore has to be able to read that verdict back, or the next tap
+    // sends `ok: false` and takes back a token the group already awarded.
+    const state = dispatch(game({ tokens: [2, 2, 2], deck: [card(1985)] }), [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.SET_CLAIM_IDENTIFY, value: true },
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 0 },
+      { type: ACTIONS.REVEAL },
+      { type: ACTIONS.CONFIRM_IDENTIFY, ok: true },
+    ]);
+    expect(tokensFor(state, 'p1')).toBe(3);
+    const back = deserialize(serialize(state));
+    expect(back.claimIdentify).toBe(true);
+    expect(back.confirmations.identify).toBe(true);
+    expect(tokensFor(back, 'p1')).toBe(3);
+    // Re-affirming what the group already said must be a no-op, not a re-award.
+    const again = reduce(back, { type: ACTIONS.CONFIRM_IDENTIFY, ok: true });
+    expect(tokensFor(again, 'p1')).toBe(3);
+    expect(core(again)).toEqual(core(back));
   });
 
   it('refuses saves it cannot trust', () => {
