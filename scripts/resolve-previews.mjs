@@ -84,9 +84,10 @@ async function search(term, attempt = 0) {
     if (!res.ok) throw new Error(`http ${res.status}`);
     return (await res.json()).results || [];
   } catch (err) {
-    if (attempt >= 4) throw err;
-    // Apple throttles bursts hard. Back off generously rather than hammering.
-    const wait = 1500 * 2 ** attempt;
+    if (attempt >= 6) throw err;
+    // Apple throttles bursts hard and stays cross for a while. Back off a long way
+    // rather than hammering: a slow run that finishes beats a fast one that 403s.
+    const wait = Math.min(60000, 2000 * 2 ** attempt);
     if (VERBOSE) console.log(`    retry in ${wait}ms (${err.message})`);
     await new Promise((r) => setTimeout(r, wait));
     return search(term, attempt + 1);
@@ -121,14 +122,32 @@ console.log(`resolving ${cards.length} cards...\n`);
 let done = 0;
 for (const card of cards) {
   done++;
+  // Resumable: a throttled run can be restarted and will only chase what is left.
+  if (!ONLY && out[card.id] && out[card.id].preview) continue;
+
   let best = null;
+  let failed = false;
   // Two phrasings: "title artist" is right almost always, but a few titles collide
   // with an artist name and only the reversed form finds the record.
   for (const term of [`${card.title} ${card.artist}`, `${card.artist} ${card.title}`]) {
-    const results = await search(term);
+    let results;
+    try {
+      results = await search(term);
+    } catch (err) {
+      // One card that cannot be reached must not throw away the 200 already done.
+      console.log(`  [${done}/${cards.length}] FAIL  ${card.id}: ${err.message}`);
+      failed = true;
+      break;
+    }
     best = pick(card, results);
     if (best) break;
-    await new Promise((r) => setTimeout(r, 220));
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  if (failed) {
+    misses.push(card);
+    fs.writeFileSync(OUT, JSON.stringify(out, null, 0) + '\n');
+    await new Promise((r) => setTimeout(r, 5000));
+    continue;
   }
 
   if (!best) {
@@ -152,7 +171,9 @@ for (const card of cards) {
       console.log(`  [${done}/${cards.length}] ...`);
     }
   }
-  await new Promise((r) => setTimeout(r, 220));
+  // Checkpoint as we go so a throttle-out never costs work already done.
+  if (done % 10 === 0) fs.writeFileSync(OUT, JSON.stringify(out, null, 0) + '\n');
+  await new Promise((r) => setTimeout(r, 500));
 }
 
 fs.writeFileSync(OUT, JSON.stringify(out, null, 0) + '\n');
