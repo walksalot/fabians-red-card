@@ -30,7 +30,7 @@
 // Bump this on any deploy that must reach returning players immediately. It is a
 // belt to the stale-while-revalidate braces below: changing it changes this file,
 // which is the only thing that makes a browser reinstall the worker at all.
-const VERSION = 'v5-compact-setup';
+const VERSION = 'v6-redesign';
 const CACHE = `music-timeline-${VERSION}`;
 const CACHE_PREFIX = 'music-timeline-';
 
@@ -51,6 +51,20 @@ const SHELL = [
   // It used to arrive here only via runtime caching, which meant it took TWO
   // online loads before the game was genuinely offline-capable.
   './previews.json',
+  // The typography, vendored rather than fetched from Google. Precached for the
+  // same reason previews.json is: runtime caching alone means the first wifi
+  // drop falls back to system fonts, so the game would look right only from the
+  // SECOND load. latin-ext is included deliberately - the deck carries accented
+  // artists (Ruben Blades, Los del Rio) and players type accented names.
+  './fonts.css',
+  './fonts/paytone-one-400-latin.woff2',
+  './fonts/paytone-one-400-latin-ext.woff2',
+  './fonts/sora-variable-latin.woff2',
+  './fonts/sora-variable-latin-ext.woff2',
+  './fonts/ibm-plex-mono-500-latin.woff2',
+  './fonts/ibm-plex-mono-500-latin-ext.woff2',
+  './fonts/ibm-plex-mono-600-latin.woff2',
+  './fonts/ibm-plex-mono-600-latin-ext.woff2',
   './qr.js',
   './engine.js',
   './deck.js',
