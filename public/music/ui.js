@@ -77,6 +77,9 @@ import {
   loadPlayers,
   rememberAvatar,
   avatarsFor,
+  loadPeople,
+  rememberPerson,
+  forgetPerson,
 } from './storage.js';
 import { qrSvg } from './qr.js';
 import { burst } from './confetti.js';
@@ -169,6 +172,8 @@ const view = {
   menuOpen: false,
   challengeOpen: false,
   challengerId: null,
+  /** Guest-list edit mode: chips become remove buttons. */
+  peopleEditing: false,
   challengeGap: null,
   lastFocus: null,
   /**
@@ -492,6 +497,117 @@ async function acceptPhoto(draft, file) {
   rememberAvatar(draft.name, photo);
   render();
   announce(`Photo added for ${draft.name || 'this player'}.`);
+}
+
+/** A row nobody has touched: still the placeholder name, no photo, not skipped. */
+function isUntouchedRow(draft, index) {
+  return (
+    !draft.photo
+    && !draft.skipped
+    && (!draft.name || draft.name.trim() === `Player ${index + 1}`)
+  );
+}
+
+/**
+ * The guest list: everybody who has played before, one tap to seat them.
+ *
+ * The avatar library solves half the problem - it puts a face back once the
+ * name is typed. This is the other half: not typing the name either.
+ */
+function paintPeople() {
+  const block = el('people-block');
+  const list = el('people-list');
+  if (!block || !list) return;
+
+  const people = loadPeople();
+  show(block, people.length > 0);
+  if (!people.length) {
+    view.peopleEditing = false;
+    block.dataset.editing = 'false';
+    replaceChildren(list, []);
+    return;
+  }
+
+  block.dataset.editing = view.peopleEditing ? 'true' : 'false';
+  pressed(el('btn-people-edit'), !!view.peopleEditing);
+  const editBtn = el('btn-people-edit');
+  if (editBtn) editBtn.textContent = view.peopleEditing ? 'Done' : 'Edit';
+  const hint = el('people-hint');
+  if (hint) {
+    hint.textContent = view.peopleEditing
+      ? 'Tap the cross to forget somebody.'
+      : 'Tap somebody to add them.';
+  }
+
+  const seated = new Set(
+    view.setup.players.map((p) => (p.name || '').trim().toLowerCase()).filter(Boolean),
+  );
+  const full = view.setup.players.length >= MAX_PLAYERS
+    && !view.setup.players.some((p, i) => isUntouchedRow(p, i));
+
+  replaceChildren(
+    list,
+    people.map((person) => {
+      const node = clone('tpl-person');
+      if (!node) return null;
+      const item = node.querySelector('.person');
+      const add = node.querySelector('.person__add');
+      const forget = node.querySelector('.person__forget');
+      const already = seated.has(person.name.toLowerCase());
+      if (item) item.dataset.name = person.name;
+      if (add) {
+        add.dataset.name = person.name;
+        add.setAttribute(
+          'aria-label',
+          already ? `${person.name} is already playing` : `Add ${person.name} to this game`,
+        );
+        disable(
+          add,
+          already || full,
+          already ? 'Already in this game' : full ? 'Eight players is the maximum' : undefined,
+        );
+      }
+      if (forget) {
+        forget.dataset.name = person.name;
+        forget.setAttribute('aria-label', `Forget ${person.name}`);
+      }
+      fill(node, { name: person.name });
+      paintAvatar(node.querySelector('.avatar'), person);
+      return node;
+    }),
+  );
+}
+
+/** Seat somebody from the guest list, reusing an empty row before adding one. */
+function addPersonToGame(name) {
+  const person = loadPeople().find((p) => p.name.toLowerCase() === String(name).toLowerCase());
+  if (!person) return;
+  const already = view.setup.players.some(
+    (p) => (p.name || '').trim().toLowerCase() === person.name.toLowerCase(),
+  );
+  if (already) return;
+
+  // Fill the first row nobody has touched rather than appending a ninth: on a
+  // fresh setup that is four "Player N" rows waiting to be replaced, and adding
+  // beside them would be nonsense.
+  const slot = view.setup.players.findIndex((p, i) => isUntouchedRow(p, i));
+  const photo = person.photo || avatarsFor(person.name)[0] || null;
+  const draft = {
+    name: person.name,
+    photo,
+    skipped: !photo && person.skipped,
+    pending: false,
+  };
+
+  if (slot !== -1) {
+    view.setup.players[slot] = draft;
+  } else {
+    if (view.setup.players.length >= MAX_PLAYERS) return;
+    view.setup.players.push(draft);
+  }
+  rememberRoster();
+  render();
+  announce(`${person.name} added.`);
 }
 
 /**
@@ -857,6 +973,7 @@ function eligibleDeck() {
 
 function renderSetup() {
   document.body.dataset.mode = view.setup.mode;
+  paintPeople();
   renderPlayerRows();
 
   text('target-cards-value', view.setup.target);
@@ -912,6 +1029,18 @@ function startGame() {
     name: (draft.name || '').trim() || `Player ${i + 1}`,
     photo: draft.photo,
   }));
+  // Starting a game is the moment a line-up is real, so this is where the guest
+  // list learns who plays. Filed in reverse so the first seat ends up first in
+  // the list rather than last - each call moves its person to the front.
+  for (let i = view.setup.players.length - 1; i >= 0; i--) {
+    const draft = view.setup.players[i];
+    rememberPerson({
+      name: (draft.name || '').trim(),
+      photo: draft.photo,
+      skipped: !!draft.skipped,
+    });
+    if (draft.photo) rememberAvatar(draft.name, draft.photo);
+  }
   const dealable = view.setup.mode === 'coop' ? 2 : roster.length + 1;
   if (eligible.length < dealable) {
     alertUser('Not enough songs match these filters. Turn some decades or genres back on.');
@@ -2413,6 +2542,18 @@ const HANDLERS = {
   'skip-photo': (node) => {
     const row = node.closest('[data-player-index]');
     if (row) skipPhoto(Number(row.dataset.playerIndex));
+  },
+  'add-person': (node) => addPersonToGame(node.dataset.name),
+  'forget-person': (node) => {
+    const name = node.dataset.name;
+    if (!name) return;
+    forgetPerson(name);
+    announce(`${name} forgotten.`);
+    render();
+  },
+  'toggle-people-edit': () => {
+    view.peopleEditing = !view.peopleEditing;
+    render();
   },
   'use-saved-photo': (node) => {
     const row = node.closest('[data-player-index]');

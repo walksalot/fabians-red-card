@@ -119,6 +119,13 @@
                            that row's [data-role="player-photo"] file input]
       skip-photo          [the .player-row__skip toggle in each row
                            (aria-pressed): on = use the generated initial]
+      add-person          [a .person__add chip in #people-list, data-name -
+                           seats that past player, reusing an untouched row
+                           before appending a new one]
+      forget-person       [the .person__forget cross on the same chip; only
+                           reachable while #people-block[data-editing="true"]]
+      toggle-people-edit  [#btn-people-edit (aria-pressed) - swaps the guest
+                           list between tap-to-add and tap-to-forget]
       use-saved-photo     [a .saved-avatar in that row's saved-list; carries
                            data-photo-index and data-player-index. Puts a face
                            we already hold for this NAME back on the row]
@@ -184,6 +191,9 @@
     challenge   - #challenge-player-name
 
   CONTAINERS ui.js FILLS (all ship EMPTY - clone the matching <template>)
+    #people-list          <- #tpl-person. #people-block is unhidden only once
+                          somebody has played before, and carries
+                          [data-editing="true"|"false"].
     #player-list          <- #tpl-player-row; each row's [data-role="saved-list"]
                           <- #tpl-saved-avatar, and its [data-role="saved-avatars"]
                           wrapper is unhidden only when we hold a face for the
@@ -349,6 +359,17 @@
         <p class="panel__hint panel__hint--privacy">
           Photos stay on this phone. They are never uploaded and never go in the QR code.
         </p>
+        <!-- Everybody who has played before. ui.js fills and unhides this; it
+             stays [hidden] on a first-ever setup, when there is nobody yet. -->
+        <div class="people" id="people-block" hidden>
+          <div class="people__head">
+            <h3 class="people__label" id="people-label">Played before</h3>
+            <button type="button" class="linkbtn people__edit" id="btn-people-edit"
+                    data-action="toggle-people-edit" aria-pressed="false">Edit</button>
+          </div>
+          <p class="panel__hint people__hint" id="people-hint">Tap somebody to add them.</p>
+          <ul class="people__list" id="people-list" aria-labelledby="people-label"></ul>
+        </div>
         <ul class="player-list" id="player-list"></ul>
         <button type="button" class="btn btn--ghost btn--block" id="btn-add-player" data-action="add-player">
           <span class="btn__glyph" aria-hidden="true">+</span> Add player
@@ -1080,6 +1101,24 @@
          does nothing" is not a bug anyone can work around at a party. -->
     <input class="player-row__file" type="file" accept="image/*" data-role="player-photo"
            tabindex="-1" aria-hidden="true">
+  </li>
+</template>
+
+<!-- One past player. Set li[data-name], the button's data-name and aria-label,
+     [data-field="name"], and the avatar's data-photo/img src. The remove button
+     only does anything while #people-block has data-editing="true". -->
+<template id="tpl-person">
+  <li class="person" data-name="">
+    <button type="button" class="person__add" data-action="add-person" data-name="">
+      <span class="avatar avatar--sm" data-photo="false">
+        <img class="avatar__img" data-field="photo" alt="">
+        <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
+      </span>
+      <span class="person__name" data-field="name">Paula</span>
+    </button>
+    <button type="button" class="person__forget" data-action="forget-person" data-name="" tabindex="-1">
+      <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
+    </button>
   </li>
 </template>
 
