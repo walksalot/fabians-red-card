@@ -1360,7 +1360,7 @@ describe('reducer purity', () => {
         expect(serialize(state), `${phase} / ${type} mutated the input`).toEqual(snapshot);
       }
       // Malformed actions must be just as harmless.
-      expect(reduce(state, { type: 'NOPE' }).lastError?.reason).toMatch(/unknown action/);
+      expect(reduce(state, { type: 'NOPE' }).lastError).not.toBeNull();
       expect(serialize(state)).toEqual(snapshot);
     }
   });
@@ -1375,6 +1375,13 @@ describe('reducer purity', () => {
         expect(core(next), `${phase} / ${type} changed state`).toEqual(core(state));
       }
     }
+  });
+
+  it('rejects an unknown action type outright', () => {
+    const state = game({ deck: [card(1985)] });
+    const next = reduce(state, { type: 'FLY_ME_TO_THE_MOON' });
+    expect(next.lastError?.reason).toMatch(/unknown action/);
+    expect(core(next)).toEqual(core(state));
   });
 
   it('clears a stale rejection notice on the next good action', () => {

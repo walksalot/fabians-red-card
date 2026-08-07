@@ -476,13 +476,7 @@ describe('version information (ISO/IEC 18004 table D.1)', () => {
     });
   }
 
-  it('appears twice in symbols of version 7 and above, and never below', () => {
-    const small = qrMatrix('x', { ecc: 'M', minVersion: 6, maxVersion: 6 });
-    expect(small.version).toBe(6);
-    // Version 6 has no version block: those modules belong to the data region.
-    const [lowA, lowB] = readVersionCopies(small);
-    expect(lowA >> 12).not.toBe(6 | 0x40); // sanity: nothing pretends to be a block
-
+  it('is written into both copies of symbols of version 7 and above', () => {
     for (const version of [7, 12, 20]) {
       const m = qrMatrix('version block check', { minVersion: version, maxVersion: version });
       expect(m.version).toBe(version);
@@ -490,7 +484,15 @@ describe('version information (ISO/IEC 18004 table D.1)', () => {
       expect(a).toBe(b);
       expect(a.toString(2).padStart(18, '0')).toBe(VERSION_INFO_STRINGS[version]);
     }
-    expect(lowB).toBeGreaterThanOrEqual(0);
+  });
+
+  it('is absent below version 7, where those modules carry data', () => {
+    // If the encoder wrongly reserved a version block at version 6 the decoder,
+    // which treats the area as data below version 7, could not round trip.
+    const text = 'version six carries data where the version block would be';
+    const m = qrMatrix(text, { ecc: 'M', minVersion: 6, maxVersion: 6 });
+    expect(m.version).toBe(6);
+    expect(decode(m).text).toBe(text);
   });
 });
 
