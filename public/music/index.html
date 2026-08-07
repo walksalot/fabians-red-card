@@ -56,13 +56,41 @@
                           photo gets it for the whole game and it must look
                           deliberate. Never leave .src set when data-photo is
                           "false" - a stale src is a broken-image request.
-    Sizes: avatar--sm (scoreboard, challenge sheet), avatar--md (play top bar,
-    reveal), avatar--lg (setup rows), avatar--xl (pass, win).
+    Sizes: avatar--sm (scoreboard, challenge sheet, the player rail, the pass
+    standings - the rail retunes --avatar-size per seat rather than adding a
+    size), avatar--md (play top bar, reveal), avatar--lg (setup rows),
+    avatar--xl (pass, win).
     Fixed ones in the markup: #play-avatar #pass-avatar #reveal-avatar
     #win-avatar. The rest come from templates.
     Photos are a square JPEG data URL, private to this device: they live in
     localStorage only, they are never uploaded, and they are never in the QR
     payload (see listenUrl() in ui.js).
+
+  THE PLAYER RAIL (.roster) - play + reveal
+    One compact strip of faces per screen, in FIXED SEAT ORDER. It answers "who
+    is winning" and "who is next" without anybody navigating anywhere, so it is
+    never re-sorted by score and it never carries names (eight of them do not
+    fit at 320px - names live in the standings list and the scoreboard).
+      #play-roster   #play-roster-seats   #play-roster-team
+      #reveal-roster #reveal-roster-seats #reveal-roster-team
+    The <ol> is the list ui.js fills from #tpl-roster-chip; the team tile is
+    static markup that CSS shows in co-op only. Each chip is a button whose
+    accessible name ui.js writes as "Ann, 4 cards, playing now" / "Mo, 2 cards,
+    up next" / "Ann, 4 cards, leading" - and whose data-action is
+    show-scoreboard, so a tap anywhere on the rail opens the scoreboard.
+    Per-seat state (all on the <li>, all read by CSS):
+      [data-rank]   = 'active' | 'next' | 'other'
+      [data-leader] = 'true' | 'false'   (gold crown; ui.js sets it only when
+                                          somebody is STRICTLY ahead)
+    The rail scrolls horizontally with the same edge fade as .strip, and ui.js
+    scrolls the active chip into view when the active player changes - it tracks
+    that on the <ol> as [data-active-seat], which is bookkeeping, not API.
+
+  STANDINGS LIST (.standings) - pass screen
+    #pass-standings-list <- #tpl-standings-row, again in seat order. Rows carry
+    the same [data-rank] / [data-leader] pair as the rail plus --fill, the meter
+    width as a percentage string. #pass-standings and #pass-coop are a pair: CSS
+    shows exactly one of them, on body[data-mode="coop"].
 
   SHEETS (menu + challenge) - NOT screens, they layer over whatever is showing
     #menu-sheet, #challenge-sheet: set dataset.open = 'true' | 'false'.
@@ -97,7 +125,7 @@
       pass-continue       [#btn-pass-continue]
       open-menu           [#btn-menu]
       close-menu          [#btn-menu-close, menu scrim]
-      show-scoreboard     [#btn-menu-scoreboard]
+      show-scoreboard     [#btn-menu-scoreboard, every rail chip]
       close-scoreboard    [#btn-scoreboard-back]
       end-game            [#btn-end-game]
       toggle-audio        [#btn-play-song]
@@ -130,11 +158,14 @@
                   #eligible-count-value ; #deck-warning ships [hidden]
                   #setup-photo-reason (ships [hidden]) - why Start is disabled
     pass        - #pass-player-name #pass-turn-number #pass-progress
+                  #pass-next-name ; hide the whole #pass-then line when there
+                  is nobody after them
     play        - #play-player-name #play-turn-number
                   #play-progress-current #play-progress-target
                   #btn-play-label #countdown-value #audio-status
                   #year-guess-value #challenge-count (badge, ships [hidden])
                   #btn-buy-card-reason (ships [hidden])
+                  #play-next-name ; hide #play-next when nobody is next
     reveal      - #reveal-year #reveal-title-text #reveal-artist
                   #verdict-banner (+ dataset.verdict, see below)
                   #confirm-player-name
@@ -144,6 +175,9 @@
 
   CONTAINERS ui.js FILLS (all ship EMPTY - clone the matching <template>)
     #player-list          <- #tpl-player-row
+    #play-roster-seats    <- #tpl-roster-chip
+    #reveal-roster-seats  <- #tpl-roster-chip
+    #pass-standings-list  <- #tpl-standings-row
     #timeline-strip       <- #tpl-timeline-gap / #tpl-timeline-card, alternating
                              gap, card, gap, card, ... gap  (n cards -> n+1 gaps)
     #challenge-timeline   <- same two templates (challenger's own timeline)
@@ -184,6 +218,11 @@
     .avatar[data-photo]           = 'true' | 'false'
     .player-row[data-photo-state] = 'none' | 'photo' | 'skipped'
     .score-row[data-active]       = 'true' | 'false'   (shows .score-row__flag)
+    .roster__seat[data-rank]      = 'active' | 'next' | 'other'
+    .roster__seat[data-leader]    = 'true' | 'false'
+    .standing[data-rank]          = 'active' | 'next' | 'other'
+    .standing[data-leader]        = 'true' | 'false'
+    .standing style property --fill = '40%' (the meter's width)
     .token-pill[data-state]       = 'full' | 'empty'
     .award[data-delta]            = 'gain' | 'loss'
     .outcome[data-result]         = 'correct' | 'wrong'
@@ -194,6 +233,11 @@
   CSS ALREADY HANDLES THESE - do not duplicate the logic in ui.js
     #field-mistake-limit  shown only while #mode-coop is checked (setup screen).
     #field-year-guess     shown only while body[data-mode="expert"].
+    .roster__team         shown only while body[data-mode="coop"] - and in that
+                          mode .roster__count (the per-player card badge) is
+                          hidden, because one shared pile is not a race.
+    #pass-coop            shown only while body[data-mode="coop"];
+    #pass-standings       hidden in exactly that case.
     .sheet-layer          visibility/inertness follows [data-open].
     .screen               visibility follows body[data-screen].
     Elements that ship [hidden] and are yours to reveal:
@@ -464,6 +508,10 @@
       <span class="pass__name" id="pass-player-name">Player 1</span>
     </h1>
 
+    <!-- Turn order, spelled out. The rail says it in pictures on the play
+         screen; here there is room for the sentence. -->
+    <p class="pass__then" id="pass-then">then <span id="pass-next-name">Player 2</span></p>
+
     <button type="button" class="pass__tap" id="btn-pass-continue" data-action="pass-continue">
       <span class="pass__tap-ring" aria-hidden="true"></span>
       <span class="pass__tap-label">Tap to start the turn</span>
@@ -473,6 +521,24 @@
     <p class="pass__meta">
       Turn <span id="pass-turn-number">1</span> &middot; <span id="pass-progress">1 / 10 cards</span>
     </p>
+
+    <!-- The handover is the moment the group checks the score, and this screen
+         is the only one with room for the whole table at once. -->
+    <section class="standings" id="pass-standings" aria-labelledby="pass-standings-title">
+      <h2 class="standings__title" id="pass-standings-title">Standings</h2>
+      <ol class="standings__list" id="pass-standings-list"></ol>
+    </section>
+
+    <!-- Co-op replaces it: one pile, one pool, one mistake budget. -->
+    <section class="standings" id="pass-coop" aria-labelledby="pass-coop-title">
+      <h2 class="standings__title" id="pass-coop-title">The team</h2>
+      <div class="teambox">
+        <p class="teambox__count"><span data-field="cards">1</span><span class="teambox__of">/<span data-field="target">10</span> cards</span></p>
+        <span class="standings__meter" aria-hidden="true"><span class="standings__fill" data-field="meter"></span></span>
+        <p class="teambox__miss"><span data-field="mistakes">0</span> of <span data-field="limit">3</span> mistakes used</p>
+        <ul class="tokens tokens--sm teambox__tokens" data-field="tokens" aria-label="Shared tokens"></ul>
+      </div>
+    </section>
   </section>
 
 
@@ -509,12 +575,30 @@
           <li class="token-pill" data-state="empty"></li>
           <li class="token-pill" data-state="empty"></li>
         </ul>
+        <!-- "Who is after me" is the second question every table asks, so it is
+             answered in the bar as well as in the rail - the rail scrolls, this
+             does not. -->
+        <p class="upnext" id="play-next">
+          <span class="upnext__label">Next</span>
+          <span class="upnext__name" id="play-next-name">Player 2</span>
+        </p>
         <p class="progress">
           <span class="progress__num" id="play-progress-current">1</span><span class="progress__slash" aria-hidden="true">/</span><span class="progress__num" id="play-progress-target">10</span>
           <span class="progress__label">cards</span>
         </p>
       </div>
     </header>
+
+    <!-- The player rail. Seat order, never score order: people do not swap
+         chairs between turns and neither should their faces. -->
+    <div class="roster" id="play-roster">
+      <p class="roster__team" id="play-roster-team">
+        <span class="roster__team-label">Team</span>
+        <span class="roster__team-score"><span data-field="cards">1</span>/<span data-field="target">10</span></span>
+        <span class="roster__team-miss"><span data-field="mistakes">0</span>/<span data-field="limit">3</span> missed</span>
+      </p>
+      <ol class="roster__seats" id="play-roster-seats" aria-label="Players - tap for the scoreboard"></ol>
+    </div>
 
     <div class="play__scroll">
 
@@ -630,6 +714,15 @@
 
   <!-- ============================================================== REVEAL -->
   <section class="screen screen--scroll screen--reveal" id="reveal" aria-labelledby="reveal-title">
+    <div class="roster roster--reveal" id="reveal-roster">
+      <p class="roster__team" id="reveal-roster-team">
+        <span class="roster__team-label">Team</span>
+        <span class="roster__team-score"><span data-field="cards">1</span>/<span data-field="target">10</span></span>
+        <span class="roster__team-miss"><span data-field="mistakes">0</span>/<span data-field="limit">3</span> missed</span>
+      </p>
+      <ol class="roster__seats" id="reveal-roster-seats" aria-label="Players - tap for the scoreboard"></ol>
+    </div>
+
     <h1 class="reveal__heading" id="reveal-title" tabindex="-1">The reveal</h1>
 
     <div class="flip" id="reveal-flip" data-flipped="false">
@@ -1038,6 +1131,51 @@
         <span class="challenge-option__tokens" data-field="tokens">2 tokens</span>
       </span>
     </button>
+  </li>
+</template>
+
+<!-- One seat in the player rail. Set li[data-player-id], li[data-rank],
+     li[data-leader], the li's --seat properties, [data-field="cards"] and the
+     button's aria-label ("Ann, 4 cards, playing now"). The flag text is
+     aria-hidden - the button's label already says it. -->
+<template id="tpl-roster-chip">
+  <li class="roster__seat" data-player-id="" data-rank="other" data-leader="false">
+    <button type="button" class="roster__chip" data-action="show-scoreboard">
+      <span class="roster__face">
+        <span class="avatar avatar--sm" data-photo="false">
+          <img class="avatar__img" data-field="photo" alt="">
+          <span class="avatar__initial" data-field="initial" aria-hidden="true">1</span>
+        </span>
+        <span class="roster__count" data-field="cards">1</span>
+        <span class="roster__crown" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false"><path d="M2.6 18.4 4.4 6.9l5.1 4.4L12 4.3l2.5 7 5.1-4.4 1.8 11.5z" fill="currentColor"/></svg>
+        </span>
+      </span>
+      <span class="roster__flag" data-field="flag" aria-hidden="true">Next</span>
+    </button>
+  </li>
+</template>
+
+<!-- One row of the pass-screen standings. Set li[data-player-id],
+     li[data-rank], li[data-leader], the row's --seat properties and --fill
+     (the meter width, e.g. "40%"); fill [data-field="tokens"] with token
+     pills. An empty [data-field="flag"] hides itself. -->
+<template id="tpl-standings-row">
+  <li class="standing" data-player-id="" data-rank="other" data-leader="false">
+    <span class="avatar avatar--sm standing__avatar" data-photo="false">
+      <img class="avatar__img" data-field="photo" alt="">
+      <span class="avatar__initial" data-field="initial" aria-hidden="true">1</span>
+    </span>
+    <p class="standing__who">
+      <span class="standing__name" data-field="name">Player 1</span>
+      <span class="standing__crown" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M2.6 18.4 4.4 6.9l5.1 4.4L12 4.3l2.5 7 5.1-4.4 1.8 11.5z" fill="currentColor"/></svg>
+      </span>
+      <span class="standing__flag" data-field="flag">Playing now</span>
+    </p>
+    <p class="standing__count"><span data-field="cards">1</span><span class="standing__of">/<span data-field="target">10</span></span></p>
+    <span class="standings__meter" aria-hidden="true"><span class="standings__fill"></span></span>
+    <ul class="tokens tokens--sm standing__tokens" data-field="tokens" aria-label="Tokens"></ul>
   </li>
 </template>
 
