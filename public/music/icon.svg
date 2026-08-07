@@ -1,0 +1,56 @@
+<!--
+  Home-screen icon for the Music Timeline game.
+
+  Maskable, so everything that matters lives inside the central 80% safe circle
+  (r = 205 around 256,256) — Android crops this to a circle, a squircle or a
+  teardrop depending on the launcher, and anything outside that circle is fair
+  game to lose. Deliberately text-free: it has to stay readable at 48px, where
+  letters turn to mud. The picture is the game itself — three song cards sitting
+  on a timeline, the one being placed lit up in the app's violet-to-pink accent.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Three song cards on a timeline">
+  <defs>
+    <linearGradient id="accent" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#a855f7" />
+      <stop offset="1" stop-color="#f0399c" />
+    </linearGradient>
+    <radialGradient id="night" cx="0.5" cy="0.38" r="0.75">
+      <stop offset="0" stop-color="#241340" />
+      <stop offset="1" stop-color="#0b0b12" />
+    </radialGradient>
+  </defs>
+
+  <!-- Full-bleed background: the mask can eat any of this without losing art. -->
+  <rect width="512" height="512" fill="url(#night)" />
+
+  <!-- The timeline itself, with a tick under each card. -->
+  <g stroke="#6d5f8c" stroke-width="12" stroke-linecap="round" fill="none">
+    <path d="M112 356 H400" />
+    <path d="M170 306 V356" opacity="0.55" />
+    <path d="M342 306 V356" opacity="0.55" />
+  </g>
+  <g fill="#6d5f8c">
+    <circle cx="112" cy="356" r="10" />
+    <circle cx="400" cy="356" r="10" />
+  </g>
+
+  <!-- Cards already placed: dark, outlined, tilted away from the centre. -->
+  <g stroke="url(#accent)" stroke-width="10" fill="#15121f">
+    <rect x="124" y="176" width="92" height="130" rx="20" transform="rotate(-9 170 241)" />
+    <rect x="296" y="176" width="92" height="130" rx="20" transform="rotate(9 342 241)" />
+  </g>
+
+  <!-- The card in play: front and centre, lit, sitting a little proud. -->
+  <g transform="translate(256 226)">
+    <rect x="-52" y="-78" width="104" height="150" rx="22" fill="url(#accent)" />
+    <g fill="#0b0b12" opacity="0.8">
+      <rect x="-30" y="26" width="60" height="12" rx="6" />
+      <rect x="-30" y="50" width="38" height="12" rx="6" />
+    </g>
+    <!-- A play triangle stands in for "this one is still playing". -->
+    <path d="M-16 -46 L22 -22 L-16 2 Z" fill="#0b0b12" opacity="0.8" />
+  </g>
+
+  <!-- The tick for the card in play, drawn last so it reads as on top. -->
+  <path d="M256 298 V356" stroke="url(#accent)" stroke-width="12" stroke-linecap="round" fill="none" />
+</svg>

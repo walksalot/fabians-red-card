@@ -17,6 +17,7 @@
     "seed": "node scripts/seed.mjs",
     "setup": "node scripts/setup.mjs",
     "backup": "node scripts/backup.mjs",
+    "music": "node scripts/music-server.mjs",
     "test:e2e:gameplay": "playwright test -c playwright.gameplay.config.ts",
     "test:e2e:all": "playwright test && playwright test -c playwright.gameplay.config.ts"
   },

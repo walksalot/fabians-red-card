@@ -1,0 +1,561 @@
+/*
+  listen.css — the entire look of listen.html.
+
+  Self-contained on purpose: the scanning phone loads this page cold off a QR
+  code, so it must not depend on the game's app.css (or anything else) being
+  cached. It borrows the same late-night language — near-black ground, one
+  electric violet-to-hot-pink accent — so the two screens feel like one app.
+*/
+
+:root {
+  --bg: #08070c;
+  --ink: #f7f5fc;
+  --ink-dim: #a8a2c0;
+  --ink-faint: #6d6788;
+
+  --violet: #8b5cf6;
+  --violet-soft: #a78bfa;
+  --pink: #ff2d9b;
+  --accent-grad: linear-gradient(135deg, var(--violet-soft), var(--violet) 45%, var(--pink));
+  --danger: #fb7185;
+
+  --line: rgba(255, 255, 255, 0.11);
+  --line-strong: rgba(255, 255, 255, 0.2);
+  --panel: rgba(255, 255, 255, 0.045);
+
+  --radius: 20px;
+  --tap: 48px;
+
+  --pad-x: clamp(16px, 5vw, 28px);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  /* Fallback for engines without dvh; the dvh rule above wins where supported. */
+  min-height: 100vh;
+  overflow-x: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans", sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* --- Ground -------------------------------------------------------------- */
+
+/* Two slow violet/pink blooms behind everything. Fixed so it never adds
+   scroll height, and pointer-events:none so it can never eat a tap. */
+.aurora {
+  position: fixed;
+  inset: -20% -30%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 30% at 22% 14%, rgba(139, 92, 246, 0.42), transparent 70%),
+    radial-gradient(42% 34% at 82% 82%, rgba(255, 45, 155, 0.3), transparent 72%);
+  filter: blur(28px);
+  animation: drift 26s ease-in-out infinite alternate;
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(-3%, -2%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(3%, 3%, 0) scale(1.12);
+  }
+}
+
+/* --- Shell --------------------------------------------------------------- */
+
+.shell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 100%;
+  max-width: 460px;
+  min-height: 100dvh;
+  min-height: 100vh;
+  margin-inline: auto;
+  padding:
+    calc(env(safe-area-inset-top, 0px) + 22px)
+    calc(env(safe-area-inset-right, 0px) + var(--pad-x))
+    calc(env(safe-area-inset-bottom, 0px) + 22px)
+    calc(env(safe-area-inset-left, 0px) + var(--pad-x));
+}
+
+.masthead {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: center;
+}
+
+.wordmark {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.card-no {
+  margin: 0;
+  font-size: clamp(1.9rem, 9vw, 2.5rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* --- Player -------------------------------------------------------------- */
+
+.player {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-height: 0;
+}
+
+.player[hidden] {
+  display: none;
+}
+
+.dial {
+  position: relative;
+  width: clamp(196px, 62vw, 262px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+}
+
+.ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.ring-track,
+.ring-progress {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.ring-track {
+  stroke: rgba(255, 255, 255, 0.09);
+  stroke-width: 5;
+}
+
+.ring-progress {
+  stroke: url(#ring-grad);
+  stroke-width: 6;
+  /* Start at 12 o'clock and deplete clockwise as the 30 seconds run out. */
+  transform: rotate(-90deg);
+  transform-origin: center;
+  transform-box: fill-box;
+  filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.45));
+}
+
+.play {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 62%;
+  height: 62%;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent-grad);
+  color: #0a0810;
+  cursor: pointer;
+  box-shadow:
+    0 18px 40px -18px rgba(255, 45, 155, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 0.16s ease, filter 0.16s ease;
+}
+
+.play:active {
+  transform: scale(0.95);
+}
+
+.play:disabled {
+  cursor: default;
+  filter: grayscale(0.55) brightness(0.7);
+}
+
+.glyph {
+  grid-area: 1 / 1;
+  width: 42%;
+  height: 42%;
+  fill: currentColor;
+}
+
+/* One button, three faces: play / pause / waiting. State lives on <body>. */
+.glyph-pause,
+.glyph-wait {
+  display: none;
+}
+
+.glyph-wait {
+  width: 30%;
+  height: 30%;
+  border-radius: 50%;
+  border: 3px solid rgba(10, 8, 16, 0.28);
+  border-top-color: #0a0810;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+body[data-state="playing"] .glyph-play {
+  display: none;
+}
+
+body[data-state="playing"] .glyph-pause {
+  display: block;
+}
+
+body[data-state="loading"] .glyph-play,
+body[data-state="loading"] .glyph-pause {
+  display: none;
+}
+
+body[data-state="loading"] .glyph-wait {
+  display: block;
+}
+
+/* A soft halo pulses while audio is actually running. */
+body[data-state="playing"] .play {
+  animation: throb 2.4s ease-in-out infinite;
+}
+
+@keyframes throb {
+  0%,
+  100% {
+    box-shadow:
+      0 18px 40px -18px rgba(255, 45, 155, 0.75),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 18px 54px -14px rgba(255, 45, 155, 0.95),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+}
+
+.times {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.9rem;
+}
+
+.time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
+.time-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.time-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  margin-inline: 4px;
+  align-self: center;
+}
+
+.status {
+  margin: 0;
+  min-height: 1.45em;
+  max-width: 30ch;
+  text-align: center;
+  text-wrap: balance;
+  color: var(--ink-dim);
+  font-size: 0.95rem;
+}
+
+body[data-state="error"] .status {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.controls {
+  display: flex;
+  justify-content: center;
+}
+
+.ghost {
+  min-height: var(--tap);
+  padding: 0 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.ghost:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ghost:not(:disabled):active {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+/* --- Notice (bad or missing card payload) -------------------------------- */
+
+.notice {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 26px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  text-align: center;
+}
+
+.notice[hidden] {
+  display: none;
+}
+
+.notice-title {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.notice-body {
+  margin: 0;
+  max-width: 32ch;
+  color: var(--ink-dim);
+  text-wrap: balance;
+}
+
+/* --- Streaming-links disclosure ------------------------------------------ */
+
+.reveal {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* When streaming fails, the disclosure is the way out — lift it out of the
+   background chrome, but never open it for the player: the title is theirs
+   to reveal. */
+.reveal[data-surfaced] {
+  border-color: rgba(255, 45, 155, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 45, 155, 0.25), 0 14px 36px -22px rgba(255, 45, 155, 0.9);
+}
+
+.reveal-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--tap);
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.reveal-summary::-webkit-details-marker {
+  display: none;
+}
+
+.reveal-text {
+  flex: 1;
+  font-weight: 650;
+  font-size: 0.95rem;
+}
+
+.reveal-text em {
+  display: block;
+  font-style: normal;
+  font-weight: 500;
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+
+.reveal-chevron {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid var(--ink-dim);
+  border-bottom: 2px solid var(--ink-dim);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform 0.2s ease;
+}
+
+.reveal[open] .reveal-chevron {
+  transform: rotate(225deg) translate(-2px, -2px);
+}
+
+.links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 16px 16px;
+}
+
+.links:empty {
+  display: none;
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap);
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+
+.link::after {
+  content: "";
+  flex: none;
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid var(--ink-faint);
+  border-right: 2px solid var(--ink-faint);
+  transform: rotate(45deg);
+}
+
+.link-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--service, var(--violet));
+}
+
+.footnote {
+  margin: 0;
+  text-align: center;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  text-wrap: balance;
+}
+
+/* --- Focus --------------------------------------------------------------- */
+
+:focus-visible {
+  outline: 2px solid var(--violet-soft);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.play:focus-visible {
+  outline-offset: 5px;
+}
+
+/* --- Motion preferences --------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora,
+  .play,
+  .glyph-wait {
+    animation: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+  }
+
+  .glyph-wait {
+    border-top-color: rgba(10, 8, 16, 0.28);
+    border-left-color: #0a0810;
+  }
+}
+
+/* --- Very small phones ---------------------------------------------------- */
+
+@media (max-width: 340px) {
+  .shell {
+    gap: 16px;
+  }
+
+  .dial {
+    width: min(72vw, 208px);
+  }
+
+  .reveal-summary {
+    padding: 12px 13px;
+  }
+
+  .links {
+    padding: 4px 13px 14px;
+  }
+}
+
+/* Landscape phones: the shell would otherwise push the disclosure off-screen. */
+@media (max-height: 560px) and (min-width: 480px) {
+  .dial {
+    width: min(38vh, 200px);
+  }
+}
