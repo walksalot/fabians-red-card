@@ -68,7 +68,13 @@ const problems = [];
 
 function watch(page, tag) {
   page.on('console', (msg) => {
-    if (msg.type() === 'error') problems.push(`[${tag}] console: ${msg.text()}`);
+    if (msg.type() === 'error') {
+      problems.push(`[${tag}] console: ${msg.text()} @ ${JSON.stringify(msg.location())}`);
+    }
+  });
+  page.on('requestfailed', (req) => problems.push(`[${tag}] requestfailed: ${req.url()}`));
+  page.on('response', (res) => {
+    if (res.status() >= 400) problems.push(`[${tag}] http ${res.status()}: ${res.url()}`);
   });
   page.on('pageerror', (err) => problems.push(`[${tag}] pageerror: ${err.message}`));
 }
@@ -77,9 +83,11 @@ async function noSideScroll(page, where) {
   const wide = await page.evaluate(() => {
     const w = document.documentElement.clientWidth;
     const out = [];
+    const scrollers = '.strip, .roster__seats, .mini-timeline, .prose';
     for (const node of document.querySelectorAll('body *')) {
       const r = node.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) continue;
+      if (node.closest(scrollers)) continue;
       if (r.right > w + 0.5) {
         out.push(`${node.tagName}.${node.className || ''}#${node.id || ''} R${Math.round(r.right)}`);
       }
@@ -91,7 +99,7 @@ async function noSideScroll(page, where) {
       out: out.slice(0, 12),
     };
   });
-  if (wide.scrollWidth > wide.clientWidth || wide.body > wide.clientWidth) {
+  if (wide.scrollWidth > wide.clientWidth || wide.out.length > 0) {
     problems.push(`[${where}] horizontal scroll: ${JSON.stringify(wide)}`);
   }
 }
@@ -141,11 +149,21 @@ async function setupGame(page, { names, mode = 'classic', target = null, photos 
 }
 
 /** Draw the card by tapping gap 0, then place it right (or deliberately wrong). */
-async function playTurn(page, { correct = true } = {}) {
+async function playTurn(page, { correct = null } = {}) {
   const screen = await page.evaluate(() => document.body.dataset.screen);
   if (screen === 'pass') await page.click('#btn-pass-continue');
   await page.waitForSelector('#play .gap');
   await page.locator('#timeline-strip .gap').first().click();
+  // Seat 0 always gets it right, seat 1 half the time, the rest never: the
+  // point of the rail is that diverging scores are readable.
+  const want = correct === null
+    ? await page.evaluate(() => {
+        const s = window.__timeline.state;
+        if (s.activeIndex === 0) return true;
+        if (s.activeIndex === 1) return s.turn % 2 === 0;
+        return false;
+      })
+    : correct;
   const gap = await page.evaluate((wantCorrect) => {
     const s = window.__timeline.state;
     const mine = s.mode === 'coop'
@@ -161,7 +179,7 @@ async function playTurn(page, { correct = true } = {}) {
     }
     const pick = wantCorrect ? ok[0] : (bad.length ? bad[0] : ok[0]);
     return pick;
-  }, correct);
+  }, want);
   await page.locator(`#timeline-strip .gap[data-gap-index="${gap}"]`).click();
   await page.click('#btn-place');
   await page.waitForFunction(() => document.body.dataset.screen === 'reveal');
@@ -187,26 +205,38 @@ async function run(browser, tag, options, turns) {
   watch(page, tag);
   await setupGame(page, options);
 
-  await bothWidths(page, `${tag}-pass-turn1`);
-  await page.setViewportSize(NARROW);
-  await shoot(page, `${tag}-pass-turn1-full-320`, { fullPage: true });
-  await page.setViewportSize(WIDE);
-  await shoot(page, `${tag}-pass-turn1-full-390`, { fullPage: true });
+  await bothWidths(page, `${tag}-pass-first`);
 
+  let over = false;
   for (let t = 0; t < turns; t += 1) {
-    const correct = t % 3 !== 1; // a deliberate miss every third turn
-    await playTurn(page, { correct });
-    if (t === 0) await bothWidths(page, `${tag}-reveal-turn1`);
+    await playTurn(page);
+    if (t === 0) await bothWidths(page, `${tag}-reveal-first`);
     await nextTurn(page);
-    const screen = await page.evaluate(() => document.body.dataset.screen);
-    if (screen === 'win') break;
-    if (screen === 'pass') await page.click('#btn-pass-continue');
-    if (t === 1) await bothWidths(page, `${tag}-play-mid`);
+    if (await page.evaluate(() => document.body.dataset.screen === 'win')) {
+      over = true;
+      break;
+    }
   }
 
-  // A few more turns so the counts diverge, then the money shots.
+  if (!over) {
+    // Mid-game, on the pass screen: the standings shot.
+    await bothWidths(page, `${tag}-pass`);
+    await page.setViewportSize(NARROW);
+    await shoot(page, `${tag}-pass-full-320`, { fullPage: true });
+    await page.setViewportSize(WIDE);
+    await shoot(page, `${tag}-pass-full-390`, { fullPage: true });
+
+    await page.click('#btn-pass-continue');
+    await page.waitForSelector('#play .gap');
+    await bothWidths(page, `${tag}-play`);
+
+    await playTurn(page);
+    await bothWidths(page, `${tag}-reveal`);
+  }
+
   const state = await page.evaluate(() => {
     const s = window.__timeline.state;
+    const seats = [...document.querySelectorAll('#play-roster-seats .roster__seat')];
     return {
       screen: document.body.dataset.screen,
       cards: s.players.map((p) => [p.name, p.timeline.length, p.tokens]),
@@ -214,24 +244,21 @@ async function run(browser, tag, options, turns) {
       mistakes: s.mistakes,
       active: s.players[s.activeIndex].name,
       turn: s.turn,
+      rail: seats.map((seat) => ({
+        rank: seat.dataset.rank,
+        leader: seat.dataset.leader,
+        cards: seat.querySelector('[data-field="cards"]').textContent,
+        label: seat.querySelector('.roster__chip').getAttribute('aria-label'),
+      })),
+      standings: [...document.querySelectorAll('#pass-standings-list .standing')].map((row) => ({
+        rank: row.dataset.rank,
+        leader: row.dataset.leader,
+        fill: row.style.getPropertyValue('--fill'),
+        text: row.textContent.replace(/\s+/g, ' ').trim(),
+      })),
     };
   });
-  console.log(tag, JSON.stringify(state));
-
-  if (state.screen === 'play') await bothWidths(page, `${tag}-play-late`);
-  if (state.screen === 'pass') await bothWidths(page, `${tag}-pass-late`);
-
-  // Standings and rail data, read back from the DOM.
-  const rail = await page.evaluate(() => {
-    const seats = [...document.querySelectorAll('#play-roster-seats .roster__seat')];
-    return seats.map((s) => ({
-      rank: s.dataset.rank,
-      leader: s.dataset.leader,
-      cards: s.querySelector('[data-field="cards"]').textContent,
-      label: s.querySelector('.roster__chip').getAttribute('aria-label'),
-    }));
-  });
-  console.log(tag, 'rail', JSON.stringify(rail));
+  console.log(tag, JSON.stringify(state, null, 1));
 
   await context.close();
 }

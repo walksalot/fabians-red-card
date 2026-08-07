@@ -898,7 +898,7 @@ body[data-busy="true"] .app {
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  padding: 4px 0 5px;
+  padding: 2px 0;
   border-bottom: 1px solid var(--line);
   background-color: rgba(8, 6, 15, 0.5);
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 70%);
@@ -909,7 +909,7 @@ body[data-busy="true"] .app {
   position: sticky;
   top: 0;
   z-index: 5;
-  padding-top: calc(4px + var(--sa-t));
+  padding-top: calc(2px + var(--sa-t));
   background-color: rgba(8, 6, 15, 0.82);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -926,7 +926,9 @@ body[data-busy="true"] .app {
   gap: var(--s-2);
   flex: 1 1 auto;
   min-width: 0;
-  padding: 0 var(--gut-r) 0 var(--gut-l);
+  /* The bottom padding is not decoration: overflow-y clips at the padding box,
+     and the NEXT flag hangs below the faces. */
+  padding: 3px var(--gut-r) 10px var(--gut-l);
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x proximity;
