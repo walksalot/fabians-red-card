@@ -925,20 +925,29 @@ body[data-busy="true"] .app {
   font-size: var(--f-xs);
   color: var(--text-faint);
 }
-/* A padlock drawn in CSS: the claim "this stays on your phone" is worth a mark
-   that reads before the sentence does, and this one costs no request. */
+/* A padlock drawn in CSS - body and shackle. The claim "this stays on your
+   phone" is worth a mark that reads before the sentence does, and this one
+   costs no request and no icon font. */
 .panel__hint--privacy::before {
   content: "";
   position: absolute;
   left: 1px;
-  top: 0.45em;
-  width: 8px;
+  top: 0.62em;
+  width: 10px;
   height: 7px;
-  border-radius: 1.5px;
+  border-radius: 2px;
+  background: var(--text-faint);
+}
+.panel__hint--privacy::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.19em;
+  width: 6px;
+  height: 6px;
   border: 1.5px solid var(--text-faint);
-  border-top-width: 4px;
-  border-top-color: transparent;
-  box-shadow: inset 0 -4px 0 -1px var(--text-faint);
+  border-bottom: 0;
+  border-radius: 3px 3px 0 0;
 }
 
 .player-list { display: grid; gap: var(--s-2); margin-bottom: var(--s-3); }
@@ -1996,6 +2005,11 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
   .avatar--md { --avatar-size: 46px; }
   .avatar--lg { --avatar-size: 54px; }
   .avatar--sm { --avatar-size: 36px; }
+  /* The status line and its escape hatch have to share ~186px here. The seat
+     number is the one thing that can go: the avatar is already in the seat
+     colour and the rows are in seat order. */
+  .player-row__num { display: none; }
+  .chip--sm { padding: 4px var(--s-2); }
 }
 
 /* Landscape phones and small tablets: the play screen gets two columns so the
