@@ -75,6 +75,8 @@ import {
   loadSettings,
   savePlayers,
   loadPlayers,
+  rememberAvatar,
+  avatarsFor,
 } from './storage.js';
 import { qrSvg } from './qr.js';
 import { burst } from './confetti.js';
@@ -485,8 +487,76 @@ async function acceptPhoto(draft, file) {
   draft.photo = photo;
   draft.skipped = false;
   rememberRoster();
+  // File it under the name too, so this face is offered next time even if the
+  // roster has moved on.
+  rememberAvatar(draft.name, photo);
   render();
   announce(`Photo added for ${draft.name || 'this player'}.`);
+}
+
+/**
+ * Offer the faces we already hold for the name in this row.
+ *
+ * Keyed on the name rather than the seat, because the name is the only thing
+ * about a player that survives being renamed, reordered or sitting a game out.
+ * The photo currently on the row is filtered out - offering somebody the face
+ * they are already wearing is just a dead button.
+ */
+function paintSavedAvatars(row, draft, index) {
+  const box = row.querySelector('[data-role="saved-avatars"]');
+  const list = row.querySelector('[data-role="saved-list"]');
+  if (!box || !list) return;
+
+  const name = (draft.name || '').trim();
+  const saved = avatarsFor(name).filter((photo) => photo !== draft.photo);
+  show(box, saved.length > 0);
+  if (!saved.length) {
+    replaceChildren(list, []);
+    return;
+  }
+
+  const labelNode = row.querySelector('[data-field="saved-label"]');
+  if (labelNode) labelNode.textContent = `Previous ${name} photos`;
+
+  // Rebuilding on every keystroke would be wasteful and would fight the caret,
+  // so bail out when the same faces are already on screen.
+  const signature = saved.join('|');
+  if (list.dataset.signature === signature) return;
+  list.dataset.signature = signature;
+
+  replaceChildren(
+    list,
+    saved.map((photo, i) => {
+      const node = clone('tpl-saved-avatar');
+      if (!node) return null;
+      const button = node.querySelector('.saved-avatar');
+      const img = node.querySelector('[data-field="photo"]');
+      if (img) img.src = photo;
+      if (button) {
+        button.dataset.photoIndex = String(i);
+        button.dataset.playerIndex = String(index);
+        button.setAttribute('aria-label', `Use this saved photo for ${name || 'this player'}`);
+      }
+      return node;
+    }),
+  );
+}
+
+/** Put a remembered face back on a row - no camera, no photo library, one tap. */
+function applySavedPhoto(index, photoIndex) {
+  const draft = view.setup.players[index];
+  if (!draft) return;
+  const saved = avatarsFor(draft.name).filter((photo) => photo !== draft.photo);
+  const photo = saved[photoIndex];
+  if (!photo) return;
+  draft.photo = photo;
+  draft.skipped = false;
+  draft.pending = false;
+  rememberRoster();
+  // Re-file it so the one they just picked is the first offered next time.
+  rememberAvatar(draft.name, photo);
+  render();
+  announce(`Photo set for ${draft.name || 'this player'}.`);
 }
 
 /** The escape hatch: nobody's grandmother can block the game from starting. */
@@ -756,6 +826,8 @@ function renderPlayerRows() {
     row.dataset.photoState = stateName;
     const label = row.querySelector('[data-field="status"]');
     if (label) label.textContent = draft.pending ? PHOTO_STATUS.pending : PHOTO_STATUS[stateName];
+
+    paintSavedAvatars(row, draft, index);
 
     const person = draft.name || `player ${index + 1}`;
     if (avatar) {
@@ -2342,6 +2414,11 @@ const HANDLERS = {
     const row = node.closest('[data-player-index]');
     if (row) skipPhoto(Number(row.dataset.playerIndex));
   },
+  'use-saved-photo': (node) => {
+    const row = node.closest('[data-player-index]');
+    if (!row) return;
+    applySavedPhoto(Number(row.dataset.playerIndex), Number(node.dataset.photoIndex));
+  },
   'target-dec': () => stepTarget(-1),
   'target-inc': () => stepTarget(1),
   'mistakes-dec': () => stepMistakes(-1),
@@ -2460,6 +2537,12 @@ function onInput(event) {
     // with the name as it is typed.
     const avatar = row.querySelector('.player-row__avatar [data-field="initial"]');
     if (avatar) avatar.textContent = initialFor(node.value);
+    // Two things follow from a name changing, and both are why the library is
+    // keyed on the name rather than the seat: a face chosen before the name was
+    // typed has to end up filed under the finished name, and a name we already
+    // know should immediately offer its faces.
+    if (draft.photo) rememberAvatar(draft.name, draft.photo);
+    paintSavedAvatars(row, draft, Number(row.dataset.playerIndex));
     return;
   }
   if (node.dataset && node.dataset.role === 'player-photo') {

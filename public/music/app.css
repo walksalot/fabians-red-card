@@ -1362,6 +1362,45 @@ body[data-mode="coop"] #pass-standings { display: none; }
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
+/* Saved faces for this name. Spans the full row, on its own line, so the
+   thumbnails get real width even at 320px where the row is already tight. */
+.player-row__saved {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  margin-top: var(--s-1);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--line);
+}
+.player-row__saved[hidden] { display: none; }
+.player-row__saved-label {
+  margin: 0 0 var(--s-1);
+  font-size: var(--f-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.player-row__saved-list {
+  display: flex;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.saved-avatar {
+  display: block;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface-2);
+  overflow: hidden;
+  cursor: pointer;
+}
+.saved-avatar:hover, .saved-avatar:focus-visible { border-color: var(--seat); }
+.saved-avatar__img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
 .player-row__status {
   flex: 1 1 auto;
   min-width: 0;

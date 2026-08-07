@@ -19,12 +19,17 @@ export const VERSION = 1;
 
 const PREFIX = `${NAMESPACE}:v${VERSION}:`;
 
-/** The three things worth surviving a reload, as unprefixed key names. */
+/** The four things worth surviving a reload, as unprefixed key names. */
 export const KEYS = Object.freeze({
   game: 'game',
   settings: 'settings',
   players: 'players',
+  avatars: 'avatars',
 });
+
+/** How many faces to keep per name, and how many names to remember at all. */
+const AVATARS_PER_NAME = 3;
+const AVATAR_NAMES = 24;
 
 // audio.js owns this key and its eviction policy; storage.js only knows about
 // it because it is the one payload we are happy to sacrifice to make room when
@@ -369,4 +374,84 @@ export function savePlayers(players) {
 export function loadPlayers() {
   const value = get(KEYS.players, null);
   return Array.isArray(value) ? value : null;
+}
+
+/* ---------------------------------------------------------------------------
+ * The avatar library
+ * ------------------------------------------------------------------------ */
+
+/**
+ * Faces remembered by NAME, which is the only thing about a player that stays
+ * put. The roster above records the last line-up, so it loses somebody's photo
+ * the moment they are renamed, reordered or dropped for one game - and then
+ * that person has to go and find a picture of themselves again. Keyed by name,
+ * a returning Paula is offered the Paulas we already have.
+ *
+ * Shape: { "paula": ["data:image/jpeg;base64,...", ...] }, newest first.
+ * Private and on-device, exactly like every other photo in this app.
+ */
+const foldName = (name) => String(name == null ? '' : name).trim().toLowerCase();
+
+/** @returns {Record<string, string[]>} */
+export function loadAvatars() {
+  const value = get(KEYS.avatars, null);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  /** @type {Record<string, string[]>} */
+  const out = {};
+  for (const [name, photos] of Object.entries(value)) {
+    if (!Array.isArray(photos)) continue;
+    const clean = photos.filter((p) => typeof p === 'string' && p.startsWith('data:image/'));
+    if (clean.length) out[name] = clean.slice(0, AVATARS_PER_NAME);
+  }
+  return out;
+}
+
+/**
+ * File one face under one name. Newest first, de-duplicated, and bounded on both
+ * axes so a group that plays every week cannot slowly fill the origin's quota.
+ * @param {string} name
+ * @param {string} photo a data: URL
+ * @returns {boolean}
+ */
+export function rememberAvatar(name, photo) {
+  const key = foldName(name);
+  if (!key || typeof photo !== 'string' || !photo.startsWith('data:image/')) return false;
+
+  const library = loadAvatars();
+  const existing = (library[key] || []).filter((p) => p !== photo);
+  library[key] = [photo, ...existing].slice(0, AVATARS_PER_NAME);
+
+  // Oldest names go first when there are too many. Object key order is
+  // insertion order, and re-filing a name does not move it, so the ordering is
+  // "first seen" rather than "last used" - close enough for a party game, and
+  // it never evicts the name somebody just typed.
+  let names = Object.keys(library);
+  while (names.length > AVATAR_NAMES) {
+    delete library[names[0]];
+    names = Object.keys(library);
+  }
+
+  if (set(KEYS.avatars, library)) return true;
+  // Out of room: keep only the newest face per name and try once more. The
+  // library is a convenience, so it yields before anything else does.
+  const thin = {};
+  for (const [n, photos] of Object.entries(library)) thin[n] = photos.slice(0, 1);
+  return set(KEYS.avatars, thin);
+}
+
+/**
+ * Faces we already hold for this name, newest first.
+ * @param {string} name
+ * @returns {string[]}
+ */
+export function avatarsFor(name) {
+  const key = foldName(name);
+  if (!key) return [];
+  const photos = loadAvatars()[key];
+  return Array.isArray(photos) ? photos : [];
+}
+
+/** Forget every saved face (offered in Settings alongside the other resets). */
+export function clearAvatars() {
+  return remove(KEYS.avatars);
 }
