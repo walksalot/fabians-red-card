@@ -1117,6 +1117,89 @@ export function progressFor(state, playerId) {
   return { cards, target: state.targetCards, cardsToGo: Math.max(0, state.targetCards - cards) };
 }
 
+/**
+ * The player who plays after the active one, or null when there is nobody else.
+ *
+ * Seat rotation is the same in every mode, co-op included: only the timeline is
+ * shared, never the turn order.
+ */
+export function nextPlayer(state) {
+  const people = state.players;
+  if (!Array.isArray(people) || people.length < 2) return null;
+  return people[(state.activeIndex + 1) % people.length] || null;
+}
+
+export function nextPlayerId(state) {
+  const player = nextPlayer(state);
+  return player ? player.id : null;
+}
+
+/**
+ * The player who is STRICTLY ahead on cards, or null when nobody is.
+ *
+ * Strictly, and on cards alone, because this drives a crown in the UI: at the
+ * start of a game everybody holds one card, and a crown on all eight faces is
+ * noise rather than information. Tokens deliberately do not break the tie - they
+ * settle a finished game (see `standings`), they do not make somebody "ahead".
+ * Co-op has one shared pile, so nobody can be ahead of anybody: always null.
+ */
+export function leader(state) {
+  if (state.mode === 'coop') return null;
+  if (!Array.isArray(state.players) || state.players.length < 2) return null;
+  let best = null;
+  let bestCards = -1;
+  let tied = false;
+  for (const player of state.players) {
+    const cards = timelineFor(state, player.id).length;
+    if (cards > bestCards) {
+      bestCards = cards;
+      best = player;
+      tied = false;
+    } else if (cards === bestCards) {
+      tied = true;
+    }
+  }
+  return tied ? null : best;
+}
+
+export function leaderId(state) {
+  const player = leader(state);
+  return player ? player.id : null;
+}
+
+/**
+ * One row per player in FIXED SEAT ORDER, with the three things a table needs
+ * to know at a glance: who is playing, who is next, and who is ahead.
+ *
+ * Seat order, not score order: people sit in a fixed order and re-sorting the
+ * faces every turn destroys the map they already have in their heads. Use
+ * `scoreboard()` when you actually want a ranking.
+ * In co-op every row reports the shared pile and the shared pool, and `isLeader`
+ * is false for everyone - there is no race to lead.
+ */
+export function seatStandings(state) {
+  const activeId = currentPlayerId(state);
+  const upNextId = nextPlayerId(state);
+  const aheadId = leaderId(state);
+  return state.players.map((p, seat) => {
+    const timeline = timelineFor(state, p.id);
+    return {
+      playerId: p.id,
+      name: p.name,
+      photo: p.photo === undefined ? null : p.photo,
+      color: typeof p.color === 'string' && p.color ? p.color : seatColor(seat),
+      seat,
+      timeline,
+      cards: timeline.length,
+      tokens: tokensFor(state, p.id),
+      cardsToGo: Math.max(0, state.targetCards - timeline.length),
+      isActive: p.id === activeId,
+      isNext: p.id === upNextId,
+      isLeader: p.id === aheadId,
+    };
+  });
+}
+
 /** Leaderboard rows, best first. In co-op every row shows the shared pile. */
 export function scoreboard(state) {
   const activeId = currentPlayerId(state);

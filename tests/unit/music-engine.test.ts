@@ -30,14 +30,19 @@ import {
   insertionIndexFor,
   isGameOver,
   isGapCorrect,
+  leader,
+  leaderId,
   legalActions,
   mulberry32,
+  nextPlayer,
+  nextPlayerId,
   pendingResult,
   progressFor,
   reduce,
   SEAT_COLORS,
   scoreboard,
   seatColor,
+  seatStandings,
   serialize,
   shuffle,
   timelineFor,
@@ -1431,6 +1436,140 @@ describe('selectors', () => {
       'NEXT_TURN',
       'END_GAME',
     ]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Turn order and the seat rail                                                */
+/* -------------------------------------------------------------------------- */
+
+describe('turn order', () => {
+  it('names the player after the active one, wrapping round the table', () => {
+    const state = game({ players: ['Ann', 'Bo', 'Cy'] });
+    expect(nextPlayer(state)?.name).toBe('Bo');
+    expect(nextPlayerId(state)).toBe('p2');
+
+    const last = { ...state, activeIndex: 2 };
+    expect(nextPlayer(last)?.name).toBe('Ann');
+    expect(nextPlayerId(last)).toBe('p1');
+  });
+
+  it('keeps up with NEXT_TURN', () => {
+    const start = game({ players: ['Ann', 'Bo'], deck: deckOf([1985, 1995, 2005]) });
+    expect(nextPlayerId(start)).toBe('p2');
+    const second = reduce(playTo(start, 0), { type: ACTIONS.NEXT_TURN });
+    expect(currentPlayerId(second)).toBe('p2');
+    expect(nextPlayerId(second)).toBe('p1');
+  });
+
+  it('has nobody up next in a one-player game', () => {
+    const solo = createGame({ players: ['Ann'], deck: deckOf([1970, 1980, 1990]) });
+    expect(nextPlayer(solo)).toBeNull();
+    expect(nextPlayerId(solo)).toBeNull();
+  });
+
+  it('rotates seats in co-op too - only the timeline is shared', () => {
+    const state = game({ mode: 'coop', players: ['Ann', 'Bo', 'Cy'] });
+    expect(nextPlayer(state)?.name).toBe('Bo');
+  });
+});
+
+describe('leader', () => {
+  it('is nobody while the table is level', () => {
+    const state = game({ timelines: [[1970], [1980], [1990]] });
+    expect(leader(state)).toBeNull();
+    expect(leaderId(state)).toBeNull();
+  });
+
+  it('is the one player strictly ahead on cards', () => {
+    const state = game({ timelines: [[1970], [1970, 1980, 1990], [1990]] });
+    expect(leader(state)?.name).toBe('Bo');
+    expect(leaderId(state)).toBe('p2');
+  });
+
+  it('is nobody when two players share the top count, tokens or not', () => {
+    const state = game({
+      timelines: [[1970, 1980], [1970, 1980], [1990]],
+      tokens: [5, 0, 2],
+    });
+    expect(leader(state)).toBeNull();
+  });
+
+  it('is nobody in co-op, however big the shared pile gets', () => {
+    const state = game({ mode: 'coop', sharedTimeline: [1960, 1970, 1980] });
+    expect(leader(state)).toBeNull();
+    expect(leaderId(state)).toBeNull();
+  });
+});
+
+describe('seatStandings', () => {
+  it('stays in seat order however the scores move', () => {
+    const state = game({
+      timelines: [[1970], [1970, 1980, 1990], [1990, 2000]],
+      tokens: [2, 1, 4],
+    });
+    const rows = seatStandings(state);
+    expect(rows.map((r) => r.playerId)).toEqual(['p1', 'p2', 'p3']);
+    // The scoreboard ranks the same players; the rail deliberately does not.
+    expect(scoreboard(state).map((r) => r.playerId)).toEqual(['p2', 'p3', 'p1']);
+    expect(rows.map((r) => r.name)).toEqual(['Ann', 'Bo', 'Cy']);
+    expect(rows.map((r) => r.cards)).toEqual([1, 3, 2]);
+    expect(rows.map((r) => r.tokens)).toEqual([2, 1, 4]);
+    expect(rows.map((r) => r.cardsToGo)).toEqual([9, 7, 8]);
+    expect(rows.map((r) => r.seat)).toEqual([0, 1, 2]);
+    expect(rows.map((r) => r.color)).toEqual(SEAT_COLORS.slice(0, 3));
+  });
+
+  it('flags exactly one active, one next and at most one leader', () => {
+    const state = game({ timelines: [[1970], [1970, 1980], [1990]], activeIndex: 2 });
+    const rows = seatStandings(state);
+    expect(rows.map((r) => r.isActive)).toEqual([false, false, true]);
+    expect(rows.map((r) => r.isNext)).toEqual([true, false, false]);
+    expect(rows.map((r) => r.isLeader)).toEqual([false, true, false]);
+  });
+
+  it('crowns nobody while everyone is tied', () => {
+    const rows = seatStandings(game({ timelines: [[1970], [1980], [1990]] }));
+    expect(rows.some((r) => r.isLeader)).toBe(false);
+  });
+
+  it('reports the shared pile and pool on every co-op row, and no leader', () => {
+    const state = game({
+      mode: 'coop',
+      players: ['Ann', 'Bo', 'Cy'],
+      sharedTimeline: [1960, 1970, 1980],
+      sharedTokens: 4,
+      targetCards: 10,
+    });
+    const rows = seatStandings(state);
+    expect(rows.map((r) => r.cards)).toEqual([3, 3, 3]);
+    expect(rows.map((r) => r.tokens)).toEqual([4, 4, 4]);
+    expect(rows.map((r) => r.cardsToGo)).toEqual([7, 7, 7]);
+    expect(rows.some((r) => r.isLeader)).toBe(false);
+    expect(rows.map((r) => r.isActive)).toEqual([true, false, false]);
+    expect(rows.map((r) => r.isNext)).toEqual([false, true, false]);
+  });
+
+  it('carries the face and accent so a chip can be drawn from one row', () => {
+    const state = createGame({
+      players: [
+        { name: 'Ann', photo: 'data:image/jpeg;base64,AAA' },
+        { name: 'Bo' },
+      ],
+      deck: deckOf([1970, 1980, 1990]),
+    });
+    const rows = seatStandings(state);
+    expect(rows[0].photo).toBe('data:image/jpeg;base64,AAA');
+    expect(rows[1].photo).toBeNull();
+    expect(rows[1].color).toBe(SEAT_COLORS[1]);
+  });
+
+  it('is a pure read - it works on a frozen state and hands back live timelines', () => {
+    const state = deepFreeze(game({ timelines: [[1970], [1980, 1990], [2000]] }));
+    const rows = seatStandings(state);
+    expect(rows.map((r) => years(r.timeline))).toEqual([[1970], [1980, 1990], [2000]]);
+    expect(nextPlayerId(state)).toBe('p2');
+    expect(leaderId(state)).toBe('p2');
   });
 });
 

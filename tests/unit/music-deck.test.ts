@@ -17,9 +17,11 @@ const slug = (s: string) =>
     .replace(/^-|-$/g, '');
 
 describe('deck data', () => {
-  it('is big enough to run several games without repeats', () => {
-    // 8 players x 10 cards, plus the misses they will make along the way.
-    expect(DECK.length).toBeGreaterThanOrEqual(200);
+  it('is big enough that a whole evening does not repeat itself', () => {
+    // A single game consumes roughly 40-80 cards (measured by playing games
+    // through the engine), so a 300-card deck started repeating by the third
+    // game of the night. This floor is what keeps that from creeping back.
+    expect(DECK.length).toBeGreaterThanOrEqual(550);
   });
 
   it('has unique ids', () => {
@@ -72,9 +74,26 @@ describe('deck data', () => {
     // A player holding only 1960s and 1970s cards cannot make an interesting guess;
     // every decade the filter chips advertise has to be genuinely stocked.
     for (const decade of DECADES) {
-      expect(perDecade.get(decade) ?? 0, `${decade}s`).toBeGreaterThanOrEqual(10);
+      expect(perDecade.get(decade) ?? 0, `${decade}s`).toBeGreaterThanOrEqual(25);
     }
-    expect(DECADES.length).toBeGreaterThanOrEqual(6);
+    expect(DECADES.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('does not let rock and pop swallow the deck', () => {
+    // The deck once ran 59% rock+pop, and it showed: games felt like the same
+    // handful of songs every time. Everything else is what makes a round feel
+    // different from the last one, so the balance is worth defending in a test
+    // rather than trusting the next person who adds cards to remember it.
+    const perGenre = new Map<string, number>();
+    for (const c of DECK) perGenre.set(c.genre, (perGenre.get(c.genre) ?? 0) + 1);
+    const bulk = (perGenre.get('rock') ?? 0) + (perGenre.get('pop') ?? 0);
+    expect(bulk / DECK.length).toBeLessThan(0.5);
+
+    // And the genres that make the deck feel wide have to actually be stocked,
+    // not represented by a token card or two.
+    for (const genre of ['jazz', 'reggae', 'metal', 'folk', 'country', 'latin', 'indie']) {
+      expect(perGenre.get(genre) ?? 0, genre).toBeGreaterThanOrEqual(12);
+    }
   });
 
   it('advertises exactly the decades it stocks', () => {
