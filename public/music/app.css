@@ -952,7 +952,9 @@ body[data-busy="true"] .app {
 }
 .roster__seats::-webkit-scrollbar { display: none; }
 
-.roster__seat { flex: 0 0 auto; scroll-snap-align: center; }
+/* Start-aligned, not centred: it is the alignment ui.js scrolls to, and a chip
+   that snaps to the left edge keeps the seats after it on screen. */
+.roster__seat { flex: 0 0 auto; scroll-snap-align: start; }
 .roster__chip {
   display: grid;
   place-items: center;
@@ -1036,18 +1038,24 @@ body[data-busy="true"] .app {
 
 /* Co-op: one pile, one pool. A per-player card count would be the same number
    eight times, so the badge goes and a team tile takes its place. */
+/* Two tight lines, not one wide one: at 320px this tile and the faces share
+   the band, and every pixel it takes is a face somebody has to scroll to. */
 .roster__team {
   display: none;
   flex: 0 0 auto;
+  grid-template-columns: auto auto;
   align-items: baseline;
-  gap: var(--s-2);
+  justify-content: center;
+  gap: 0 5px;
   margin-left: var(--gut-l);
-  padding: 4px var(--s-2);
+  padding: 3px var(--s-2);
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--surface-2);
   white-space: nowrap;
+  line-height: 1.15;
 }
+.roster__team-miss { grid-column: 1 / -1; justify-self: center; }
 .roster__team-label {
   font-size: var(--f-3xs);
   font-weight: 800;
@@ -1067,7 +1075,7 @@ body[data-busy="true"] .app {
   color: var(--gold);
   font-variant-numeric: tabular-nums;
 }
-body[data-mode="coop"] .roster__team { display: flex; }
+body[data-mode="coop"] .roster__team { display: grid; }
 body[data-mode="coop"] .roster__count { display: none; }
 body[data-mode="coop"] .roster__seats { padding-left: var(--pad); }
 
@@ -2430,6 +2438,18 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
   .tl-card__title { -webkit-line-clamp: 1; }
   .strip:empty { min-height: 92px; }
   .actions { padding-block: var(--s-2) calc(var(--s-2) + var(--sa-b)); }
+
+  /* Same bargain on the pass screen: the face and the tap target give up a
+     little so a four-player table can read its standings without scrolling. */
+  .screen--pass {
+    gap: var(--s-2);
+    padding-top: calc(var(--s-3) + var(--sa-t));
+  }
+  .pass__avatar { --avatar-size: min(28vw, 112px); }
+  .pass__name { font-size: var(--f-2xl); }
+  .pass__tap { min-height: 84px; }
+  .standings__title { margin-bottom: var(--s-1); }
+  .standing { padding-block: 4px; }
 }
 
 /* Landscape phones and small tablets: the play screen gets two columns so the

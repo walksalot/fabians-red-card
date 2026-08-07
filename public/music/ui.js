@@ -1419,28 +1419,41 @@ function paintRoster(seats, team) {
   const fit = active ? `${active.id}@${seats.clientWidth}` : '';
   if (active && seats.dataset.activeSeat !== fit) {
     seats.dataset.activeSeat = fit;
-    const chip = seats.querySelector('[data-rank="active"]');
-    if (chip) scrollSeatIntoView(seats, chip);
+    scrollSeatIntoView(
+      seats,
+      seats.querySelector('[data-rank="active"]'),
+      seats.querySelector('[data-rank="next"]'),
+    );
   }
 }
 
 /**
- * Bring a chip into view with the SMALLEST scroll that does it.
+ * Put the active chip - and the one after it - in view, but only when they are
+ * not there already.
  *
- * Deliberately not centred like the timeline strip: the rail is a seating plan,
- * and shoving the first two seats off the left edge to centre the third throws
- * away the very thing the rail is for.
+ * Three rules, all learned the hard way. Both chips, because "who is next" is
+ * half the point of the rail and the two are always neighbours. Not centred the
+ * way the timeline strip is: the rail is a seating plan, and shoving the first
+ * two seats off the left edge to centre the third throws away the thing the
+ * rail is for. And when it does scroll it lands exactly on the active chip's own
+ * snap position - anywhere else and the scroll-snap container simply drags the
+ * rail somewhere else the moment the programmatic scroll finishes.
  */
-function scrollSeatIntoView(seats, chip) {
-  if (typeof seats.scrollTo !== 'function') return;
-  const margin = 12;
-  const left = chip.offsetLeft - margin;
-  const right = chip.offsetLeft + chip.offsetWidth + margin;
-  let target = seats.scrollLeft;
-  if (left < seats.scrollLeft) target = left;
-  else if (right > seats.scrollLeft + seats.clientWidth) target = right - seats.clientWidth;
-  target = Math.max(0, Math.min(target, seats.scrollWidth - seats.clientWidth));
-  if (Math.abs(seats.scrollLeft - target) < 2) return;
+function scrollSeatIntoView(seats, chip, nextChip) {
+  if (!chip || typeof seats.scrollTo !== 'function') return;
+  const left = seats.scrollLeft;
+  const right = left + seats.clientWidth;
+  const inView = (node) =>
+    node.offsetLeft >= left && node.offsetLeft + node.offsetWidth <= right;
+  if (inView(chip) && (!nextChip || inView(nextChip))) return;
+  // Snap positions are start-aligned, offset by the scroll padding - which is
+  // the container's own inline padding, so the first chip's is exactly 0.
+  const pad = Number.parseFloat(window.getComputedStyle(seats).paddingLeft) || 0;
+  const target = Math.max(
+    0,
+    Math.min(chip.offsetLeft - pad, seats.scrollWidth - seats.clientWidth),
+  );
+  if (Math.abs(left - target) < 2) return;
   try {
     seats.scrollTo({ left: target, behavior: motionIsReduced() ? 'auto' : 'smooth' });
   } catch {

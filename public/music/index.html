@@ -1150,8 +1150,10 @@
         <span class="roster__crown" aria-hidden="true">
           <svg viewBox="0 0 24 24" focusable="false"><path d="M2.6 18.4 4.4 6.9l5.1 4.4L12 4.3l2.5 7 5.1-4.4 1.8 11.5z" fill="currentColor"/></svg>
         </span>
+        <!-- Inside the face, not next to it: the flag is positioned against the
+             circle it belongs to, and .roster__face is what makes that box. -->
+        <span class="roster__flag" data-field="flag" aria-hidden="true">Next</span>
       </span>
-      <span class="roster__flag" data-field="flag" aria-hidden="true">Next</span>
     </button>
   </li>
 </template>

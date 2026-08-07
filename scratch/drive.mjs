@@ -126,6 +126,14 @@ async function shoot(page, name, opts = {}) {
       problems.push(`[${name}] play button clipped by the fold: ${JSON.stringify(dial)}`);
     }
   }
+  if (name.includes('pass') && !name.includes('full')) {
+    const rows = await page.evaluate(() => {
+      const list = [...document.querySelectorAll('#pass-standings-list .standing')];
+      const visible = list.filter((r) => r.getBoundingClientRect().bottom <= window.innerHeight);
+      return `${visible.length}/${list.length} standings rows above the fold`;
+    });
+    console.log(`  ${name}: ${rows}`);
+  }
   await page.screenshot({ path: `${OUT}/${name}.png`, ...opts });
 }
 
