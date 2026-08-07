@@ -119,6 +119,16 @@
                            that row's [data-role="player-photo"] file input]
       skip-photo          [the .player-row__skip toggle in each row
                            (aria-pressed): on = use the generated initial]
+      add-person          [a .person__add chip in #people-list, data-name -
+                           seats that past player, reusing an untouched row
+                           before appending a new one]
+      forget-person       [the .person__forget cross on the same chip; only
+                           reachable while #people-block[data-editing="true"]]
+      toggle-people-edit  [#btn-people-edit (aria-pressed) - swaps the guest
+                           list between tap-to-add and tap-to-forget]
+      use-saved-photo     [a .saved-avatar in that row's saved-list; carries
+                           data-photo-index and data-player-index. Puts a face
+                           we already hold for this NAME back on the row]
       target-dec/target-inc         [#field-target-cards stepper]
       mistakes-dec/mistakes-inc     [#field-mistake-limit stepper]
       toggle-decade       [buttons in #decade-chips, data-decade="1980"]
@@ -181,7 +191,13 @@
     challenge   - #challenge-player-name
 
   CONTAINERS ui.js FILLS (all ship EMPTY - clone the matching <template>)
-    #player-list          <- #tpl-player-row
+    #people-list          <- #tpl-person. #people-block is unhidden only once
+                          somebody has played before, and carries
+                          [data-editing="true"|"false"].
+    #player-list          <- #tpl-player-row; each row's [data-role="saved-list"]
+                          <- #tpl-saved-avatar, and its [data-role="saved-avatars"]
+                          wrapper is unhidden only when we hold a face for the
+                          name currently typed in that row
     #play-roster-seats    <- #tpl-roster-chip
     #reveal-roster-seats  <- #tpl-roster-chip
     #pass-standings-list  <- #tpl-standings-row
@@ -336,13 +352,23 @@
       <fieldset class="panel" aria-labelledby="setup-players-label">
         <h2 class="panel__legend" id="setup-players-label">Players</h2>
         <p class="panel__hint">
-          Two to eight. Everyone needs a name and a face &mdash; tap a circle to take
-          or choose a photo. Not keen? Tap <strong>Skip photo</strong> and that player
-          gets their initial in their own colour instead.
+          Two to eight. Tap a circle for a photo, or <strong>Skip photo</strong> for an
+          initial instead.
         </p>
         <p class="panel__hint panel__hint--privacy">
-          Photos stay on this phone. They are never uploaded and never go in the QR code.
+          Photos never leave this phone.
         </p>
+        <!-- Everybody who has played before. ui.js fills and unhides this; it
+             stays [hidden] on a first-ever setup, when there is nobody yet. -->
+        <div class="people" id="people-block" hidden>
+          <div class="people__head">
+            <h3 class="people__label" id="people-label">Played before</h3>
+            <button type="button" class="linkbtn people__edit" id="btn-people-edit"
+                    data-action="toggle-people-edit" aria-pressed="false">Edit</button>
+          </div>
+          <p class="panel__hint people__hint" id="people-hint">Tap somebody to add them.</p>
+          <ul class="people__list" id="people-list" aria-labelledby="people-label"></ul>
+        </div>
         <ul class="player-list" id="player-list"></ul>
         <button type="button" class="btn btn--ghost btn--block" id="btn-add-player" data-action="add-player">
           <span class="btn__glyph" aria-hidden="true">+</span> Add player
@@ -365,48 +391,42 @@
       <!-- mode -->
       <fieldset class="panel" aria-labelledby="setup-mode-label">
         <h2 class="panel__legend" id="setup-mode-label">Mode</h2>
-        <ul class="radio-list">
+        <!-- Four titles in a grid, and ONE hint underneath for whichever is
+             selected. All four hints ship in the markup; CSS shows the one
+             matching body[data-mode], which ui.js already sets - so the panel
+             costs one line instead of four without losing a word. -->
+        <ul class="mode-grid">
           <li>
-            <label class="radio-card" for="mode-classic">
+            <label class="mode-chip" for="mode-classic">
               <input type="radio" name="mode" id="mode-classic" value="classic" checked>
-              <span class="radio-card__box" aria-hidden="true"></span>
-              <span class="radio-card__body">
-                <span class="radio-card__title">Classic</span>
-                <span class="radio-card__hint">Put the song in the right spot. That is the whole game.</span>
-              </span>
+              <span class="mode-chip__title">Classic</span>
             </label>
           </li>
           <li>
-            <label class="radio-card" for="mode-advanced">
+            <label class="mode-chip" for="mode-advanced">
               <input type="radio" name="mode" id="mode-advanced" value="advanced">
-              <span class="radio-card__box" aria-hidden="true"></span>
-              <span class="radio-card__body">
-                <span class="radio-card__title">Advanced</span>
-                <span class="radio-card__hint">The spot only counts if you also name the title and the artist.</span>
-              </span>
+              <span class="mode-chip__title">Advanced</span>
             </label>
           </li>
           <li>
-            <label class="radio-card" for="mode-expert">
+            <label class="mode-chip" for="mode-expert">
               <input type="radio" name="mode" id="mode-expert" value="expert">
-              <span class="radio-card__box" aria-hidden="true"></span>
-              <span class="radio-card__body">
-                <span class="radio-card__title">Expert</span>
-                <span class="radio-card__hint">Advanced, plus you must call the exact release year.</span>
-              </span>
+              <span class="mode-chip__title">Expert</span>
             </label>
           </li>
           <li>
-            <label class="radio-card" for="mode-coop">
+            <label class="mode-chip" for="mode-coop">
               <input type="radio" name="mode" id="mode-coop" value="coop">
-              <span class="radio-card__box" aria-hidden="true"></span>
-              <span class="radio-card__body">
-                <span class="radio-card__title">Co-op</span>
-                <span class="radio-card__hint">One shared timeline, shared tokens. Too many misses and everyone loses.</span>
-              </span>
+              <span class="mode-chip__title">Co-op</span>
             </label>
           </li>
         </ul>
+        <p class="panel__hint mode-hint" aria-live="polite">
+          <span data-mode-hint="classic">Put the song in the right spot. That is the whole game.</span>
+          <span data-mode-hint="advanced">The spot only counts if you also name the title and the artist.</span>
+          <span data-mode-hint="expert">Advanced, plus you must call the exact release year.</span>
+          <span data-mode-hint="coop">One shared timeline, shared tokens. Too many misses and everyone loses.</span>
+        </p>
       </fieldset>
 
       <!-- co-op only -->
@@ -421,80 +441,91 @@
         <p class="panel__hint">Every wrong placement uses one. Run out and the whole table loses.</p>
       </fieldset>
 
-      <!-- deck -->
-      <fieldset class="panel" aria-labelledby="setup-deck-label">
-        <h2 class="panel__legend" id="setup-deck-label">The deck</h2>
+      <!-- Deck filters and playback: every option kept, but folded away. These
+           are set-once choices, and open they were 769px - most of a phone screen
+           of scrolling before you reach Start. The summary carries the live state,
+           so folding hides the controls, never what is actually switched on. -->
+      <details class="foldout" id="setup-more">
+        <summary class="foldout__summary">
+          <span class="foldout__title">Deck &amp; playback</span>
+          <span class="foldout__state" id="setup-more-state">All decades &middot; all genres</span>
+          <svg viewBox="0 0 24 24" class="foldout__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </summary>
+        <!-- deck -->
+        <fieldset class="panel" aria-labelledby="setup-deck-label">
+          <h2 class="panel__legend" id="setup-deck-label">The deck</h2>
 
-        <div class="chipset">
-          <div class="chipset__head">
-            <h3 class="chipset__title" id="decades-label">Decades</h3>
-            <button type="button" class="linkbtn" id="btn-decades-all" data-action="chips-all" data-target="decade">All</button>
+          <div class="chipset">
+            <div class="chipset__head">
+              <h3 class="chipset__title" id="decades-label">Decades</h3>
+              <button type="button" class="linkbtn" id="btn-decades-all" data-action="chips-all" data-target="decade">All</button>
+            </div>
+            <div class="chips" id="decade-chips" role="group" aria-labelledby="decades-label">
+              <button type="button" class="chip" data-action="toggle-decade" data-decade="1950" aria-pressed="true">50s</button>
+              <button type="button" class="chip" data-action="toggle-decade" data-decade="1960" aria-pressed="true">60s</button>
+              <button type="button" class="chip" data-action="toggle-decade" data-decade="1970" aria-pressed="true">70s</button>
+              <button type="button" class="chip" data-action="toggle-decade" data-decade="1980" aria-pressed="true">80s</button>
+              <button type="button" class="chip" data-action="toggle-decade" data-decade="1990" aria-pressed="true">90s</button>
+              <button type="button" class="chip" data-action="toggle-decade" data-decade="2000" aria-pressed="true">00s</button>
+              <button type="button" class="chip" data-action="toggle-decade" data-decade="2010" aria-pressed="true">10s</button>
+              <button type="button" class="chip" data-action="toggle-decade" data-decade="2020" aria-pressed="true">20s</button>
+            </div>
           </div>
-          <div class="chips" id="decade-chips" role="group" aria-labelledby="decades-label">
-            <button type="button" class="chip" data-action="toggle-decade" data-decade="1950" aria-pressed="true">50s</button>
-            <button type="button" class="chip" data-action="toggle-decade" data-decade="1960" aria-pressed="true">60s</button>
-            <button type="button" class="chip" data-action="toggle-decade" data-decade="1970" aria-pressed="true">70s</button>
-            <button type="button" class="chip" data-action="toggle-decade" data-decade="1980" aria-pressed="true">80s</button>
-            <button type="button" class="chip" data-action="toggle-decade" data-decade="1990" aria-pressed="true">90s</button>
-            <button type="button" class="chip" data-action="toggle-decade" data-decade="2000" aria-pressed="true">00s</button>
-            <button type="button" class="chip" data-action="toggle-decade" data-decade="2010" aria-pressed="true">10s</button>
-            <button type="button" class="chip" data-action="toggle-decade" data-decade="2020" aria-pressed="true">20s</button>
-          </div>
-        </div>
 
-        <div class="chipset">
-          <div class="chipset__head">
-            <h3 class="chipset__title" id="genres-label">Genres</h3>
-            <button type="button" class="linkbtn" id="btn-genres-all" data-action="chips-all" data-target="genre">All</button>
+          <div class="chipset">
+            <div class="chipset__head">
+              <h3 class="chipset__title" id="genres-label">Genres</h3>
+              <button type="button" class="linkbtn" id="btn-genres-all" data-action="chips-all" data-target="genre">All</button>
+            </div>
+            <div class="chips" id="genre-chips" role="group" aria-labelledby="genres-label">
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="pop" aria-pressed="true">Pop</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="rock" aria-pressed="true">Rock</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="hiphop" aria-pressed="true">Hip-hop</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="rnb" aria-pressed="true">R&amp;B</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="soul" aria-pressed="true">Soul</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="country" aria-pressed="true">Country</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="dance" aria-pressed="true">Dance</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="latin" aria-pressed="true">Latin</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="metal" aria-pressed="true">Metal</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="folk" aria-pressed="true">Folk</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="jazz" aria-pressed="true">Jazz</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="reggae" aria-pressed="true">Reggae</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="indie" aria-pressed="true">Indie</button>
+              <button type="button" class="chip" data-action="toggle-genre" data-genre="disco" aria-pressed="true">Disco</button>
+            </div>
           </div>
-          <div class="chips" id="genre-chips" role="group" aria-labelledby="genres-label">
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="pop" aria-pressed="true">Pop</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="rock" aria-pressed="true">Rock</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="hiphop" aria-pressed="true">Hip-hop</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="rnb" aria-pressed="true">R&amp;B</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="soul" aria-pressed="true">Soul</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="country" aria-pressed="true">Country</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="dance" aria-pressed="true">Dance</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="latin" aria-pressed="true">Latin</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="metal" aria-pressed="true">Metal</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="folk" aria-pressed="true">Folk</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="jazz" aria-pressed="true">Jazz</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="reggae" aria-pressed="true">Reggae</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="indie" aria-pressed="true">Indie</button>
-            <button type="button" class="chip" data-action="toggle-genre" data-genre="disco" aria-pressed="true">Disco</button>
-          </div>
-        </div>
 
-        <p class="tally" id="eligible-count" role="status" aria-live="polite">
-          <strong class="tally__num" id="eligible-count-value">&mdash;</strong>
-          <span class="tally__label">songs match these filters</span>
-        </p>
-        <p class="notice notice--warn" id="deck-warning" hidden>
-          That is a thin deck for this many players. Add decades or genres.
-        </p>
-      </fieldset>
-
-      <!-- playback -->
-      <fieldset class="panel" aria-labelledby="setup-playback-label">
-        <h2 class="panel__legend" id="setup-playback-label">Playback</h2>
-        <div class="field">
-          <label class="field__label" for="playback-source">Play songs with</label>
-          <div class="select">
-            <select id="playback-source" name="playback-source">
-              <option value="preview" selected>In-app preview (30 seconds)</option>
-              <option value="spotify">Spotify</option>
-              <option value="apple">Apple Music</option>
-              <option value="youtube">YouTube</option>
-            </select>
-            <svg viewBox="0 0 24 24" class="select__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </div>
-          <p class="field__hint">
-            The in-app preview plays here and gives nothing away. Pick a streaming
-            service instead and this phone gets a link to open rather than a preview
-            &mdash; which shows the active player the title before they guess.
+          <p class="tally" id="eligible-count" role="status" aria-live="polite">
+            <strong class="tally__num" id="eligible-count-value">&mdash;</strong>
+            <span class="tally__label">songs match these filters</span>
           </p>
-        </div>
-      </fieldset>
+          <p class="notice notice--warn" id="deck-warning" hidden>
+            That is a thin deck for this many players. Add decades or genres.
+          </p>
+        </fieldset>
+
+        <!-- playback -->
+        <fieldset class="panel" aria-labelledby="setup-playback-label">
+          <h2 class="panel__legend" id="setup-playback-label">Playback</h2>
+          <div class="field">
+            <label class="field__label" for="playback-source">Play songs with</label>
+            <div class="select">
+              <select id="playback-source" name="playback-source">
+                <option value="preview" selected>In-app preview (30 seconds)</option>
+                <option value="spotify">Spotify</option>
+                <option value="apple">Apple Music</option>
+                <option value="youtube">YouTube</option>
+              </select>
+              <svg viewBox="0 0 24 24" class="select__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <p class="field__hint">
+              The in-app preview plays here and gives nothing away. Pick a streaming
+              service instead and this phone gets a link to open rather than a preview
+              &mdash; which shows the active player the title before they guess.
+            </p>
+          </div>
+        </fieldset>
+      </details>
 
       <div class="setup__go">
         <!-- ui.js replaces this with the live count; the shipped text is the
@@ -1063,11 +1094,45 @@
         Skip photo
       </button>
     </p>
+    <!-- Faces already saved under this name. ui.js fills and unhides it as the
+         name is typed; it stays [hidden] when we hold nothing for that name. -->
+    <div class="player-row__saved" data-role="saved-avatars" hidden>
+      <p class="player-row__saved-label" data-field="saved-label">Previous photos</p>
+      <ul class="player-row__saved-list" data-role="saved-list"></ul>
+    </div>
     <!-- Visually hidden rather than [hidden]: some older iOS builds refuse to
          open the picker for a display:none file input, and "the camera button
          does nothing" is not a bug anyone can work around at a party. -->
     <input class="player-row__file" type="file" accept="image/*" data-role="player-photo"
            tabindex="-1" aria-hidden="true">
+  </li>
+</template>
+
+<!-- One past player. Set li[data-name], the button's data-name and aria-label,
+     [data-field="name"], and the avatar's data-photo/img src. The remove button
+     only does anything while #people-block has data-editing="true". -->
+<template id="tpl-person">
+  <li class="person" data-name="">
+    <button type="button" class="person__add" data-action="add-person" data-name="">
+      <span class="avatar avatar--sm" data-photo="false">
+        <img class="avatar__img" data-field="photo" alt="">
+        <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
+      </span>
+      <span class="person__name" data-field="name">Paula</span>
+    </button>
+    <button type="button" class="person__forget" data-action="forget-person" data-name="" tabindex="-1">
+      <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
+    </button>
+  </li>
+</template>
+
+<!-- One remembered face. Set the button's data-photo-index and aria-label, and
+     the img's src. Lives in a .player-row__saved-list. -->
+<template id="tpl-saved-avatar">
+  <li>
+    <button type="button" class="saved-avatar" data-action="use-saved-photo" data-photo-index="0">
+      <img class="saved-avatar__img" data-field="photo" alt="">
+    </button>
   </li>
 </template>
 

@@ -19,12 +19,21 @@ export const VERSION = 1;
 
 const PREFIX = `${NAMESPACE}:v${VERSION}:`;
 
-/** The three things worth surviving a reload, as unprefixed key names. */
+/** The four things worth surviving a reload, as unprefixed key names. */
 export const KEYS = Object.freeze({
   game: 'game',
   settings: 'settings',
   players: 'players',
+  avatars: 'avatars',
+  people: 'people',
 });
+
+/** How many faces to keep per name, and how many names to remember at all. */
+const AVATARS_PER_NAME = 3;
+const AVATAR_NAMES = 24;
+
+/** How many past players to offer at setup. */
+const PEOPLE_LIMIT = 24;
 
 // audio.js owns this key and its eviction policy; storage.js only knows about
 // it because it is the one payload we are happy to sacrifice to make room when
@@ -369,4 +378,162 @@ export function savePlayers(players) {
 export function loadPlayers() {
   const value = get(KEYS.players, null);
   return Array.isArray(value) ? value : null;
+}
+
+/* ---------------------------------------------------------------------------
+ * The avatar library
+ * ------------------------------------------------------------------------ */
+
+/**
+ * Faces remembered by NAME, which is the only thing about a player that stays
+ * put. The roster above records the last line-up, so it loses somebody's photo
+ * the moment they are renamed, reordered or dropped for one game - and then
+ * that person has to go and find a picture of themselves again. Keyed by name,
+ * a returning Paula is offered the Paulas we already have.
+ *
+ * Shape: { "paula": ["data:image/jpeg;base64,...", ...] }, newest first.
+ * Private and on-device, exactly like every other photo in this app.
+ */
+const foldName = (name) => String(name == null ? '' : name).trim().toLowerCase();
+
+/** @returns {Record<string, string[]>} */
+export function loadAvatars() {
+  const value = get(KEYS.avatars, null);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  /** @type {Record<string, string[]>} */
+  const out = {};
+  for (const [name, photos] of Object.entries(value)) {
+    if (!Array.isArray(photos)) continue;
+    const clean = photos.filter((p) => typeof p === 'string' && p.startsWith('data:image/'));
+    if (clean.length) out[name] = clean.slice(0, AVATARS_PER_NAME);
+  }
+  return out;
+}
+
+/**
+ * File one face under one name. Newest first, de-duplicated, and bounded on both
+ * axes so a group that plays every week cannot slowly fill the origin's quota.
+ * @param {string} name
+ * @param {string} photo a data: URL
+ * @returns {boolean}
+ */
+export function rememberAvatar(name, photo) {
+  const key = foldName(name);
+  if (!key || typeof photo !== 'string' || !photo.startsWith('data:image/')) return false;
+
+  const library = loadAvatars();
+  const existing = (library[key] || []).filter((p) => p !== photo);
+  library[key] = [photo, ...existing].slice(0, AVATARS_PER_NAME);
+
+  // Oldest names go first when there are too many. Object key order is
+  // insertion order, and re-filing a name does not move it, so the ordering is
+  // "first seen" rather than "last used" - close enough for a party game, and
+  // it never evicts the name somebody just typed.
+  let names = Object.keys(library);
+  while (names.length > AVATAR_NAMES) {
+    delete library[names[0]];
+    names = Object.keys(library);
+  }
+
+  if (set(KEYS.avatars, library)) return true;
+  // Out of room: keep only the newest face per name and try once more. The
+  // library is a convenience, so it yields before anything else does.
+  const thin = {};
+  for (const [n, photos] of Object.entries(library)) thin[n] = photos.slice(0, 1);
+  return set(KEYS.avatars, thin);
+}
+
+/**
+ * Faces we already hold for this name, newest first.
+ * @param {string} name
+ * @returns {string[]}
+ */
+export function avatarsFor(name) {
+  const key = foldName(name);
+  if (!key) return [];
+  const photos = loadAvatars()[key];
+  return Array.isArray(photos) ? photos : [];
+}
+
+/** Forget every saved face (offered in Settings alongside the other resets). */
+export function clearAvatars() {
+  return remove(KEYS.avatars);
+}
+
+/* ---------------------------------------------------------------------------
+ * Everybody who has ever played
+ * ------------------------------------------------------------------------ */
+
+/**
+ * The people, as opposed to the line-up.
+ *
+ * `players` above is one game's seating; this is the guest list, so setting up
+ * next week is tapping four faces instead of typing four names and hunting for
+ * four photos. Most recently played first, since that is the group most likely
+ * to be in the room.
+ *
+ * Shape: [{ name, photo|null, skipped }]. Private and on-device like every
+ * other photo here.
+ * @returns {Array<{name: string, photo: string|null, skipped: boolean}>}
+ */
+export function loadPeople() {
+  const value = get(KEYS.people, null);
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((p) => p && typeof p === 'object' && typeof p.name === 'string' && p.name.trim())
+    .map((p) => ({
+      name: p.name.trim(),
+      photo: typeof p.photo === 'string' && p.photo.startsWith('data:image/') ? p.photo : null,
+      skipped: !!p.skipped,
+    }))
+    .slice(0, PEOPLE_LIMIT);
+}
+
+/**
+ * File one player on the guest list, or move them to the front if they are
+ * already on it. Matching is on the folded name, so "paula" and "Paula" are one
+ * person - but the casing they last typed is what gets shown back to them.
+ * @param {{name: string, photo?: string|null, skipped?: boolean}} person
+ * @returns {boolean}
+ */
+export function rememberPerson(person) {
+  const name = person && typeof person.name === 'string' ? person.name.trim() : '';
+  if (!name) return false;
+  // "Player 3" is the placeholder this app puts in an empty row, not somebody's
+  // name. Remembering it would clutter the list with people who do not exist.
+  if (/^player\s*\d+$/i.test(name)) return false;
+
+  const key = foldName(name);
+  const rest = loadPeople().filter((p) => foldName(p.name) !== key);
+  const entry = {
+    name,
+    photo: typeof person.photo === 'string' && person.photo.startsWith('data:image/')
+      ? person.photo
+      : null,
+    skipped: !!person.skipped,
+  };
+  const next = [entry, ...rest].slice(0, PEOPLE_LIMIT);
+
+  if (set(KEYS.people, next)) return true;
+  // Out of room: the names are the expensive-to-retype part, the faces are the
+  // big part. Keep the list, drop the pictures - avatarsFor() can still put a
+  // face back once the name is on a row.
+  return set(KEYS.people, next.map((p) => ({ ...p, photo: null })));
+}
+
+/**
+ * Take one person off the list - a typo, or somebody who is not playing again.
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function forgetPerson(name) {
+  const key = foldName(name);
+  if (!key) return false;
+  const next = loadPeople().filter((p) => foldName(p.name) !== key);
+  const library = loadAvatars();
+  if (library[key]) {
+    delete library[key];
+    set(KEYS.avatars, library);
+  }
+  return set(KEYS.people, next);
 }
