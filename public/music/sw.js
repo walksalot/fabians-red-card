@@ -23,7 +23,10 @@
 // caches are deleted on activate, and a new worker takes over immediately
 // instead of waiting for every tab to close.
 
-const VERSION = 'v1';
+// Bump this on any deploy that must reach returning players immediately. It is a
+// belt to the stale-while-revalidate braces below: changing it changes this file,
+// which is the only thing that makes a browser reinstall the worker at all.
+const VERSION = 'v2-photos';
 const CACHE = `music-timeline-${VERSION}`;
 const CACHE_PREFIX = 'music-timeline-';
 
@@ -121,7 +124,29 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     (async () => {
       const cached = await caches.match(request, { ignoreSearch: true });
-      if (cached) return cached;
+      if (cached) {
+        // Stale-while-revalidate, NOT plain cache-first. Cache-first was a trap:
+        // a worker only reinstalls when sw.js's own bytes change, so bumping
+        // VERSION was the only thing that could ever refresh the shell - and a
+        // deploy that did not touch this file left every returning player pinned
+        // to the build they first loaded, forever. They keep the instant cached
+        // response here; the copy behind it is refreshed for the next load.
+        event.waitUntil(
+          (async () => {
+            try {
+              const fresh = await fetch(new Request(request, { cache: 'no-cache' }));
+              if (fresh.ok && fresh.type === 'basic') {
+                const cache = await caches.open(CACHE);
+                await cache.put(request, fresh.clone());
+              }
+            } catch {
+              // Offline or blocked: the cached copy already went out, so there
+              // is nothing to recover from and nothing worth reporting.
+            }
+          })(),
+        );
+        return cached;
+      }
 
       try {
         const response = await fetch(request);
