@@ -993,6 +993,23 @@ function renderSetup() {
   const eligible = eligibleDeck();
   text('eligible-count-value', eligible.length);
 
+  // The foldout's summary. Folding may hide the controls; it must never hide the
+  // fact that a filter is on, or somebody wonders for a whole game why the deck
+  // is all eighties.
+  const decades = view.setup.decades;
+  const genres = view.setup.genres;
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  // Selecting every chip is the same deck as selecting none, so it has to read
+  // the same too - "8 decades" looks like a filter when nothing is filtered.
+  const allDecades = decades.length === 0 || decades.length === DECADES.length;
+  const allGenres = genres.length === 0 || genres.length === GENRES.length;
+  const parts = [
+    allDecades ? 'All decades' : plural(decades.length, 'decade', 'decades'),
+    allGenres ? 'all genres' : plural(genres.length, 'genre', 'genres'),
+    `${eligible.length} songs`,
+  ];
+  text('setup-more-state', parts.join(' · '));
+
   // In co-op there is one timeline, so the group needs far fewer cards than
   // four people racing to ten each.
   const seats = view.setup.mode === 'coop' ? 1 : view.setup.players.length;

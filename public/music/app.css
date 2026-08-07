@@ -1362,6 +1362,112 @@ body[data-mode="coop"] #pass-standings { display: none; }
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
+/* --------------------------------------------------- compact setup panels */
+/* Mode: four titles in a grid, one hint. The hints all ship in the markup and
+   CSS reveals the one matching body[data-mode] - no JS, no lost words, and the
+   panel drops from 417px to about 150. */
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.mode-chip { display: block; cursor: pointer; }
+.mode-chip input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.mode-chip__title {
+  display: grid;
+  place-items: center;
+  min-height: 48px;
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: var(--f-sm);
+  font-weight: 700;
+  text-align: center;
+}
+.mode-chip input:checked + .mode-chip__title {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.mode-chip input:focus-visible + .mode-chip__title {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.mode-hint { margin-top: var(--s-2); }
+.mode-hint > span { display: none; }
+body[data-mode="classic"] .mode-hint > [data-mode-hint="classic"],
+body[data-mode="advanced"] .mode-hint > [data-mode-hint="advanced"],
+body[data-mode="expert"] .mode-hint > [data-mode-hint="expert"],
+body[data-mode="coop"] .mode-hint > [data-mode-hint="coop"] { display: inline; }
+
+/* The foldout: set-once options, out of the way but never hidden - the summary
+   states what is actually on, so a folded panel is still readable at a glance. */
+.foldout {
+  /* Same inset and bottom gap as .panel - it sits in that stack and would
+     otherwise run edge to edge while everything above it is inset. */
+  margin: 0 var(--gut-r) var(--s-4) var(--gut-l);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+/* The panels inside have already been given the card treatment by the foldout,
+   so they drop their own margin as well as their border and background. */
+.foldout .panel { margin: 0; }
+.foldout__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 56px;
+  padding: var(--s-3);
+  cursor: pointer;
+  list-style: none;
+}
+.foldout__summary::-webkit-details-marker { display: none; }
+.foldout__summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.foldout__title { font-size: var(--f-sm); font-weight: 700; }
+.foldout__state {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: var(--f-xs);
+  color: var(--text-faint);
+}
+.foldout__caret {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  color: var(--text-faint);
+  transition: transform var(--t-fast);
+}
+.foldout[open] .foldout__caret { transform: rotate(180deg); }
+/* The fieldsets inside lose their own card, or it is a box in a box. */
+.foldout .panel {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .foldout__caret { transition: none; }
+}
+
 /* ------------------------------------------------ the guest list (setup) */
 /* Everybody who has played before, offered as one-tap chips. Sits above the
    rows because not typing four names is the entire point of it. */
