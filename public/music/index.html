@@ -417,7 +417,11 @@
       <div class="topbar__row">
         <div class="topbar__id">
           <p class="topbar__eyebrow">Turn <span id="play-turn-number">1</span></p>
-          <h1 class="topbar__name" id="play-title" tabindex="-1"><span id="play-player-name">Player 1</span></h1>
+          <!-- The screen is a landmark named by this heading, so the heading has to
+               say which screen it is. Sighted players get that from the layout; a
+               bare name would leave a screen reader with two regions both called
+               "Sofia" (here and on the win screen). -->
+          <h1 class="topbar__name" id="play-title" tabindex="-1"><span class="sr-only">Now playing: </span><span id="play-player-name">Player 1</span></h1>
         </div>
         <button type="button" class="icon-btn" id="btn-menu" data-action="open-menu"
                 aria-haspopup="dialog" aria-expanded="false" aria-controls="menu-sheet" aria-label="Game menu">
@@ -626,7 +630,9 @@
     <canvas class="confetti" id="confetti" aria-hidden="true"></canvas>
     <div class="win__body">
       <p class="win__eyebrow" id="win-eyebrow">Winner</p>
-      <h1 class="win__name" id="win-title" tabindex="-1"><span id="win-player-name">Player 1</span></h1>
+      <!-- "Winner" is only in the eyebrow above, which is not part of the heading -
+           so the accessible name needs its own copy. See the note on #play-title. -->
+      <h1 class="win__name" id="win-title" tabindex="-1"><span class="sr-only">Winner: </span><span id="win-player-name">Player 1</span></h1>
       <p class="win__summary" id="win-summary">10 cards, 3 tokens left</p>
       <ol class="mini-timeline mini-timeline--win" id="win-timeline"></ol>
     </div>
