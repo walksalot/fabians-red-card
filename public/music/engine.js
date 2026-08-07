@@ -602,6 +602,14 @@ function resolveReveal(state, base) {
 
   const identifyConfirmed = state.confirmations.identify;
   const identifyAwarded = state.claimIdentify && identifyConfirmed === true;
+  // What the player ACTUALLY receives, not what the rule nominally pays. At the
+  // token cap a confirmed claim is still confirmed, but it is worth nothing -
+  // and a reveal screen promising "+1" while the pills refuse to move is read at
+  // a table as the game cheating somebody, so the award has to tell the truth.
+  const tokensBefore = readTokens(state.mode, base, active.id);
+  const identifyDelta = identifyAwarded
+    ? clamp(tokensBefore + 1, 0, state.tokenCap) - tokensBefore
+    : 0;
 
   let destination = 'discard';
   if (accepted) destination = 'timeline';
@@ -627,7 +635,7 @@ function resolveReveal(state, base) {
       ? [
           {
             playerId: active.id,
-            delta: 1,
+            delta: identifyDelta,
             reason: 'identify',
             pool: state.mode === 'coop' ? 'shared' : 'player',
           },
@@ -1313,6 +1321,15 @@ export function serialize(state) {
   return JSON.stringify(state);
 }
 
+/** Give a saved player list the `photo`/`color` fields a pre-avatar save lacks. */
+function withIdentity(players) {
+  return players.map((p, index) => ({
+    ...p,
+    photo: typeof p.photo === 'string' && p.photo ? p.photo : null,
+    color: typeof p.color === 'string' && p.color ? p.color : seatColor(index),
+  }));
+}
+
 /**
  * @param {string|object} json
  * @returns {object} the restored state
@@ -1335,16 +1352,23 @@ export function deserialize(json) {
   // cheaper than bumping STATE_VERSION, which would throw away a game that is
   // mid-party on somebody's phone - and a missing `color` would leave the play
   // screen with no accent at all.
-  const needsIdentity = state.players.some(
-    (p) => !p || typeof p.color !== 'string' || p.photo === undefined,
-  );
-  if (!needsIdentity) return state;
+  //
+  // `revealBase` gets exactly the same treatment, and that is not belt and
+  // braces: every confirmation toggle on the reveal screen replays the turn from
+  // that snapshot and writes its `players` straight back over the live ones (see
+  // `applyOutcome`). Backfilling only the live list means the first tap on
+  // Title after resuming mid-reveal silently undoes the backfill - every seat
+  // colour and every photo gone for the rest of the game.
+  const needsIdentity = (list) =>
+    Array.isArray(list) &&
+    list.some((p) => !p || typeof p.color !== 'string' || p.photo === undefined);
+  const base = state.revealBase;
+  const fixPlayers = needsIdentity(state.players);
+  const fixBase = !!base && typeof base === 'object' && needsIdentity(base.players);
+  if (!fixPlayers && !fixBase) return state;
   return {
     ...state,
-    players: state.players.map((p, index) => ({
-      ...p,
-      photo: typeof p.photo === 'string' && p.photo ? p.photo : null,
-      color: typeof p.color === 'string' && p.color ? p.color : seatColor(index),
-    })),
+    players: fixPlayers ? withIdentity(state.players) : state.players,
+    revealBase: fixBase ? { ...base, players: withIdentity(base.players) } : state.revealBase,
   };
 }

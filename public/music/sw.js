@@ -13,11 +13,15 @@
 //   }
 //
 // Two rules run this file:
-//   1. The app shell is cache-first, because a song game must not wait on a
-//      network round trip between turns.
-//   2. Nothing that resolves or streams a song is cached at all. Preview URLs
-//      are signed and short-lived, the results are already cached in
-//      localStorage by audio.js, and stale audio bytes would be worse than none.
+//   1. The app shell is served from the cache first and refreshed behind the
+//      response (stale-while-revalidate), because a song game must not wait on
+//      a network round trip between turns - but it must not pin a returning
+//      player to the first build they ever loaded either. Do not "simplify"
+//      this back to plain cache-first; see the note in the fetch handler.
+//   2. The audio itself is never cached - stale bytes would be worse than none,
+//      and a preview per card would not fit anyway. The *answers* are:
+//      previews.json is part of the shell below, which is what makes an offline
+//      reload able to resolve a card at all.
 // Everything else follows from "a bad cache must never be able to lock a family
 // out of the game": the version below changes whenever the shell changes, old
 // caches are deleted on activate, and a new worker takes over immediately
@@ -41,6 +45,12 @@ const SHELL = [
   './listen.css',
   './manifest.json',
   './icon.svg',
+  // Load-bearing, not an extra: this is the build-time answer for the deck.
+  // Without it audio.js falls through to a live iTunes lookup, so a family that
+  // loaded the game once and then lost the wifi could not play a single song.
+  // It used to arrive here only via runtime caching, which meant it took TWO
+  // online loads before the game was genuinely offline-capable.
+  './previews.json',
   './qr.js',
   './engine.js',
   './deck.js',

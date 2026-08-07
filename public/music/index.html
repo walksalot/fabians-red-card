@@ -143,6 +143,10 @@
       open-challenge      [#btn-challenge]
       close-challenge     [#btn-challenge-close, challenge scrim]
       pick-challenger     [options in #challenge-players, data-player-id]
+      remove-challenge    [a .challenge-option whose player has already
+                           challenged - ui.js swaps that row's data-action to
+                           this, so the same button takes the challenge back
+                           and refunds the token]
       confirm-challenge   [#btn-challenge-confirm]
       commit-placement    [#btn-place]
       confirm-title       [#btn-confirm-title]        (aria-pressed toggle)
@@ -278,6 +282,9 @@
   <meta name="format-detection" content="telephone=no">
   <title>Timeline - music party game</title>
   <link rel="manifest" href="./manifest.json">
+  <!-- Named explicitly so the browser stops asking for /favicon.ico, which does
+       not exist and 404s on every single load. -->
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
   <link rel="stylesheet" href="./app.css">
   <script type="module" src="./ui.js"></script>
 </head>
@@ -347,7 +354,7 @@
       <fieldset class="panel" aria-labelledby="setup-target-label">
         <h2 class="panel__legend" id="setup-target-label">Cards to win</h2>
         <div class="stepper" id="field-target-cards" role="group" aria-labelledby="target-cards-label">
-          <span class="stepper__label" id="target-cards-label">Timeline length</span>
+          <span class="stepper__label" id="target-cards-label">First to</span>
           <button type="button" class="stepper__btn" data-action="target-dec" aria-label="Fewer cards to win">&minus;</button>
           <output class="stepper__value" id="target-cards-value" aria-live="polite">10</output>
           <button type="button" class="stepper__btn" data-action="target-inc" aria-label="More cards to win">+</button>
@@ -411,7 +418,7 @@
           <output class="stepper__value" id="mistake-limit-value" aria-live="polite">3</output>
           <button type="button" class="stepper__btn" data-action="mistakes-inc" aria-label="More mistakes allowed">+</button>
         </div>
-        <p class="panel__hint">Co-op only. Every wrong placement burns one.</p>
+        <p class="panel__hint">Every wrong placement uses one. Run out and the whole table loses.</p>
       </fieldset>
 
       <!-- deck -->
@@ -481,13 +488,19 @@
             </select>
             <svg viewBox="0 0 24 24" class="select__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
-          <p class="field__hint">Previews come from Apple's public search. The other options open links on the scanning phone and will reveal the title.</p>
+          <p class="field__hint">
+            The in-app preview plays here and gives nothing away. Pick a streaming
+            service instead and this phone gets a link to open rather than a preview
+            &mdash; which shows the active player the title before they guess.
+          </p>
         </div>
       </fieldset>
 
       <div class="setup__go">
+        <!-- ui.js replaces this with the live count; the shipped text is the
+             same sentence with nobody named yet. -->
         <p class="setup__reason" id="setup-photo-reason" role="status" aria-live="polite" hidden>
-          Everyone needs a photo first
+          Everyone needs a photo &mdash; or tap Skip photo for them
         </p>
         <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-start-game" data-action="start-game" aria-describedby="setup-photo-reason">
           Shuffle &amp; start
@@ -660,8 +673,11 @@
         <div class="qr__body">
           <p class="qr__caption" id="qr-caption">Scan to play it on your own phone</p>
           <p class="qr__sub">The scanned page shows a play button and nothing else. No year, no title.</p>
+          <!-- ui.js rewrites this for the exact reason (opened from a file, or
+               served on an address only this device can reach). The shipped text
+               is the one that covers both. -->
           <p class="notice notice--info" id="qr-file-note" hidden>
-            This page was opened from a file, so the code cannot reach other phones.
+            This address only works on this device, so the code has nothing to open.
             Run <code>node scripts/music-server.mjs</code> on a computer and use the Wi-Fi address it prints.
           </p>
           <button type="button" class="linkbtn" id="btn-qr-alt" data-action="toggle-qr-alt" aria-pressed="false" hidden>
@@ -844,7 +860,7 @@
       <h2>Setting up</h2>
       <ul>
         <li>Two to eight players. Enter everyone's name on the setup screen.</li>
-        <li>Everyone starts with <strong>one song card face up</strong> in their timeline, year showing, and <strong>2 tokens</strong>.</li>
+        <li>Everyone starts with <strong>one song card face up</strong> in their timeline, year showing, and <strong>2 tokens</strong>. In co-op there is one starting card and one pool of 2 tokens for the whole table.</li>
         <li>The rest of the songs become a shared face-down deck.</li>
         <li>Choose a target of 5, 10 or 15 cards, a mode, and which decades and genres are in play.</li>
       </ul>
@@ -868,9 +884,10 @@
       <ul>
         <li>Before the reveal, any player other than the active one may challenge.</li>
         <li>You spend a token and nominate a gap in <strong>your own</strong> timeline.</li>
-        <li>At the reveal the active player is resolved first. If they were wrong and you were right, the card goes to you.</li>
+        <li>At the reveal the active player is resolved first. If they put the card in the wrong spot and you picked a right one, the card goes to you.</li>
         <li>If several challengers were right, the card goes to the one closest to the active player's left.</li>
         <li>A wrong challenge just costs the token. Challenging a correct placement is allowed &mdash; it also just costs the token.</li>
+        <li>Only the <em>spot</em> counts here. In advanced and expert, a card that was placed correctly but lost on the title, artist or year is discarded rather than won &mdash; challengers get nothing.</li>
         <li>One challenge per player per turn.</li>
       </ul>
       <h3>Name that song &mdash; earn 1 token</h3>
@@ -888,9 +905,10 @@
 
       <h2>Winning</h2>
       <ul>
-        <li>First player to reach the target number of cards wins immediately.</li>
+        <li>The first player to reach the target number of cards wins, as soon as that turn ends.</li>
         <li>If the deck runs out first, the longest timeline wins.</li>
         <li>Still tied? Most tokens wins. Still tied after that, the win is shared.</li>
+        <li>Co-op is all or nothing: the table wins by reaching the target together, and loses if it hits the mistake limit <em>or</em> empties the deck first.</li>
       </ul>
 
       <h2>The four modes</h2>
@@ -904,7 +922,11 @@
         <dt>Co-op</dt>
         <dd>One shared timeline and one shared token pool. Everyone still takes turns placing, but you are all on the same side. Reach the target together and you win; hit the mistake limit (3 by default) and the game is over for everybody.</dd>
       </dl>
-      <p class="prose__aside">Tokens work exactly the same way in all four modes.</p>
+      <p class="prose__aside">
+        Tokens are spent and earned the same way in every mode. The only difference is
+        whose they are: in co-op there is one pool, so a challenge or a bought card is
+        paid for by the whole table.
+      </p>
 
       <h2>House notes</h2>
       <ul>
@@ -936,7 +958,7 @@
         <label class="switch" for="opt-skip-pass">
           <input type="checkbox" id="opt-skip-pass">
           <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
-          <span class="switch__text">Skip pass-the-phone<span class="switch__hint">For single-device speed runs</span></span>
+          <span class="switch__text">Skip pass-the-phone<span class="switch__hint">No handover screen &mdash; the next player sees the last reveal</span></span>
         </label>
       </li>
       <li>
@@ -956,7 +978,7 @@
     </ul>
 
     <div class="field">
-      <label class="field__label" for="opt-playback-source">Playback source</label>
+      <label class="field__label" for="opt-playback-source">Play songs with</label>
       <div class="select">
         <select id="opt-playback-source">
           <option value="preview" selected>In-app preview (30 seconds)</option>
@@ -984,8 +1006,8 @@
     <div class="sheet__grip" aria-hidden="true"></div>
     <h2 class="sheet__title" id="challenge-sheet-title">Challenge</h2>
     <p class="sheet__lead">
-      Spend 1 token to bet the card belongs in <strong>your</strong> timeline. You only win it if
-      the active player gets it wrong.
+      A challenger spends 1 token to bet the card belongs in <strong>their</strong> timeline.
+      They only win it if the active player puts it in the wrong spot.
     </p>
 
     <h3 class="sheet__sub" id="challenge-players-label">Who is challenging?</h3>

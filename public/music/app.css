@@ -28,7 +28,12 @@
   --line-strong:   rgba(255, 255, 255, 0.20);
   --text:          #f5f2fc;
   --text-dim:      #b0a9cc;
-  --text-faint:    #7d769c;
+  /* The quietest ink in the app, so it is the one that has to be checked: it
+     carries hints, statuses and unit labels, and it is almost always read on a
+     translucent surface rather than on --bg. On .player-row (two stacked
+     surfaces) the old #7d769c measured 3.97:1; this clears 4.5:1 on every
+     surface the app actually paints it on. */
+  --text-faint:    #8a82ac;
 
   /* One vivid accent, used as a gradient everywhere it matters. */
   --violet:        #7c3aff;
@@ -100,8 +105,12 @@
      seven other players present but unmistakably not the one holding the phone. */
   --roster-face:      36px;
   --roster-face-lg:   44px;
-  --roster-dim:       0.44;
-  --roster-dim-next:  0.85;
+  /* Dim enough that the active seat is unmistakable, bright enough that the
+     card count on a resting seat is still a number somebody can read: at 0.44
+     those badges measured 4.0:1 and the initials 2.8:1, which is a face nobody
+     can name from across a table. */
+  --roster-dim:       0.66;
+  --roster-dim-next:  0.88;
   --roster-badge:     #1b1430;
 
   /* Touch + safe area. Nothing important gets within 16px of the edge. */
@@ -169,6 +178,14 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   border-radius: 6px;
 }
 :focus:not(:focus-visible) { outline: none; }
+
+/* The eight screen headings are focus targets, not controls: ui.js moves focus
+   to one on every screen change so a screen reader lands at the top of the new
+   screen. Nothing can Tab to them, so a ring there guides nobody - and on the
+   first paint, before any input has happened, Chromium DOES match
+   :focus-visible on a scripted focus, which put a cyan box around the Timeline
+   wordmark every time the app was opened. */
+h1[tabindex="-1"]:focus-visible { outline: none; }
 
 /* ------------------------------------------------------------ 3 utilities */
 .sr-only {
@@ -356,13 +373,6 @@ body[data-busy="true"] .app {
 .btn--xl { min-height: 58px; font-size: var(--f-lg); border-radius: var(--r-lg); }
 .btn--sm { min-height: var(--tap); padding: 8px var(--s-3); font-size: var(--f-sm); }
 
-.btn[disabled] {
-  opacity: 0.4;
-  cursor: not-allowed;
-  box-shadow: none;
-  transform: none;
-}
-
 .btn[aria-pressed="true"] {
   background: var(--accent-soft);
   border-color: var(--violet-lift);
@@ -371,6 +381,24 @@ body[data-busy="true"] .app {
               0 8px 22px -14px rgba(150, 55, 220, 0.9);
 }
 .btn[aria-pressed="true"] .btn__sub { color: var(--violet-lift); }
+
+/* Off, not faded, and last so it beats every variant above including a pressed
+   toggle. A blanket opacity: 0.4 took a ghost button's label to 3.5:1 and its
+   sub-label to 1.7:1 - and it did nothing at all to a primary's gradient, so
+   "Place here" and "Shuffle & start" kept shouting in full colour with a grey
+   word laid over them, which reads as a broken button rather than a locked one.
+   Restating the surface makes every disabled control the quietest thing in its
+   row while keeping its label readable. */
+.btn[disabled] {
+  cursor: not-allowed;
+  background: var(--surface);
+  background-image: none;
+  border-color: var(--line);
+  color: var(--text-faint);
+  box-shadow: none;
+  transform: none;
+}
+.btn[disabled] .btn__sub { color: var(--text-faint); }
 
 .icon-btn {
   display: inline-flex;
@@ -391,7 +419,9 @@ body[data-busy="true"] .app {
 
 .linkbtn {
   min-height: 44px;
-  padding: 4px 2px;
+  /* "All" is three characters wide; without a floor it was a 21px target. */
+  min-width: 44px;
+  padding: 4px var(--s-2);
   color: var(--violet-lift);
   font-size: var(--f-sm);
   font-weight: 650;
@@ -864,6 +894,11 @@ body[data-busy="true"] .app {
   overflow-x: auto;
   padding: var(--s-1) 0 var(--s-2);
   scrollbar-width: none;
+  /* Same promise the play strip makes: a soft right edge means "this keeps
+     going". Right only - the row always starts flush left, so a fade there
+     would just dim the earliest year for no reason. */
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent 100%);
+          mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent 100%);
 }
 .mini-timeline::-webkit-scrollbar { display: none; }
 .mini-card {
@@ -883,12 +918,22 @@ body[data-busy="true"] .app {
   overflow: visible;
   gap: 6px;
   margin-top: var(--s-4);
+  /* Wrapped, not scrolled - nothing is hidden, so nothing should be faded. */
+  -webkit-mask-image: none;
+          mask-image: none;
 }
 .mini-timeline--win .mini-card {
   font-size: var(--f-sm);
   padding: 7px 11px;
   border-color: rgba(255, 194, 71, 0.35);
   background: rgba(255, 194, 71, 0.10);
+}
+/* A co-op loss is not a trophy cabinet: the eyebrow and the name already turn
+   red, so leaving the cards in token-gold made the screen argue with itself. */
+#win[data-outcome="loss"] .mini-timeline--win .mini-card {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text-dim);
 }
 
 /* --- the player rail --- */
@@ -1482,8 +1527,14 @@ body[data-mode="coop"] #pass-standings { display: none; }
 }
 .pass__tap {
   position: relative;
+  /* Grows into the slack so it is always the obvious thing to hit, but capped:
+     with four players (or with co-op's single team tile) there is enough spare
+     height that an uncapped flex: 1 stretched this to nearly 700px, and a
+     rounded rectangle two thirds of a phone tall with one line in the middle of
+     it reads as a container waiting for content, not as a button. */
   flex: 1 1 auto;
   min-height: 104px;
+  max-height: 240px;
   margin: var(--s-1) 0;
   display: flex;
   flex-direction: column;
@@ -1876,19 +1927,26 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
   background: linear-gradient(168deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.04)), #130c22;
   text-align: center;
 }
+/* Artwork is a bonus that needs the network, and this app promises to work
+   without one - so the no-artwork case is the common case, not the error case.
+   A flat grey box with a small grey glyph in it reads as an <img> that failed;
+   tinting it with the accent and giving the note room makes it read as the
+   deliberate stand-in it is. */
 .reveal__art {
   width: 84px;
   height: 84px;
   flex: 0 0 auto;
   border-radius: var(--r-md);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid var(--line);
+  background:
+    radial-gradient(120% 120% at 30% 0%, rgba(124, 58, 255, 0.34), transparent 70%),
+    rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-strong);
   display: grid;
   place-items: center;
 }
 .reveal__art-img { width: 100%; height: 100%; object-fit: cover; }
-.reveal__art-empty { font-size: 2rem; color: var(--text-faint); }
+.reveal__art-empty { font-size: 2.4rem; line-height: 1; color: var(--text-dim); }
 .reveal__year {
   margin-top: var(--s-2);
   font-size: clamp(2.6rem, 15vw, 3.6rem);
@@ -1981,19 +2039,29 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
   border: 1px solid var(--line);
   background: var(--surface);
 }
-.award__who { font-weight: 750; font-size: var(--f-md); min-width: 0; }
+.award__who { grid-column: 1; grid-row: 1; font-weight: 750; font-size: var(--f-md); min-width: 0; }
 .award__what {
   grid-column: 1 / -1;
+  grid-row: 2;
   font-size: var(--f-sm);
   color: var(--text-dim);
 }
+/* Placed, not auto-flowed: .award__what spans both columns, so auto placement
+   pushed the delta onto a third row at the left margin and the row read as
+   three loose lines instead of "who / what ... +1". */
 .award__delta {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
   font-weight: 850;
   font-variant-numeric: tabular-nums;
   font-size: var(--f-lg);
 }
 .award[data-delta="gain"] .award__delta { color: var(--gold); text-shadow: var(--sh-gold); }
 .award[data-delta="loss"] .award__delta { color: var(--bad); }
+/* Nothing moved - a claim confirmed while already at the token cap. Neither a
+   win nor a loss, so it gets neither colour. */
+.award[data-delta="none"] .award__delta { color: var(--text-faint); }
 
 .outcome {
   display: grid;
@@ -2016,6 +2084,13 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
   padding: 0 var(--gut-r) var(--s-4) var(--gut-l);
 }
 .score-row {
+  /* Grid items get min-width: auto, so this row was sized by the widest thing
+     inside it - the whole mini-timeline, unwrapped. At twelve cards that made
+     every row 642px wide inside a 390px phone, which pushed the "to go" count
+     and the Playing flag clean off the screen and stopped .mini-timeline from
+     ever scrolling. The row has to be allowed to be narrower than its contents
+     before the scroller inside it can do its job. */
+  min-width: 0;
   padding: var(--s-3) var(--s-4);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
@@ -2279,7 +2354,23 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
   text-transform: uppercase;
   color: var(--text-faint);
 }
-.sheet__foot { display: grid; gap: var(--s-2); margin-top: var(--s-5); }
+/* Pinned to the bottom of the sheet's own scroller. On a 568px phone the menu
+   is ~690px of content, so End game, Home and Close were all below the fold and
+   the sheet opened with no visible way out of it. Sticky costs nothing on a
+   taller phone, where the footer is already sitting at the bottom. The colour
+   is the closing stop of the sheet gradient, so at rest the seam is invisible
+   and it only appears as a surface once there is content sliding under it. */
+.sheet__foot {
+  position: sticky;
+  bottom: calc(-1 * (var(--s-5) + var(--sa-b)));
+  z-index: 1;
+  display: grid;
+  gap: var(--s-2);
+  margin-top: var(--s-5);
+  padding-block: var(--s-3) calc(var(--s-5) + var(--sa-b));
+  margin-bottom: calc(-1 * (var(--s-5) + var(--sa-b)));
+  background: linear-gradient(to bottom, rgba(12, 8, 23, 0) 0, #0c0817 var(--s-3), #0c0817 100%);
+}
 
 .menu-list { margin-top: var(--s-3); display: grid; gap: var(--s-1); }
 .menu-item {
@@ -2386,7 +2477,10 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
     --roster-face: 34px;
     --roster-face-lg: 42px;
   }
-  .roster__chip { min-width: 44px; min-height: 42px; }
+  /* The face shrinks, the button does not: this rail is a control - every chip
+     opens the scoreboard - and 42px was the one tap target in the app under the
+     44px floor this block's own heading promises to hold. */
+  .roster__chip { min-width: 44px; min-height: 44px; }
   .roster__seats { padding-block: 4px 8px; }
   .standing__name { font-size: var(--f-sm); }
   .dial { width: 138px; height: 138px; }
@@ -2419,7 +2513,7 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
   .topbar__row--meta { margin-top: var(--s-1); }
   .screen--play .avatar--md { --avatar-size: 44px; }
   .topbar__name { font-size: var(--f-lg); }
-  .roster__seats { padding-block: 4px 8px; }
+  .roster__seats { padding-block: 3px 7px; }
   .play__scroll { padding-top: var(--s-1); gap: var(--s-2); }
   .mystery { padding: var(--s-2) var(--s-3) var(--s-3); }
   .mystery__label { font-size: var(--f-3xs); letter-spacing: 0.14em; }
@@ -2430,7 +2524,7 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
   .dial__label { font-size: var(--f-xs); }
   .timeline { padding-top: var(--s-2); }
   /* One line, whatever the mode: a wrapped header costs the dial 20px. */
-  .timeline__head { gap: var(--s-2); }
+  .timeline__head { gap: var(--s-2); padding-bottom: var(--s-1); }
   .timeline__title { white-space: nowrap; }
   .timeline__hint {
     min-width: 0;
@@ -2442,8 +2536,18 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
   .tl-card { padding: var(--s-2); }
   /* One line of title instead of two: the year is what a timeline is read by. */
   .tl-card__title { -webkit-line-clamp: 1; }
+  /* And no artist at all here. Same bargain, one step further: on a 568px phone
+     this third line was costing 17px of the only region that scrolls, which is
+     the region the Play button lives in. The year orders the timeline and the
+     title identifies the card; the artist is on the reveal either way. */
+  .tl-card__artist { display: none; }
   .strip:empty { min-height: 92px; }
-  .actions { padding-block: var(--s-2) calc(var(--s-2) + var(--sa-b)); }
+  .actions { padding-block: var(--s-2) calc(var(--s-2) + var(--sa-b)); gap: 6px; }
+  /* Expert adds a whole extra row to the action block - 74px, on the phone with
+     the least to spare - so the year stepper travels light here. Its buttons
+     stop at 44px rather than 48px, which is still a full touch target. */
+  .stepper--inline { padding-block: 4px; }
+  .stepper--inline .stepper__btn { width: 44px; height: 44px; }
 
   /* Same bargain on the pass screen: the face and the tap target give up a
      little so a four-player table can read its standings without scrolling. */

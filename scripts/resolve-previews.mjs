@@ -32,19 +32,33 @@ const { DECK } = await import(pathToFileURL(path.join(ROOT, 'public/music/deck.j
 // Deliberately the same rules as public/music/audio.js. If you change one, change
 // both, or the baked answer and the live fallback will disagree about the same card.
 
-const strip = (s) =>
-  String(s || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+// Latin-extended letters that NFD does not decompose, so the [^a-z0-9] sweep
+// below would turn them into spaces and shred the word. Turkish dotless i is the
+// one that actually bit us: "Simarik" scored ZERO against Tarkan's own
+// "Simarik" because the catalogue spells it with two of them.
+const TRANSLITERATE = [
+  [/[ı]/g, 'i'], [/[İ]/g, 'i'], [/[đĐ]/g, 'd'],
+  [/[łŁ]/g, 'l'], [/[øØ]/g, 'o'], [/[æÆ]/g, 'ae'],
+  [/[œŒ]/g, 'oe'], [/[ß]/g, 'ss'], [/[þÞ]/g, 'th'],
+  [/[ħ]/g, 'h'], [/[ŋ]/g, 'n'],
+];
+
+const strip = (s) => {
+  let v = String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  for (const [re, to] of TRANSLITERATE) v = v.replace(re, to);
+  return v
     .replace(/\(.*?\)|\[.*?\]/g, ' ')
-    .replace(/\b(feat|ft|featuring|with)\b.*$/, ' ')
+    // NOT "with": it is a perfectly ordinary word in a title, and including it
+    // here truncated "With or Without You" to nothing, scored it zero and
+    // rejected the real U2 recording. Six cards were silently affected.
+    .replace(/\b(feat|ft|featuring)\b\.?.*$/, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+};
 
 // Variants that are not the recording on the card. "Live" needs a word boundary or
 // it eats "Livery"; "version" alone is too broad (plenty of legitimate titles).
-const VARIANT = /\b(remix|remixed|live|karaoke|instrumental|tribute|cover|made famous|originally performed|re-?recorded|taylors version|demo|acoustic version|radio edit remix)\b/;
+const VARIANT = /\b(remix|remixed|live|karaoke|instrumental|tribute|cover|made famous|originally performed|re-?recorded|taylors version|demo|acoustic version|radio edit remix|extended (mix|version)|club mix|dub mix|edit remix)\b/;
 
 function similarity(a, b) {
   if (!a || !b) return 0;
@@ -59,12 +73,62 @@ function similarity(a, b) {
   return Math.min(1, jaccard + contains);
 }
 
+// Acts that exist only to re-record other people's songs. The title matches
+// perfectly, which is exactly why they are dangerous: "Garth Brooks Tribute"
+// and "Pickin' On Series" both won matches here before this existed.
+const IMPOSTOR_ARTIST = /\b(tribute|karaoke|made famous|originally performed|performed by|pickin on|the hit crew|hit co|lullaby|8 bit|string quartet|cover band|covers)\b/;
+
+/** Levenshtein, capped - only used on short artist names. */
+function editDistance(a, b) {
+  if (a === b) return 0;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0];
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j];
+      prev[j] = Math.min(prev[j] + 1, prev[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = tmp;
+    }
+  }
+  return prev[b.length];
+}
+
+/**
+ * Is this plausibly the same act?
+ *
+ * Word overlap alone is too strict for stylised credits - "P!nk" folds to "pnk"
+ * and shares no word with "pink" - so a short edit distance and a containment
+ * check both count as agreement.
+ */
+function sameArtist(cardArtist, resultArtist) {
+  const a = strip(cardArtist);
+  const b = strip(resultArtist);
+  if (!a || !b) return false;
+  if (similarity(a, b) >= 0.34) return true;
+  const ca = a.replace(/ /g, '');
+  const cb = b.replace(/ /g, '');
+  if (ca.includes(cb) || cb.includes(ca)) return true;
+  return editDistance(ca, cb) <= Math.max(1, Math.floor(Math.min(ca.length, cb.length) / 6));
+}
+
 function score(card, r) {
   const title = strip(r.trackName);
   const artist = strip(r.artistName);
   const t = similarity(strip(card.title), title);
   const a = similarity(strip(card.artist), artist);
+  // Test the RAW title, not the stripped one: strip() deletes bracketed text,
+  // and "(feat. ...) [Remix]" is exactly where the catalogue puts the word that
+  // tells you this is not the recording on the card.
+  const rawTitle = String(r.trackName || '').toLowerCase();
+  if (VARIANT.test(rawTitle) && !VARIANT.test(String(card.title).toLowerCase())) return -1;
   if (VARIANT.test(title) && !VARIANT.test(strip(card.title))) return -1;
+  if (IMPOSTOR_ARTIST.test(artist)) return -1;
+  // The artist is a GATE, not a weight. Scoring it as 45% of a blend meant a
+  // perfect title with a completely wrong artist landed on exactly the 0.55
+  // acceptance floor and got through - which is how a Mark Chesnutt cover beat
+  // Garth Brooks to "Friends in Low Places". Wrong artist is wrong song, full stop.
+  if (!sameArtist(card.artist, r.artistName)) return -1;
   if (r.trackTimeMillis && r.trackTimeMillis < 45000) return -1; // interludes, skits
   return t * 0.55 + a * 0.45;
 }
@@ -104,9 +168,13 @@ function pick(card, results) {
   // An in-era match beats a better-scoring one from the wrong decade: that is what
   // stops a 2008 covers-album version from beating the 1968 original.
   const inEra = scored.filter((x) => x.y != null && Math.abs(x.y - card.year) <= 2);
-  const best = inEra.length ? inEra[0] : scored[0];
-  if (best.s < (inEra.length ? 0.55 : 0.7)) return null;
-  return best;
+  if (inEra.length && inEra[0].s >= 0.55) return inEra[0];
+  // Falling through rather than giving up: a weak in-era candidate used to veto
+  // a strong out-of-era one, so a catalogue that carried BOTH a badly-titled
+  // original and a clean reissue resolved to neither. The out-of-era bar stays
+  // high, which is what keeps covers and re-recordings out.
+  if (scored[0].s >= 0.7) return scored[0];
+  return null;
 }
 
 /* ------------------------------------------------------------------ main -- */
