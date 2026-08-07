@@ -1037,9 +1037,9 @@ body[data-busy="true"] .app {
 .roster__seat[data-rank="next"] .roster__flag { display: block; }
 
 /* Co-op: one pile, one pool. A per-player card count would be the same number
-   eight times, so the badge goes and a team tile takes its place. */
-/* Two tight lines, not one wide one: at 320px this tile and the faces share
-   the band, and every pixel it takes is a face somebody has to scroll to. */
+   eight times, so the badge goes and a team tile takes its place - two tight
+   lines rather than one wide one, because at 320px every pixel this tile takes
+   is a face somebody has to scroll to. */
 .roster__team {
   display: none;
   flex: 0 0 auto;
@@ -1055,7 +1055,6 @@ body[data-busy="true"] .app {
   white-space: nowrap;
   line-height: 1.15;
 }
-.roster__team-miss { grid-column: 1 / -1; justify-self: center; }
 .roster__team-label {
   font-size: var(--f-3xs);
   font-weight: 800;
@@ -1070,6 +1069,8 @@ body[data-busy="true"] .app {
   letter-spacing: -0.02em;
 }
 .roster__team-miss {
+  grid-column: 1 / -1;
+  justify-self: center;
   font-size: var(--f-3xs);
   font-weight: 700;
   color: var(--gold);
@@ -1631,6 +1632,11 @@ body[data-mode="coop"] #pass-standings { display: none; }
   display: flex;
   flex-direction: column;
   gap: var(--s-3);
+  /* Fade the last few pixels instead of guillotining them. Without this the
+     bottom edge slices whatever is there - typically the QR block's heading -
+     clean through the middle of a line, which reads as broken rather than as
+     "there is more below". The top stays hard: it butts against the rail. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
 }
 .play__scroll > * { flex: 0 0 auto; }
 

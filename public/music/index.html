@@ -18,7 +18,10 @@
     CSS shows exactly the <section class="screen"> whose id matches and hides
     every other one. There is no other show/hide mechanism for screens - do not
     add/remove [hidden] on a <section class="screen">.
-    After switching, focus the matching heading (all are tabindex="-1"):
+    After switching, focus the matching heading (all are tabindex="-1") and put
+    both the section and the window back to scroll position 0 - several screens
+    are taller than the viewport and a leftover offset lands the next person in
+    the middle of theirs:
       #home-title #setup-title #pass-title #play-title
       #reveal-title #scoreboard-title #win-title #rules-title
 

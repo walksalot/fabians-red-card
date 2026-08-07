@@ -603,6 +603,10 @@ function focusHeading(name) {
     }
     const scroller = heading.closest('.screen');
     if (scroller) scroller.scrollTop = 0;
+    // The page itself scrolls on any screen that outgrows the viewport - setup,
+    // the rules, a pass screen with eight players in the standings - and a
+    // leftover offset would drop the next person into the middle of theirs.
+    window.scrollTo(0, 0);
   });
 }
 
