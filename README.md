@@ -155,8 +155,8 @@ play, and once it has loaded once it keeps working even if the wifi drops.
 **The QR bit** — this is the trick that replaces physical cards. On the play
 screen there's a QR code next to the mystery song. Whoever's turn it is scans it
 with their own phone and the clip plays there instead, on a tiny page that shows
-nothing but a play button. The year, the title and the artist are never in that
-code, so scanning can't spoil the answer. (This needs option 1 or 2 above —
+nothing but a play button — no year, no title, no artist, so scanning can't
+spoil the answer for anyone. (This needs option 1 or 2 above —
 another phone can't open a file sitting on your laptop.)
 
 **House rules, briefly**

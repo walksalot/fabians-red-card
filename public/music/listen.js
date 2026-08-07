@@ -484,7 +484,7 @@ function showNotice(reason) {
   dom.notice.hidden = false;
   dom.player.hidden = true;
   dom.reveal.hidden = true;
-  dom.cardNo.textContent = "Card";
+  dom.cardNo.textContent = "Listen";
   setState("blank");
 }
 

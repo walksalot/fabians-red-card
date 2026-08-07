@@ -6,6 +6,8 @@
  * gap of every timeline length, both ends of every tie, the whole token economy,
  * challenge priority with wrap-around seating, and each way the game can end.
  */
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -193,6 +195,16 @@ const ALL_ACTION_TYPES = Object.keys(SAMPLE_ACTIONS) as ActionType[];
 /* -------------------------------------------------------------------------- */
 
 describe('module surface', () => {
+  it('is a self-contained module with no clock, DOM or unseeded randomness', () => {
+    const source = readFileSync(new URL('../../public/music/engine.js', import.meta.url), 'utf8');
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code).not.toMatch(/Math\.random/);
+    expect(code).not.toMatch(/Date\.now|new Date\(/);
+    expect(code).not.toMatch(/\bdocument\b|\bwindow\b|localStorage|sessionStorage/);
+    expect(code).not.toMatch(/^\s*import\s/m);
+    expect(code).not.toMatch(/require\(/);
+  });
+
   it('exports the four modes and the phase machine', () => {
     expect([...MODES]).toEqual(['classic', 'advanced', 'expert', 'coop']);
     expect([...PHASES]).toEqual([
@@ -1495,6 +1507,56 @@ describe('full games', () => {
     for (const p of state.players) {
       expect(years(p.timeline)).toEqual(years(p.timeline).slice().sort((a, b) => a - b));
     }
+  });
+
+  it('plays an advanced game where the naming gate decides every card', () => {
+    let state = game({
+      mode: 'advanced',
+      targetCards: 3,
+      timelines: [[1980], [1970], [1990]],
+      deck: deckOf([1985, 1975, 1995, 1965, 2005]),
+    });
+
+    // Ann: right gap, named it. Card and no token (she never claimed identify).
+    state = dispatch(playTo(state, 1), [
+      { type: ACTIONS.CONFIRM_TITLE_ARTIST, title: true, artist: true },
+      { type: ACTIONS.NEXT_TURN },
+    ]);
+    expect(years(timelineFor(state, 'p1'))).toEqual([1980, 1985]);
+    expect(tokensFor(state, 'p1')).toBe(2);
+
+    // Bo: right gap, but only got the title. No card — and a challenger cannot
+    // pick it up, because the placement itself was correct.
+    state = dispatch(state, [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 1 },
+      { type: ACTIONS.ADD_CHALLENGE, playerId: 'p3', gapIndex: 0 },
+      { type: ACTIONS.REVEAL },
+      { type: ACTIONS.CONFIRM_TITLE_ARTIST, title: true, artist: false },
+    ]);
+    expect(outcomeOf(state).placementCorrect).toBe(true);
+    expect(outcomeOf(state).accepted).toBe(false);
+    expect(outcomeOf(state).destination).toBe('discard');
+    expect(tokensFor(state, 'p3')).toBe(1);
+    state = reduce(state, { type: ACTIONS.NEXT_TURN });
+    expect(timelineFor(state, 'p2')).toHaveLength(1);
+
+    // Cy: wrong gap but names it perfectly, and Ann challenges correctly and
+    // takes the card even though she is not the one who named it.
+    state = dispatch(state, [
+      { type: ACTIONS.DRAW },
+      { type: ACTIONS.COMMIT_PLACEMENT, gapIndex: 0 },
+      { type: ACTIONS.ADD_CHALLENGE, playerId: 'p1', gapIndex: 2 },
+      { type: ACTIONS.REVEAL },
+      { type: ACTIONS.CONFIRM_TITLE_ARTIST, title: true, artist: true },
+    ]);
+    expect(outcomeOf(state).stolenBy).toBe('p1');
+    state = reduce(state, { type: ACTIONS.NEXT_TURN });
+    expect(years(timelineFor(state, 'p1'))).toEqual([1980, 1985, 1995]);
+
+    // That was Ann's third card, so the game is already decided.
+    expect(state.phase).toBe('game-over');
+    expect(winner(state)?.id).toBe('p1');
   });
 
   it('plays an expert game where only a fully correct answer scores', () => {

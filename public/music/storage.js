@@ -46,19 +46,51 @@ let backing;
 function store() {
   if (backing !== undefined) return backing;
   backing = null;
+  let candidate = null;
   try {
-    const candidate = globalThis.localStorage;
-    if (candidate) {
-      const probe = `${PREFIX}__probe`;
-      candidate.setItem(probe, '1');
-      candidate.removeItem(probe);
-      backing = candidate;
-    }
+    candidate = globalThis.localStorage || null;
   } catch {
-    // Private mode / disabled storage / sandboxed iframe: stay on memory.
+    // Reaching for the property is itself enough to throw in a sandboxed
+    // iframe or with third-party storage blocked.
+    return backing;
+  }
+  if (!candidate) return backing;
+  const probe = `${PREFIX}__probe`;
+  try {
+    candidate.setItem(probe, '1');
+    candidate.removeItem(probe);
+    backing = candidate;
+    return backing;
+  } catch (error) {
+    // Anything other than a full quota (private mode, storage disabled by
+    // policy) will never accept a write: go straight to memory.
+    if (!isQuotaError(error)) return backing;
+  }
+  // Full, but maybe only because of our own preview cache. Free it and ask
+  // again - that is the difference between "this browser said no" and "this
+  // origin needs a tidy-up", and only the first should cost us persistence.
+  freeSpace(candidate);
+  try {
+    candidate.setItem(probe, '1');
+    candidate.removeItem(probe);
+    backing = candidate;
+  } catch {
+    // Genuinely unusable (old Safari private mode throws quota on every
+    // write). Memory it is.
     backing = null;
   }
   return backing;
+}
+
+/** Drop the caches we are happy to rebuild. Never touches another app's keys. */
+function freeSpace(ls) {
+  for (const key of SACRIFICIAL_KEYS) {
+    try {
+      ls.removeItem(key);
+    } catch {
+      // Nothing else to try for this key.
+    }
+  }
 }
 
 /**
@@ -85,12 +117,18 @@ function isQuotaError(error) {
 
 function readRaw(fullKey) {
   const ls = store();
-  if (!ls) return memory.has(fullKey) ? memory.get(fullKey) : null;
-  try {
-    return ls.getItem(fullKey);
-  } catch {
-    return null;
+  if (ls) {
+    try {
+      const value = ls.getItem(fullKey);
+      if (value !== null && value !== undefined) return value;
+    } catch {
+      // Fall through to memory.
+    }
   }
+  // Values stranded in memory by a failed write still have to be readable,
+  // otherwise a full quota would look like a lost game rather than a game that
+  // simply will not survive a reload.
+  return memory.has(fullKey) ? memory.get(fullKey) : null;
 }
 
 function writeRaw(fullKey, text) {
@@ -101,22 +139,19 @@ function writeRaw(fullKey, text) {
   }
   try {
     ls.setItem(fullKey, text);
+    memory.delete(fullKey);
     return true;
   } catch (error) {
     if (!isQuotaError(error)) return false;
     // Make room by dropping caches we can rebuild, then try exactly once more.
-    for (const key of SACRIFICIAL_KEYS) {
-      try {
-        ls.removeItem(key);
-      } catch {
-        // Nothing else to try for this key.
-      }
-    }
+    freeSpace(ls);
     try {
       ls.setItem(fullKey, text);
+      memory.delete(fullKey);
       return true;
     } catch {
-      // Still full: keep it in memory so this session at least behaves.
+      // Still full: keep it in memory so this session at least behaves, and
+      // tell the caller the truth - this will not survive a reload.
       memory.set(fullKey, text);
       return false;
     }

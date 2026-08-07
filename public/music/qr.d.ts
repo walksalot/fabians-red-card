@@ -1,7 +1,7 @@
 /**
  * Types for the hand-rolled QR encoder. It ships as a plain ES module (the
  * browser and `scripts/music-server.mjs` load it verbatim, no build step), so
- * the types live beside it rather than in it — that way TypeScript callers such
+ * the types live beside it rather than in it: that way TypeScript callers such
  * as the vitest suite get real checking without the runtime file growing a
  * toolchain.
  */

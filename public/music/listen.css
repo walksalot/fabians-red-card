@@ -361,13 +361,14 @@ body[data-state="error"] .status {
 
 /* --- Notice (bad or missing card payload) -------------------------------- */
 
+/* Centred in the leftover space rather than stretched to fill it: a tall
+   hollow panel around two lines of text just looks broken. */
 .notice {
   display: flex;
-  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 10px;
+  margin-block: auto;
   padding: 26px 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius);

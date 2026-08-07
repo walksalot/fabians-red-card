@@ -375,11 +375,11 @@ body[data-busy="true"] .app {
 
 .badge {
   position: absolute;
-  top: -7px;
-  right: -7px;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
+  top: 5px;
+  right: 6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
   display: grid;
   place-items: center;
   border-radius: var(--r-pill);
@@ -388,11 +388,16 @@ body[data-busy="true"] .app {
   font-size: var(--f-2xs);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  box-shadow: 0 0 0 2px var(--bg);
+  line-height: 1;
 }
 
 /* --- panels --- */
 .panel {
+  /* Grid rather than block on purpose: it drops the browser's "rendered
+     legend" behaviour, so a <legend> sits inside the card instead of straddling
+     a notch in the top border. */
+  display: grid;
+  align-content: start;
   margin: 0 var(--gut-r) var(--s-4) var(--gut-l);
   padding: var(--s-4);
   border: 1px solid var(--line);
@@ -406,6 +411,7 @@ body[data-busy="true"] .app {
 .panel__legend {
   display: block;
   float: none;
+  width: 100%;
   padding: 0 0 var(--s-1);
   font-size: var(--f-2xs);
   font-weight: 800;
@@ -654,7 +660,13 @@ body[data-busy="true"] .app {
 }
 
 /* --- timeline strip --- */
-.timeline { flex: 0 0 auto; }
+/* The border matters: the scroll region above can be mid-scroll, and without a
+   hard edge the cut-off content reads as a rendering bug rather than a seam. */
+.timeline {
+  flex: 0 0 auto;
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--line);
+}
 .timeline__head {
   display: flex;
   align-items: baseline;
@@ -767,8 +779,6 @@ body[data-busy="true"] .app {
   overflow-x: auto;
   padding: var(--s-1) 0 var(--s-2);
   scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent 100%);
-          mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent 100%);
 }
 .mini-timeline::-webkit-scrollbar { display: none; }
 .mini-card {
@@ -783,9 +793,7 @@ body[data-busy="true"] .app {
   color: var(--text);
 }
 .mini-timeline--win {
-  justify-content: flex-start;
-  -webkit-mask-image: none;
-          mask-image: none;
+  justify-content: center;
   flex-wrap: wrap;
   overflow: visible;
   gap: 6px;
@@ -928,7 +936,7 @@ body[data-busy="true"] .app {
 /* Co-op is the only mode with a mistake limit, so the field only exists then.
    ui.js may also force it shut with [hidden]; that always wins. */
 #field-mistake-limit { display: none; }
-#setup-form:has(#mode-coop:checked) #field-mistake-limit { display: block; }
+#setup-form:has(#mode-coop:checked) #field-mistake-limit { display: grid; }
 
 .setup__go {
   padding: var(--s-2) var(--gut-r) calc(var(--s-6) + var(--sa-b)) var(--gut-l);
@@ -941,14 +949,16 @@ body[data-busy="true"] .app {
   text-align: center;
   gap: var(--s-4);
 }
-.pass__head { padding-top: var(--s-5); }
+.pass__head { padding-top: var(--s-5); font-weight: 400; }
 .pass__lead {
+  display: block;
   font-size: var(--f-lg);
   font-weight: 650;
   letter-spacing: 0.02em;
   color: var(--text-dim);
 }
 .pass__name {
+  display: block;
   margin-top: var(--s-2);
   font-size: var(--f-3xl);
   font-weight: 850;
@@ -1061,14 +1071,17 @@ body[data-busy="true"] .app {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--s-4) var(--gut-r) var(--s-2) var(--gut-l);
-  display: grid;
+  /* Flex, not grid: grid's auto tracks share leftover space between the two
+     children and quietly crop the mystery card on taller phones. */
+  display: flex;
+  flex-direction: column;
   gap: var(--s-3);
-  align-content: start;
 }
+.play__scroll > * { flex: 0 0 auto; }
 
 .mystery {
   position: relative;
-  padding: var(--s-4) var(--s-4) var(--s-4);
+  padding: var(--s-3) var(--s-4) var(--s-4);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-xl);
   background:
@@ -1099,9 +1112,9 @@ body[data-busy="true"] .app {
 
 .dial {
   position: relative;
-  width: 172px;
-  height: 172px;
-  margin: var(--s-3) auto var(--s-2);
+  width: 156px;
+  height: 156px;
+  margin: var(--s-2) auto var(--s-2);
 }
 .ring { width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring__track {
@@ -1465,6 +1478,9 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
   pointer-events: none;
   z-index: 0;
 }
+/* Two auto margins split the slack: the body settles optically centred while
+   the buttons stay on the thumb line at the bottom. */
+.win__body { margin-top: auto; }
 .win__body, .win__actions { position: relative; z-index: 1; }
 .win__eyebrow {
   font-size: var(--f-xs);
@@ -1690,8 +1706,8 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
 }
 .strip--sheet {
   padding-inline: 0;
-  -webkit-mask-image: none;
-          mask-image: none;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent 100%);
+          mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent 100%);
 }
 
 /* ------------------------------------------------------------- 9 motion */
@@ -1736,9 +1752,10 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
 /* Very narrow phones: shrink the furniture, never the tap targets. */
 @media (max-width: 359px) {
   :root { --pad: 12px; }
-  .dial { width: 148px; height: 148px; }
+  .dial { width: 138px; height: 138px; }
   .dial__icon { width: 32px; height: 32px; }
-  .qr__frame { width: 78px; height: 78px; }
+  .qr__frame { width: 76px; height: 76px; }
+  .qr__sub { display: none; }
   .tl-card { flex-basis: 116px; }
   .stepper { grid-template-columns: minmax(0, 1fr) auto minmax(44px, auto) auto; }
   .stepper__label { font-size: var(--f-xs); }

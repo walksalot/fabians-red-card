@@ -220,8 +220,8 @@
     <form class="setup" id="setup-form" novalidate>
 
       <!-- players -->
-      <fieldset class="panel">
-        <legend class="panel__legend">Players</legend>
+      <fieldset class="panel" aria-labelledby="setup-players-label">
+        <h2 class="panel__legend" id="setup-players-label">Players</h2>
         <p class="panel__hint">Two to eight. Names show up on the pass-the-phone screen.</p>
         <ul class="player-list" id="player-list"></ul>
         <button type="button" class="btn btn--ghost btn--block" id="btn-add-player" data-action="add-player">
@@ -231,8 +231,8 @@
       </fieldset>
 
       <!-- target cards -->
-      <fieldset class="panel">
-        <legend class="panel__legend">Cards to win</legend>
+      <fieldset class="panel" aria-labelledby="setup-target-label">
+        <h2 class="panel__legend" id="setup-target-label">Cards to win</h2>
         <div class="stepper" role="group" aria-labelledby="target-cards-label">
           <span class="stepper__label" id="target-cards-label">Timeline length</span>
           <button type="button" class="stepper__btn" data-action="target-dec" aria-label="Fewer cards to win">&minus;</button>
@@ -243,8 +243,8 @@
       </fieldset>
 
       <!-- mode -->
-      <fieldset class="panel">
-        <legend class="panel__legend">Mode</legend>
+      <fieldset class="panel" aria-labelledby="setup-mode-label">
+        <h2 class="panel__legend" id="setup-mode-label">Mode</h2>
         <ul class="radio-list">
           <li>
             <label class="radio-card" for="mode-classic">
@@ -290,8 +290,8 @@
       </fieldset>
 
       <!-- co-op only -->
-      <fieldset class="panel" id="field-mistake-limit">
-        <legend class="panel__legend">Mistakes allowed</legend>
+      <fieldset class="panel" id="field-mistake-limit" aria-labelledby="setup-mistakes-label">
+        <h2 class="panel__legend" id="setup-mistakes-label">Mistakes allowed</h2>
         <div class="stepper" role="group" aria-labelledby="mistake-limit-label">
           <span class="stepper__label" id="mistake-limit-label">Lose after</span>
           <button type="button" class="stepper__btn" data-action="mistakes-dec" aria-label="Fewer mistakes allowed">&minus;</button>
@@ -302,8 +302,8 @@
       </fieldset>
 
       <!-- deck -->
-      <fieldset class="panel">
-        <legend class="panel__legend">The deck</legend>
+      <fieldset class="panel" aria-labelledby="setup-deck-label">
+        <h2 class="panel__legend" id="setup-deck-label">The deck</h2>
 
         <div class="chipset">
           <div class="chipset__head">
@@ -355,8 +355,8 @@
       </fieldset>
 
       <!-- playback -->
-      <fieldset class="panel">
-        <legend class="panel__legend">Playback</legend>
+      <fieldset class="panel" aria-labelledby="setup-playback-label">
+        <h2 class="panel__legend" id="setup-playback-label">Playback</h2>
         <div class="field">
           <label class="field__label" for="playback-source">Play songs with</label>
           <div class="select">
@@ -383,10 +383,10 @@
 
   <!-- ================================================================ PASS -->
   <section class="screen screen--pass" id="pass" aria-labelledby="pass-title">
-    <div class="pass__head">
-      <h1 class="pass__lead" id="pass-title" tabindex="-1">Pass the phone to</h1>
-      <p class="pass__name" id="pass-player-name">Player 1</p>
-    </div>
+    <h1 class="pass__head" id="pass-title" tabindex="-1">
+      <span class="pass__lead">Pass the phone to</span>
+      <span class="pass__name" id="pass-player-name">Player 1</span>
+    </h1>
 
     <button type="button" class="pass__tap" id="btn-pass-continue" data-action="pass-continue">
       <span class="pass__tap-ring" aria-hidden="true"></span>
@@ -703,10 +703,10 @@
         <dd>The placement only counts if you also name the title and the artist. The group confirms both at the reveal.</dd>
         <dt>Expert</dt>
         <dd>Advanced, plus you must call the exact release year with the year stepper before you place. Exact match or nothing.</dd>
-        <dd class="modes__note">Tokens still work exactly the same in every mode.</dd>
         <dt>Co-op</dt>
         <dd>One shared timeline and one shared token pool. Everyone still takes turns placing, but you are all on the same side. Reach the target together and you win; hit the mistake limit (3 by default) and the game is over for everybody.</dd>
       </dl>
+      <p class="prose__aside">Tokens work exactly the same way in all four modes.</p>
 
       <h2>House notes</h2>
       <ul>
@@ -794,7 +794,7 @@
     <ol class="challenge-players" id="challenge-players" aria-labelledby="challenge-players-label"></ol>
 
     <div class="challenge__step" id="challenge-step-gap" hidden>
-      <h3 class="sheet__sub">Where in <span id="challenge-player-name">their</span> timeline?</h3>
+      <h3 class="sheet__sub">Where would <span id="challenge-player-name">they</span> put it?</h3>
       <ol class="strip strip--sheet" id="challenge-timeline" aria-label="Challenger timeline"></ol>
     </div>
 
