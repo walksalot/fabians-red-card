@@ -531,8 +531,13 @@ function searchUrl(term) {
 
 /**
  * Run the searches for one card. Never throws.
+ *
+ * `answered` distinguishes "the catalogue does not have this" from "we could
+ * not ask" - only the first is worth remembering, otherwise one flight-mode
+ * turn would poison the cache for a week.
+ *
  * @param {Card} card
- * @returns {Promise<ResolvedTrack|null>}
+ * @returns {Promise<{track: ResolvedTrack|null, answered: boolean}>}
  */
 async function lookup(card) {
   // Two attempts: the card as written, then a scrubbed form. The second one
@@ -541,6 +546,7 @@ async function lookup(card) {
   const verbatim = `${String(card.title || '').trim()} ${String(card.artist || '').trim()}`.trim();
   const scrubbed = `${normTitle(card.title)} ${normArtist(card.artist)}`.trim();
   const terms = scrubbed && scrubbed !== verbatim.toLowerCase() ? [verbatim, scrubbed] : [verbatim];
+  let answered = false;
 
   for (const term of terms) {
     if (!term) continue;
@@ -551,17 +557,18 @@ async function lookup(card) {
       // Offline, blocked, rate-limited or timed out. Rephrasing cannot fix any
       // of those, and a second 8-second stall in front of a player waiting to
       // hear a song is worse than falling straight through to the fallback.
-      return null;
+      return { track: null, answered };
     }
     const results =
       payload && typeof payload === 'object' && Array.isArray(payload.results)
         ? payload.results
         : null;
     if (!results) continue;
+    answered = true;
     const best = chooseBest(results, card);
-    if (best) return best;
+    if (best) return { track: best, answered: true };
   }
-  return null;
+  return { track: null, answered };
 }
 
 /**
@@ -587,8 +594,11 @@ export async function resolveTrack(card) {
   let pending = inflight.get(key);
   if (!pending) {
     pending = lookup(card)
-      .then((track) => {
-        writeEntry(key, sig, track);
+      .then(({ track, answered }) => {
+        // A hit is cached forever; a genuine "not in the catalogue" is cached
+        // briefly; an unreachable network is not cached at all, so the next
+        // turn on a better connection tries again.
+        if (track || answered) writeEntry(key, sig, track);
         return track;
       })
       .catch(() => null)
