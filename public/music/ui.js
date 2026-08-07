@@ -813,9 +813,18 @@ function paintQr() {
   pressed(altBtn, view.qrAlt);
   show(altWarn, offline && view.qrAlt);
 
-  // Nothing has been drawn yet: an empty white QR frame would just look broken.
-  show(el('qr-block'), !!card);
+  // Nothing has been drawn yet. Hiding the whole block would be tidier, but it
+  // also hides the single best feature of the game from anyone who has not
+  // played before - they never learn they can listen on their own phone. So the
+  // block stays, the frame goes (an empty white square reads as broken), and the
+  // caption explains why the code is not here yet. Drawing eagerly instead is
+  // not an option: it would close the buy-a-card window, which is only open
+  // until the deck is touched.
+  show(el('qr-block'), true);
   if (!card) {
+    // Caption only: the block's own heading already says what the code is for,
+    // and an extra "it will appear shortly" note just adds a boxed line that
+    // lands on the scroll fold and gets sliced in half.
     box.textContent = '';
     show(frame, false);
     show(note, false);
