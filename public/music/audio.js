@@ -577,6 +577,17 @@ async function lookup(card) {
 
 /** @type {Promise<Record<string, {preview?: string, art?: string}>>|null} */
 let bakedPromise = null;
+/**
+ * The same map once it has actually arrived.
+ *
+ * This exists so a tap handler can look a card up WITHOUT awaiting. iOS only
+ * lets you start audio from inside a user gesture, and an `await` - even one
+ * that resolves immediately - hands control back to the event loop and loses
+ * that permission, so `play()` is silently refused. Anything on the tap path
+ * has to be synchronous.
+ * @type {Record<string, {preview?: string, art?: string, matchedYear?: number}>|null}
+ */
+let bakedMap = null;
 
 /**
  * The previews resolved at build time, fetched once and remembered.
@@ -596,12 +607,43 @@ function loadBaked() {
       const res = await fetch(url, { cache: 'force-cache' });
       if (!res.ok) return {};
       const data = await res.json();
-      return data && typeof data === 'object' ? data : {};
+      bakedMap = data && typeof data === 'object' ? data : {};
+      return bakedMap;
     } catch {
-      return {};
+      bakedMap = {};
+      return bakedMap;
     }
   })();
   return bakedPromise;
+}
+
+/**
+ * Start loading the baked previews now, so the first tap does not have to wait.
+ * Safe to call repeatedly; the fetch happens once.
+ */
+export function primeBaked() {
+  loadBaked();
+}
+
+/**
+ * The baked answer for a card, or null if the map has not arrived yet.
+ *
+ * Synchronous on purpose - see the note on `bakedMap`. Callers on the tap path
+ * must use this and must not await anything before calling `play()`.
+ * @param {Card} card
+ * @returns {ResolvedTrack|null}
+ */
+export function bakedTrackSync(card) {
+  if (!card || !card.id || !bakedMap) return null;
+  const hit = bakedMap[card.id];
+  if (!hit || typeof hit.preview !== 'string' || !hit.preview) return null;
+  return {
+    previewUrl: hit.preview,
+    artworkUrl: typeof hit.art === 'string' ? hit.art : '',
+    matchedTitle: '',
+    matchedArtist: '',
+    matchedYear: typeof hit.matchedYear === 'number' ? hit.matchedYear : null,
+  };
 }
 
 /**
@@ -854,6 +896,51 @@ function createPlayer() {
     return el;
   };
 
+  // ~10ms of actual silence. Muted playback does NOT lift iOS's restriction -
+  // only a real play() inside a gesture does - so this has to be an audible
+  // element playing inaudible content.
+  const SILENCE =
+    'data:audio/wav;base64,UklGRnQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+  let unlocked = false;
+
+  /**
+   * Spend a user gesture teaching iOS that this element is allowed to make
+   * noise, so a later programmatic play() - after a lookup, a fetch, anything
+   * that yields - is not refused.
+   *
+   * Must be called SYNCHRONOUSLY from the tap handler, before any await.
+   * Cheap, idempotent, and silent whether or not it succeeds.
+   * @returns {boolean} whether an unlock attempt was made
+   */
+  const unlock = () => {
+    if (unlocked) return true;
+    const node = ensureElement();
+    if (!node) return false;
+    unlocked = true; // only ever try once; a failure here is not worth retrying
+    try {
+      node.src = SILENCE;
+      const started = node.play();
+      if (started && typeof started.then === 'function') {
+        started
+          .then(() => {
+            node.pause();
+            try {
+              node.currentTime = 0;
+            } catch {
+              // Seeking a data URI can throw; harmless, the src is replaced next.
+            }
+          })
+          .catch(() => {
+            // Refused anyway (no gesture, or a locked-down webview). The real
+            // play() will surface it properly through its own return value.
+          });
+      }
+    } catch {
+      return false;
+    }
+    return true;
+  };
+
   /**
    * Start (or resume) playback. Call this from a tap handler.
    * @param {string} [url] omit to resume whatever is loaded
@@ -940,6 +1027,7 @@ function createPlayer() {
 
   return {
     play,
+    unlock,
     pause,
     stop,
     seek,

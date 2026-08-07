@@ -57,7 +57,14 @@ import {
   seatColor,
 } from './engine.js';
 import { DECK, DECADES, GENRES, filterDeck } from './deck.js';
-import { resolveTrack, prefetch, streamingLinks, getPlayer } from './audio.js';
+import {
+  resolveTrack,
+  prefetch,
+  streamingLinks,
+  getPlayer,
+  primeBaked,
+  bakedTrackSync,
+} from './audio.js';
 import {
   saveGame,
   loadGame,
@@ -988,6 +995,14 @@ function resetCardAudio() {
 
 /** Tap-to-play. Every path through here starts inside a user gesture. */
 async function toggleAudio() {
+  // Everything from here to the play() call must stay synchronous. iOS grants
+  // permission to start audio only inside a user gesture, and the first await
+  // hands control back to the event loop and throws that permission away - the
+  // song then simply never starts, with no error anyone can see. This is why
+  // the unlock happens first and why the baked lookup below is the sync one.
+  const p = player();
+  p.unlock();
+
   ensureCard();
   if (!state || !state.card) return;
 
@@ -1003,7 +1018,6 @@ async function toggleAudio() {
     return;
   }
 
-  const p = player();
   if (p.playing) {
     p.pause();
     return;
@@ -1014,6 +1028,23 @@ async function toggleAudio() {
     else warmNextCard();
     return;
   }
+
+  // Most cards were resolved at build time, and that answer is available
+  // without waiting - so start them here, in the same tick as the tap, rather
+  // than going through the async path below and losing the gesture.
+  const quick = bakedTrackSync(state.card);
+  if (quick) {
+    view.audio.resolved = quick;
+    const started = await p.play(quick.previewUrl);
+    if (!started) failAudio('That preview would not play here.');
+    else {
+      view.audio.status = 'Playing the preview.';
+      render();
+      warmNextCard();
+    }
+    return;
+  }
+
   if (view.audio.resolving) return;
 
   const token = view.audio.token;
@@ -2195,6 +2226,11 @@ function registerServiceWorker() {
 function init() {
   const note = el('qr-file-note');
   fileNoteHtml = note ? note.innerHTML : '';
+
+  // Start fetching the baked previews immediately. By the time anyone reaches a
+  // play button the map is in memory, which is what lets the tap handler look a
+  // card up without awaiting - see the note at the top of toggleAudio().
+  primeBaked();
 
   loadSavedSettings();
   applySettings();
