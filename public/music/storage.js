@@ -116,19 +116,23 @@ function isQuotaError(error) {
 }
 
 function readRaw(fullKey) {
+  // Memory first, and only ever a fallback in appearance: a key is in this map
+  // exactly when its most recent write could NOT be persisted (every successful
+  // write deletes it again), so a value here is always newer than whatever
+  // localStorage still holds. Reading localStorage first was a quiet trap - a
+  // save that hit the quota mid-game left the previous, smaller save on disk,
+  // and the game read that stale copy back for the rest of the session.
+  if (memory.has(fullKey)) return memory.get(fullKey);
   const ls = store();
   if (ls) {
     try {
       const value = ls.getItem(fullKey);
       if (value !== null && value !== undefined) return value;
     } catch {
-      // Fall through to memory.
+      // Unreadable storage and nothing stranded in memory: treat as absent.
     }
   }
-  // Values stranded in memory by a failed write still have to be readable,
-  // otherwise a full quota would look like a lost game rather than a game that
-  // simply will not survive a reload.
-  return memory.has(fullKey) ? memory.get(fullKey) : null;
+  return null;
 }
 
 function writeRaw(fullKey, text) {
@@ -274,14 +278,27 @@ export function clearAll() {
  * what goes. Returns null when there was nothing to drop, which lets callers
  * skip a pointless second write.
  */
+function stripPhotoList(players) {
+  if (!Array.isArray(players)) return players;
+  return players.map((p) => (p && typeof p === 'object' ? { ...p, photo: null } : p));
+}
+
+function hasPhoto(players) {
+  return Array.isArray(players) && players.some((p) => p && typeof p === 'object' && p.photo);
+}
+
 function withoutPhotos(value) {
-  const players = value && typeof value === 'object' ? value.players : null;
-  if (!Array.isArray(players)) return null;
-  if (!players.some((p) => p && typeof p === 'object' && p.photo)) return null;
-  return {
-    ...value,
-    players: players.map((p) => (p && typeof p === 'object' ? { ...p, photo: null } : p)),
-  };
+  if (!value || typeof value !== 'object') return null;
+  // revealBase carries its own copy of the players: the engine replays every
+  // confirmation from that snapshot. Missing it meant the "lean" save was barely
+  // leaner (a second full set of photos rode along), and that a confirmation
+  // after a resume copied the photos straight back over the stripped ones - so
+  // the save we shed them from grew them again on the next write.
+  const base = value.revealBase && typeof value.revealBase === 'object' ? value.revealBase : null;
+  if (!hasPhoto(value.players) && !hasPhoto(base && base.players)) return null;
+  const lean = { ...value, players: stripPhotoList(value.players) };
+  if (base) lean.revealBase = { ...base, players: stripPhotoList(base.players) };
+  return lean;
 }
 
 /**

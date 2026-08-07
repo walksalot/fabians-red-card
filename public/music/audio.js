@@ -437,14 +437,28 @@ function readCache() {
   }
 }
 
+/** Age of a cached row for eviction, tolerating a row that is not an object. */
+function entryTime(entry) {
+  return entry && typeof entry === 'object' && Number.isFinite(entry.t) ? entry.t : 0;
+}
+
 function writeCache(entries) {
   try {
     if (!globalThis.localStorage) return;
+    // A row that is not an object (a hand-edited value, a truncated write, a
+    // `null` left by an older build) is dropped rather than sorted: reading
+    // `.t` off one used to throw here, and because the whole function is
+    // wrapped in a try that failure was silent - the cache stopped accepting
+    // writes and stopped honouring the cap, permanently, for that browser.
+    for (const key of Object.keys(entries)) {
+      const entry = entries[key];
+      if (!entry || typeof entry !== 'object') delete entries[key];
+    }
     const keys = Object.keys(entries);
     if (keys.length > CACHE_LIMIT) {
       // Oldest out, by the timestamp written with each entry.
       keys
-        .sort((a, b) => (entries[a].t || 0) - (entries[b].t || 0))
+        .sort((a, b) => entryTime(entries[a]) - entryTime(entries[b]))
         .slice(0, keys.length - CACHE_LIMIT)
         .forEach((key) => {
           delete entries[key];
@@ -605,7 +619,13 @@ function loadBaked() {
       // the site root, from /music/, or straight off disk.
       const url = new URL('./previews.json', import.meta.url).href;
       const res = await fetch(url, { cache: 'force-cache' });
-      if (!res.ok) return {};
+      if (!res.ok) {
+        // Still publish the (empty) answer synchronously, so bakedTrackSync
+        // reports "no baked track" instead of "not loaded yet" and the tap path
+        // stops waiting for a map that is never coming.
+        bakedMap = {};
+        return bakedMap;
+      }
       const data = await res.json();
       bakedMap = data && typeof data === 'object' ? data : {};
       return bakedMap;
@@ -942,6 +962,22 @@ function createPlayer() {
   };
 
   /**
+   * Did *we* interrupt this play(), rather than the browser refusing it?
+   *
+   * A pause(), a stop(), or a newer play() replacing the source all reject the
+   * still-settling promise of the previous play() with an AbortError. That is
+   * the app getting what it asked for, not a broken preview, and it must not be
+   * reported as a failure: callers turn a `false` here into "that preview would
+   * not play" and offer the streaming links, which spell out the song title.
+   * The message check is a belt for engines that use a plain Error.
+   */
+  const wasInterrupted = (error) => {
+    if (!error) return false;
+    if (error.name === 'AbortError') return true;
+    return /interrupted|aborted|new load request|call to pause/i.test(String(error.message || ''));
+  };
+
+  /**
    * Start (or resume) playback. Call this from a tap handler.
    * @param {string} [url] omit to resume whatever is loaded
    * @returns {Promise<boolean>} false when the browser refused
@@ -951,7 +987,12 @@ function createPlayer() {
     if (!node) return false;
     const next = typeof url === 'string' && url ? url : currentUrl;
     if (!next) return false;
-    if (next !== currentUrl) {
+    // Reload on a new source - and also when the source we already have failed.
+    // An element left holding a MediaError refuses every later play() without
+    // ever re-fetching, so without this a preview that 404'd once (or loaded
+    // during a wifi drop) could never be retried: "tap to try again" was a dead
+    // button for the rest of the card.
+    if (next !== currentUrl || node.error) {
       currentUrl = next;
       lastError = null;
       node.preload = 'auto';
@@ -968,6 +1009,7 @@ function createPlayer() {
       if (started && typeof started.then === 'function') await started;
       return true;
     } catch (error) {
+      if (wasInterrupted(error)) return true;
       lastError = error instanceof Error ? error : new Error('audio: play was blocked');
       emit('error');
       return false;
