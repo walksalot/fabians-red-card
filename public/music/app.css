@@ -51,6 +51,11 @@
   /* Warm gold is tokens and only tokens. Green / red are verdicts only. */
   --gold:          #ffc247;
   --gold-deep:     #c9820f;
+  /* The leader crown. Same warm family - "ahead" and "tokens" are both this
+     app's look-at-me - but a whiter gold, and always drawn as a crown, so a
+     crown at the corner of a face can never read as a stray token pill. */
+  --lead:          #ffd66b;
+  --lead-glow:     rgba(255, 214, 107, 0.55);
   --good:          #3ce6a0;
   --good-ink:      #062a1c;
   --bad:           #ff5a76;
@@ -61,6 +66,7 @@
   /* Type. System stack: instant paint, no network, native on every phone. */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
              "Helvetica Neue", Arial, sans-serif;
+  --f-3xs:  0.5625rem;
   --f-2xs:  0.6875rem;
   --f-xs:   0.75rem;
   --f-sm:   0.8125rem;
@@ -87,6 +93,16 @@
   --sh-accent: 0 12px 34px -14px rgba(150, 55, 220, 0.95),
                inset 0 1px 0 rgba(255, 255, 255, 0.28);
   --sh-gold: 0 0 12px -2px rgba(255, 194, 71, 0.7);
+
+  /* The player rail. Every number here is a token because the whole band has to
+     stay around 56px on a 320px phone: the play screen has no spare height, so
+     the faces are the first thing that has to give. --roster-dim is what keeps
+     seven other players present but unmistakably not the one holding the phone. */
+  --roster-face:      36px;
+  --roster-face-lg:   44px;
+  --roster-dim:       0.44;
+  --roster-dim-next:  0.85;
+  --roster-badge:     #1b1430;
 
   /* Touch + safe area. Nothing important gets within 16px of the edge. */
   --tap: 48px;
@@ -662,6 +678,9 @@ body[data-busy="true"] .app {
   align-items: center;
   gap: 5px;
   min-width: 0;
+  /* The pills themselves cannot shrink, so a shrinkable list would simply spill
+     its contents over whatever sits next to it in the top bar. */
+  flex: 0 0 auto;
 }
 .token-pill {
   width: 13px;
@@ -871,6 +890,319 @@ body[data-busy="true"] .app {
   border-color: rgba(255, 194, 71, 0.35);
   background: rgba(255, 194, 71, 0.10);
 }
+
+/* --- the player rail --- */
+/* Faces in seat order, one band, on both the play and the reveal screen. The
+   band is deliberately dumb about score: it is a seating plan with a number on
+   each chair, so the group can read "who is up, who is next, who is ahead" in
+   one glance and never has to go looking for the scoreboard. */
+.roster {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  /* No padding of its own: the scroller inside carries it, because overflow
+     clips at ITS padding box and the crowns and flags hang outside the faces. */
+  padding: 0;
+  border-bottom: 1px solid var(--line);
+  background-color: rgba(8, 6, 15, 0.5);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 70%);
+}
+/* On the reveal screen the page itself scrolls, so the band pins to the top -
+   it is the one thing that must not scroll away mid-argument. */
+.roster--reveal {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding-top: calc(2px + var(--sa-t));
+  background-color: rgba(8, 6, 15, 0.82);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* Only this inner list scrolls, so the fade lands on the faces and never on the
+   band's own background. */
+.roster__seats {
+  /* Positioned so a chip's offsetLeft is measured from this box - that is what
+     the auto-scroll maths assumes. */
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  /* The block padding is not decoration: overflow-y clips at the padding box,
+     the crown sits above the faces and the NEXT flag hangs below them. */
+  padding: 5px var(--gut-r) 8px var(--gut-l);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: var(--pad);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  /* The fade is exactly as wide as the gutter, so the first and last chips sit
+     at full strength when the rail is at either end and only ever dim once
+     there really is something more to scroll to. */
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 var(--pad),
+                                      #000 calc(100% - var(--pad)), transparent 100%);
+          mask-image: linear-gradient(90deg, transparent 0, #000 var(--pad),
+                                      #000 calc(100% - var(--pad)), transparent 100%);
+}
+.roster__seats::-webkit-scrollbar { display: none; }
+
+/* Start-aligned, not centred: it is the alignment ui.js scrolls to, and a chip
+   that snaps to the left edge keeps the seats after it on screen. */
+.roster__seat { flex: 0 0 auto; scroll-snap-align: start; }
+.roster__chip {
+  display: grid;
+  place-items: center;
+  min-width: 46px;
+  min-height: 44px;
+  opacity: var(--roster-dim);
+  transition: opacity var(--t-mid) var(--ease);
+}
+.roster__seat[data-rank="next"] .roster__chip { opacity: var(--roster-dim-next); }
+.roster__seat[data-rank="active"] .roster__chip { opacity: 1; }
+
+.roster__face { position: relative; display: block; }
+.roster__seat .avatar { --avatar-size: var(--roster-face); }
+/* The active seat is bigger, brighter and ringed in its own colour: three
+   signals, because one of them alone reads as decoration. */
+.roster__seat[data-rank="active"] .avatar {
+  --avatar-size: var(--roster-face-lg);
+  border-width: 2.5px;
+  box-shadow: 0 0 0 1px rgba(6, 4, 12, 0.9),
+              0 0 0 3px var(--seat-soft),
+              0 8px 20px -8px var(--seat-glow);
+}
+
+.roster__count {
+  position: absolute;
+  top: -3px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-pill);
+  border: 1.5px solid rgba(6, 4, 12, 0.92);
+  background: var(--roster-badge);
+  color: var(--text);
+  font-size: var(--f-2xs);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.roster__seat[data-rank="active"] .roster__count {
+  background: var(--seat);
+  color: var(--seat-ink);
+}
+
+.roster__crown {
+  position: absolute;
+  top: -6px;
+  left: -5px;
+  width: 15px;
+  height: 15px;
+  display: none;
+  color: var(--lead);
+  filter: drop-shadow(0 0 4px var(--lead-glow));
+}
+.roster__crown svg { width: 100%; height: 100%; }
+.roster__seat[data-leader="true"] .roster__crown { display: block; }
+
+/* The NEXT flag overlaps the bottom of the face rather than sitting under it:
+   a caption row would cost 12px of a band that only has 56 to spend. */
+.roster__flag {
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  transform: translateX(-50%);
+  display: none;
+  padding: 1px 5px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--seat);
+  background: #120c22;
+  color: var(--seat);
+  font-size: var(--f-3xs);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.roster__seat[data-rank="next"] .roster__flag { display: block; }
+
+/* Co-op: one pile, one pool. A per-player card count would be the same number
+   eight times, so the badge goes and a team tile takes its place - two tight
+   lines rather than one wide one, because at 320px every pixel this tile takes
+   is a face somebody has to scroll to. */
+.roster__team {
+  display: none;
+  flex: 0 0 auto;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0 5px;
+  margin-left: var(--gut-l);
+  padding: 3px var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  white-space: nowrap;
+  line-height: 1.15;
+}
+.roster__team-label {
+  font-size: var(--f-3xs);
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.roster__team-score {
+  font-size: var(--f-md);
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.roster__team-miss {
+  grid-column: 1 / -1;
+  justify-self: center;
+  font-size: var(--f-3xs);
+  font-weight: 700;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+body[data-mode="coop"] .roster__team { display: grid; }
+body[data-mode="coop"] .roster__count { display: none; }
+body[data-mode="coop"] .roster__seats { padding-left: var(--pad); }
+
+/* --- standings list (pass screen) --- */
+.standings { margin: 0 var(--gut-r) 0 var(--gut-l); text-align: left; }
+.standings__title {
+  margin-bottom: var(--s-2);
+  font-size: var(--f-2xs);
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.standings__list { display: grid; gap: 6px; }
+
+.standing {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 3px var(--s-3);
+  padding: 6px var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.standing[data-rank="active"] {
+  border-color: var(--seat-glow);
+  background-image: linear-gradient(100deg, var(--seat-soft), transparent 62%);
+}
+.standing__avatar { grid-column: 1; grid-row: 1 / span 2; }
+.standing__who {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.standing__name {
+  min-width: 0;
+  font-size: var(--f-md);
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.standing__crown {
+  flex: 0 0 auto;
+  display: none;
+  width: 14px;
+  height: 14px;
+  color: var(--lead);
+  filter: drop-shadow(0 0 4px var(--lead-glow));
+}
+.standing__crown svg { width: 100%; height: 100%; }
+.standing[data-leader="true"] .standing__crown { display: block; }
+.standing__flag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  font-size: var(--f-3xs);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--line-strong);
+  color: var(--text-faint);
+}
+.standing__flag:empty { display: none; }
+.standing[data-rank="active"] .standing__flag {
+  border-color: transparent;
+  background: var(--seat);
+  color: var(--seat-ink);
+}
+.standing[data-rank="next"] .standing__flag { border-color: var(--seat); color: var(--seat); }
+.standing__count {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  font-size: var(--f-lg);
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.standing__of { font-size: var(--f-xs); font-weight: 700; color: var(--text-faint); }
+.standing__tokens { grid-column: 3; grid-row: 2; justify-content: flex-end; }
+
+.standing .standings__meter { grid-column: 2; grid-row: 2; }
+.standings__meter {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+.standings__fill {
+  display: block;
+  height: 100%;
+  width: var(--fill, 0%);
+  border-radius: inherit;
+  background: var(--seat);
+  transition: width var(--t-mid) var(--ease);
+}
+
+/* Co-op swaps the whole list for one team card. */
+.teambox {
+  display: grid;
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  justify-items: center;
+}
+.teambox__count {
+  font-size: var(--f-xl);
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.teambox__of { margin-left: 5px; font-size: var(--f-sm); font-weight: 700; color: var(--text-faint); }
+.teambox__miss { font-size: var(--f-xs); font-weight: 700; color: var(--gold); }
+#pass-coop { display: none; }
+body[data-mode="coop"] #pass-coop { display: block; }
+body[data-mode="coop"] #pass-standings { display: none; }
 
 /* ------------------------------------------------------- 7 screen styles */
 
@@ -1114,14 +1446,21 @@ body[data-busy="true"] .app {
 }
 
 /* --- pass the phone --- */
+/* The screen now carries the standings, so the furniture above them gives up
+   the room: the face is still the biggest thing here by a distance, it just no
+   longer owns half a phone. Nothing is pinned - a table of eight makes this
+   screen taller than the viewport, and scrolling to the bottom of a standings
+   list is exactly what somebody doing that wants. */
 .screen--pass {
-  padding: calc(var(--s-6) + var(--sa-t)) var(--gut-r)
+  padding: calc(var(--s-4) + var(--sa-t)) var(--gut-r)
            calc(var(--s-5) + var(--sa-b)) var(--gut-l);
   text-align: center;
-  gap: var(--s-4);
+  gap: var(--s-3);
 }
-.pass__avatar { margin: var(--s-4) auto 0; }
-.pass__head { padding-top: var(--s-3); font-weight: 400; }
+.pass__avatar { --avatar-size: min(34vw, 140px); margin: 0 auto; }
+.pass__head { font-weight: 400; }
+.pass__then { font-size: var(--f-md); color: var(--text-faint); }
+.pass__then span { color: var(--text-dim); font-weight: 750; }
 .pass__lead {
   display: block;
   font-size: var(--f-lg);
@@ -1144,8 +1483,8 @@ body[data-busy="true"] .app {
 .pass__tap {
   position: relative;
   flex: 1 1 auto;
-  min-height: 132px;
-  margin: var(--s-3) 0;
+  min-height: 104px;
+  margin: var(--s-1) 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1245,6 +1584,32 @@ body[data-busy="true"] .app {
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
 }
+/* The rail answers "who is next" in pictures, but it scrolls; this does not. */
+.upnext {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.upnext__label {
+  flex: 0 0 auto;
+  font-size: var(--f-2xs);
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.upnext__name {
+  min-width: 0;
+  font-size: var(--f-sm);
+  font-weight: 750;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .progress__num { font-size: var(--f-lg); font-weight: 800; letter-spacing: -0.02em; }
 .progress__slash { color: var(--text-faint); font-size: var(--f-md); }
 .progress__label {
@@ -1267,6 +1632,11 @@ body[data-busy="true"] .app {
   display: flex;
   flex-direction: column;
   gap: var(--s-3);
+  /* Fade the last few pixels instead of guillotining them. Without this the
+     bottom edge slices whatever is there - typically the QR block's heading -
+     clean through the middle of a line, which reads as broken rather than as
+     "there is more below". The top stays hard: it butts against the rail. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
 }
 .play__scroll > * { flex: 0 0 auto; }
 
@@ -1449,8 +1819,9 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
 
 /* --- reveal --- */
 .screen--reveal { gap: var(--s-3); }
+/* The safe-area inset is the rail's job now - it sits above this. */
 .reveal__heading {
-  padding: calc(var(--s-5) + var(--sa-t)) var(--gut-r) 0 var(--gut-l);
+  padding: var(--s-3) var(--gut-r) 0 var(--gut-l);
   font-size: var(--f-2xs);
   font-weight: 800;
   letter-spacing: 0.2em;
@@ -2008,7 +2379,16 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
 /* --------------------------------------------------- 10 width adaptations */
 /* Very narrow phones: shrink the furniture, never the tap targets. */
 @media (max-width: 359px) {
-  :root { --pad: 12px; }
+  :root {
+    --pad: 12px;
+    /* Two pixels off each face buys a whole extra chip on a 320px screen, and
+       the band gives four back to the play area. */
+    --roster-face: 34px;
+    --roster-face-lg: 42px;
+  }
+  .roster__chip { min-width: 44px; min-height: 42px; }
+  .roster__seats { padding-block: 4px 8px; }
+  .standing__name { font-size: var(--f-sm); }
   .dial { width: 138px; height: 138px; }
   .dial__icon { width: 32px; height: 32px; }
   .qr__frame { width: 76px; height: 76px; }
@@ -2027,6 +2407,57 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
   .chip--sm { padding: 4px var(--s-2); }
 }
 
+/* Short phones - a 568px-tall SE, or anything held in landscape. The rail costs
+   the play screen around 56px, and this is where they come back from: every
+   piece of furniture gives up a few pixels so the dial, the one control a
+   player has to reach, stays on screen instead of below the fold. */
+@media (max-height: 640px) {
+  .topbar {
+    padding-top: calc(4px + var(--sa-t));
+    padding-bottom: var(--s-2);
+  }
+  .topbar__row--meta { margin-top: var(--s-1); }
+  .screen--play .avatar--md { --avatar-size: 44px; }
+  .topbar__name { font-size: var(--f-lg); }
+  .roster__seats { padding-block: 4px 8px; }
+  .play__scroll { padding-top: var(--s-1); gap: var(--s-2); }
+  .mystery { padding: var(--s-2) var(--s-3) var(--s-3); }
+  .mystery__label { font-size: var(--f-3xs); letter-spacing: 0.14em; }
+  .mystery__status { margin-top: var(--s-1); }
+  .dial { width: 108px; height: 108px; margin-block: var(--s-1); }
+  .dial__icon { width: 28px; height: 28px; }
+  .dial__btn { inset: 10px; }
+  .dial__label { font-size: var(--f-xs); }
+  .timeline { padding-top: var(--s-2); }
+  /* One line, whatever the mode: a wrapped header costs the dial 20px. */
+  .timeline__head { gap: var(--s-2); }
+  .timeline__title { white-space: nowrap; }
+  .timeline__hint {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .strip { padding-block: var(--s-1) var(--s-2); }
+  .tl-card { padding: var(--s-2); }
+  /* One line of title instead of two: the year is what a timeline is read by. */
+  .tl-card__title { -webkit-line-clamp: 1; }
+  .strip:empty { min-height: 92px; }
+  .actions { padding-block: var(--s-2) calc(var(--s-2) + var(--sa-b)); }
+
+  /* Same bargain on the pass screen: the face and the tap target give up a
+     little so a four-player table can read its standings without scrolling. */
+  .screen--pass {
+    gap: var(--s-2);
+    padding-top: calc(var(--s-3) + var(--sa-t));
+  }
+  .pass__avatar { --avatar-size: min(28vw, 112px); }
+  .pass__name { font-size: var(--f-2xl); }
+  .pass__tap { min-height: 84px; }
+  .standings__title { margin-bottom: var(--s-1); }
+  .standing { padding-block: 4px; }
+}
+
 /* Landscape phones and small tablets: the play screen gets two columns so the
    timeline is not squeezed against the actions. */
 @media (min-width: 620px) {
@@ -2038,6 +2469,9 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
   .play__scroll { max-width: 620px; margin-inline: auto; width: 100%; }
   .topbar__row { max-width: 620px; margin-inline: auto; width: 100%; }
   .timeline__head, .strip { max-width: 620px; margin-inline: auto; }
+  /* No justify-content here: centring an overflowing scroller puts its first
+     items out of reach in every engine that ships today. */
+  .roster__seats { max-width: 620px; margin-inline: auto; }
 }
 
 /* Wide screens still read as a phone app, just centred. */

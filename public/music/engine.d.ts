@@ -216,6 +216,14 @@ export interface ScoreRow {
   isActive: boolean;
 }
 
+/** A ScoreRow in fixed seat order, with the turn-order flags the rail needs. */
+export interface SeatRow extends ScoreRow {
+  /** True for the player who plays after the active one. */
+  isNext: boolean;
+  /** True only when this player is STRICTLY ahead on cards. Never true in co-op. */
+  isLeader: boolean;
+}
+
 export interface Progress {
   cards: number;
   target: number;
@@ -258,6 +266,11 @@ export declare function challengeFor(state: GameState, playerId: string): Challe
 export declare function deckRemaining(state: GameState): number;
 export declare function progressFor(state: GameState, playerId: string): Progress;
 export declare function scoreboard(state: GameState): ScoreRow[];
+export declare function nextPlayer(state: GameState): Player | null;
+export declare function nextPlayerId(state: GameState): string | null;
+export declare function leader(state: GameState): Player | null;
+export declare function leaderId(state: GameState): string | null;
+export declare function seatStandings(state: GameState): SeatRow[];
 export declare function isGameOver(state: GameState): boolean;
 export declare function result(state: GameState): GameResult | null;
 export declare function winners(state: GameState): Player[];

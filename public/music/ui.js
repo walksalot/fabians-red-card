@@ -51,6 +51,8 @@ import {
   challengeFor,
   progressFor,
   scoreboard,
+  seatStandings,
+  nextPlayer,
   isGameOver,
   winners,
   pendingResult,
@@ -601,6 +603,10 @@ function focusHeading(name) {
     }
     const scroller = heading.closest('.screen');
     if (scroller) scroller.scrollTop = 0;
+    // The page itself scrolls on any screen that outgrows the viewport - setup,
+    // the rules, a pass screen with eight players in the standings - and a
+    // leftover offset would drop the next person into the middle of theirs.
+    window.scrollTo(0, 0);
   });
 }
 
@@ -885,7 +891,13 @@ function enterPlay() {
   resetCardAudio();
   showScreen('play');
   const player = currentPlayer(state);
-  if (player) announce(`${player.name}'s turn. Turn ${state.turn}.`);
+  if (!player) return;
+  // Politely, on the existing status region: the handover is the one thing a
+  // player who cannot see the rail still has to be told about.
+  const upNext = nextPlayer(state);
+  announce(
+    `${player.name}'s turn. Turn ${state.turn}.${upNext ? ` ${upNext.name} is next.` : ''}`,
+  );
 }
 
 /**
@@ -1318,6 +1330,184 @@ function scrollIntoStrip(strip, node) {
 }
 
 /* ========================================================================== */
+/* The player rail + the standings list                                       */
+/* ========================================================================== */
+/* Both are the same data - engine.seatStandings(), in seat order - drawn twice
+   at two sizes. The rail is what the table glances at mid-turn; the standings
+   list is what they read while the phone is being handed over.                */
+
+function rankOf(row) {
+  if (row.isActive) return 'active';
+  if (row.isNext) return 'next';
+  return 'other';
+}
+
+/**
+ * What a screen reader gets instead of a face.
+ *
+ * The card count is the whole point of the badge, so it goes in the name rather
+ * than a title attribute - except in co-op, where every player would report the
+ * same shared pile and the number would be noise eight times over.
+ */
+function seatLabel(row, mode) {
+  const parts = [row.name];
+  if (mode !== 'coop') parts.push(`${row.cards} card${row.cards === 1 ? '' : 's'}`);
+  if (row.isActive) parts.push('playing now');
+  else if (row.isNext) parts.push('up next');
+  if (row.isLeader) parts.push('leading');
+  return parts.join(', ');
+}
+
+/** How far along the meter is. Clamped: a bought card can overshoot the target. */
+function meterWidth(cards, target) {
+  if (!Number.isFinite(target) || target <= 0) return '0%';
+  return `${Math.max(0, Math.min(100, Math.round((cards / target) * 100)))}%`;
+}
+
+function buildTokenPills(list, count) {
+  if (!list || !state) return;
+  replaceChildren(
+    list,
+    Array.from({ length: state.tokenCap }, (unused, index) => {
+      const pill = clone('tpl-token-pill');
+      if (pill) pill.dataset.state = index < count ? 'full' : 'empty';
+      return pill;
+    }),
+  );
+  list.setAttribute('aria-label', `${count} token${count === 1 ? '' : 's'}`);
+}
+
+/**
+ * Paint one rail (there is one on the play screen and one on the reveal).
+ *
+ * Chips are only rebuilt when the roster itself changes, so an ordinary turn
+ * change is four attribute flips - which keeps the scroll position, lets CSS
+ * animate the handover, and means a photo is never re-decoded mid-game.
+ */
+function paintRoster(seats, team) {
+  if (!seats || !state) return;
+  const rows = seatStandings(state);
+
+  const key = rows.map((row) => row.playerId).join('|');
+  if (seats.dataset.rosterKey !== key) {
+    replaceChildren(seats, rows.map(() => clone('tpl-roster-chip')));
+    seats.dataset.rosterKey = key;
+  }
+
+  rows.forEach((row, index) => {
+    const seat = seats.children[index];
+    if (!seat) return;
+    seat.dataset.playerId = row.playerId;
+    seat.dataset.rank = rankOf(row);
+    seat.dataset.leader = row.isLeader ? 'true' : 'false';
+    applySeat(seat, row.color);
+    paintAvatar(seat.querySelector('.avatar'), row);
+    fill(seat, { cards: row.cards, flag: row.isNext ? 'Next' : '' });
+    const chip = seat.querySelector('.roster__chip');
+    if (chip) chip.setAttribute('aria-label', seatLabel(row, state.mode));
+  });
+
+  if (team) {
+    fill(team, {
+      cards: state.sharedTimeline.length,
+      target: state.targetCards,
+      mistakes: state.mistakes,
+      limit: state.mistakeLimit,
+    });
+  }
+
+  // Only chase the active chip when the turn moved on - or when the rail itself
+  // changed size, which is a rotated phone. Doing it on every repaint would
+  // scroll somebody's own browsing out from under them.
+  const active = currentPlayer(state);
+  const fit = active ? `${active.id}@${seats.clientWidth}` : '';
+  if (active && seats.dataset.activeSeat !== fit) {
+    seats.dataset.activeSeat = fit;
+    scrollSeatIntoView(
+      seats,
+      seats.querySelector('[data-rank="active"]'),
+      seats.querySelector('[data-rank="next"]'),
+    );
+  }
+}
+
+/**
+ * Put the active chip - and the one after it - in view, but only when they are
+ * not there already.
+ *
+ * Three rules, all learned the hard way. Both chips, because "who is next" is
+ * half the point of the rail and the two are always neighbours. Not centred the
+ * way the timeline strip is: the rail is a seating plan, and shoving the first
+ * two seats off the left edge to centre the third throws away the thing the
+ * rail is for. And when it does scroll it lands exactly on the active chip's own
+ * snap position - anywhere else and the scroll-snap container simply drags the
+ * rail somewhere else the moment the programmatic scroll finishes.
+ */
+function scrollSeatIntoView(seats, chip, nextChip) {
+  if (!chip || typeof seats.scrollTo !== 'function') return;
+  const left = seats.scrollLeft;
+  const right = left + seats.clientWidth;
+  const inView = (node) =>
+    node.offsetLeft >= left && node.offsetLeft + node.offsetWidth <= right;
+  if (inView(chip) && (!nextChip || inView(nextChip))) return;
+  // Snap positions are start-aligned, offset by the scroll padding - which is
+  // the container's own inline padding, so the first chip's is exactly 0.
+  const pad = Number.parseFloat(window.getComputedStyle(seats).paddingLeft) || 0;
+  const target = Math.max(
+    0,
+    Math.min(chip.offsetLeft - pad, seats.scrollWidth - seats.clientWidth),
+  );
+  if (Math.abs(left - target) < 2) return;
+  try {
+    seats.scrollTo({ left: target, behavior: motionIsReduced() ? 'auto' : 'smooth' });
+  } catch {
+    seats.scrollLeft = target;
+  }
+}
+
+function renderStandings() {
+  const list = el('pass-standings-list');
+  if (list) {
+    replaceChildren(
+      list,
+      seatStandings(state).map((row) => {
+        const node = clone('tpl-standings-row');
+        if (!node) return null;
+        node.dataset.playerId = row.playerId;
+        node.dataset.rank = rankOf(row);
+        node.dataset.leader = row.isLeader ? 'true' : 'false';
+        applySeat(node, row.color);
+        node.style.setProperty('--fill', meterWidth(row.cards, state.targetCards));
+        paintAvatar(node.querySelector('.standing__avatar'), row);
+        fill(node, {
+          name: row.name,
+          cards: row.cards,
+          target: state.targetCards,
+          flag: row.isActive ? 'Playing now' : row.isNext ? 'Up next' : '',
+        });
+        buildTokenPills(node.querySelector('[data-field="tokens"]'), row.tokens);
+        return node;
+      }),
+    );
+  }
+
+  // Co-op: one pile, one pool, one mistake budget. CSS decides which of the two
+  // blocks is on screen; this only has to keep the numbers right.
+  const coop = el('pass-coop');
+  if (coop) {
+    const cards = state.sharedTimeline.length;
+    fill(coop, {
+      cards,
+      target: state.targetCards,
+      mistakes: state.mistakes,
+      limit: state.mistakeLimit,
+    });
+    coop.style.setProperty('--fill', meterWidth(cards, state.targetCards));
+    buildTokenPills(coop.querySelector('[data-field="tokens"]'), state.sharedTokens);
+  }
+}
+
+/* ========================================================================== */
 /* Play screen                                                                */
 /* ========================================================================== */
 
@@ -1343,8 +1533,16 @@ function renderPlay() {
   text('play-progress-target', progress.target);
   paintTokens(el('play-tokens'), tokensFor(state, active.id), state.tokenCap);
 
+  // Who is up, who is after them: the rail says it in faces, the bar in words.
+  const upNext = nextPlayer(state);
+  show(el('play-next'), !!upNext);
+  if (upNext) text('play-next-name', upNext.name);
+  paintRoster(el('play-roster-seats'), el('play-roster-team'));
+
   const heading = el('timeline-heading');
-  if (heading) heading.textContent = state.mode === 'coop' ? 'The shared timeline' : 'Your timeline';
+  // "Shared", not "The shared": at 320px the longer version wraps the header
+  // onto a second line and pushes the mystery card's Play button off screen.
+  if (heading) heading.textContent = state.mode === 'coop' ? 'Shared timeline' : 'Your timeline';
 
   const timeline = timelineFor(state, active.id);
   paintStrip(el('timeline-strip'), gapsFor(state, active.id), timeline, state.selectedGap);
@@ -1441,6 +1639,14 @@ function renderPass() {
   text('pass-turn-number', state.turn);
   const progress = progressFor(state, active.id);
   text('pass-progress', `${progress.cards} / ${progress.target} cards`);
+
+  // "then Ann" - the handover is the only moment the running order is anybody's
+  // question, so it gets answered in words here rather than in a caret.
+  const upNext = nextPlayer(state);
+  show(el('pass-then'), !!upNext);
+  if (upNext) text('pass-next-name', upNext.name);
+
+  renderStandings();
 }
 
 /* ========================================================================== */
@@ -1480,6 +1686,7 @@ const REVEAL_SUB = {
 };
 
 function renderReveal() {
+  paintRoster(el('reveal-roster-seats'), el('reveal-roster-team'));
   const outcome = state.outcome;
   if (!outcome) return;
   const card = outcome.card;
@@ -1642,18 +1849,7 @@ function renderScoreboard() {
     applySeat(node, row.color);
     paintAvatar(node.querySelector('.score-row__avatar'), row);
     fill(node, { name: row.name, togo: row.cardsToGo });
-    const tokens = node.querySelector('[data-field="tokens"]');
-    if (tokens) {
-      replaceChildren(
-        tokens,
-        Array.from({ length: state.tokenCap }, (unused, index) => {
-          const pill = clone('tpl-token-pill');
-          if (pill) pill.dataset.state = index < row.tokens ? 'full' : 'empty';
-          return pill;
-        }),
-      );
-      tokens.setAttribute('aria-label', `${row.tokens} tokens`);
-    }
+    buildTokenPills(node.querySelector('[data-field="tokens"]'), row.tokens);
     const strip = node.querySelector('[data-field="timeline"]');
     if (strip) replaceChildren(strip, row.timeline.map(miniCard));
     return node;
@@ -2190,6 +2386,23 @@ function onInput(event) {
   }
 }
 
+/**
+ * A rotated phone changes how many faces fit, and the rail would otherwise keep
+ * a scroll offset that leaves the active one off screen for the rest of the
+ * turn. Debounced and rail-only: a full render() here would redraw the QR code
+ * every time a mobile browser's address bar slid away.
+ */
+let railResizeTimer = null;
+function onResize() {
+  if (railResizeTimer !== null) return;
+  railResizeTimer = window.setTimeout(() => {
+    railResizeTimer = null;
+    if (!state) return;
+    if (view.screen === 'play') paintRoster(el('play-roster-seats'), el('play-roster-team'));
+    else if (view.screen === 'reveal') paintRoster(el('reveal-roster-seats'), el('reveal-roster-team'));
+  }, 180);
+}
+
 function onKeydown(event) {
   if (event.key !== 'Escape') return;
   if (view.challengeOpen) {
@@ -2241,6 +2454,7 @@ function init() {
   document.addEventListener('input', onInput);
   document.addEventListener('change', onInput);
   document.addEventListener('keydown', onKeydown);
+  window.addEventListener('resize', onResize);
 
   // Nothing here should ever throw, but if something does the player gets a
   // sentence instead of a frozen screen.
