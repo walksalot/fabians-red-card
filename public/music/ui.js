@@ -1773,6 +1773,8 @@ function renderChallengeSheet() {
         const button = node.querySelector('.challenge-option');
         if (!button) return null;
         button.dataset.playerId = p.id;
+        applySeat(button, p.color);
+        paintAvatar(button.querySelector('.avatar'), p);
         const blocked = challengeBlockedReason(state, p.id);
         const existing = challengeFor(state, p.id);
         const tokens = tokensFor(state, p.id);
@@ -1793,6 +1795,8 @@ function renderChallengeSheet() {
   const chosen = view.challengerId;
   show(step, !!chosen);
   if (chosen) {
+    const challenger = playerOf(chosen);
+    applySeat(step, challenger && challenger.color);
     text('challenge-player-name', nameOf(chosen));
     paintStrip(
       el('challenge-timeline'),
@@ -1809,7 +1813,14 @@ function renderChallengeSheet() {
 /* ========================================================================== */
 
 function render() {
-  if (state) document.body.dataset.mode = state.mode;
+  if (state) {
+    document.body.dataset.mode = state.mode;
+    // One place publishes the active player's accent; play, pass and reveal all
+    // inherit it from <body>. Anything showing somebody else (the winner, a
+    // scoreboard row, a challenge option) overrides it on its own element.
+    const active = currentPlayer(state);
+    if (active) applySeat(document.body, active.color);
+  }
 
   switch (view.screen) {
     case 'home':
@@ -1983,7 +1994,7 @@ const HANDLERS = {
   home: () => goHome(),
   'add-player': () => {
     if (view.setup.players.length >= MAX_PLAYERS) return;
-    view.setup.players.push(`Player ${view.setup.players.length + 1}`);
+    view.setup.players.push(playerDraft(view.setup.players.length));
     render();
   },
   'remove-player': (node) => {
@@ -1991,7 +2002,22 @@ const HANDLERS = {
     if (!row) return;
     if (view.setup.players.length <= MIN_PLAYERS) return;
     view.setup.players.splice(Number(row.dataset.playerIndex), 1);
+    rememberRoster();
     render();
+  },
+  // The button is the accessible control; the <input type="file"> behind it is
+  // an implementation detail that stays hidden. No `capture` attribute on that
+  // input, deliberately - it is what makes iOS offer "Take Photo" AND "Photo
+  // Library" instead of forcing the camera on someone who already has the shot.
+  'pick-photo': (node) => {
+    const row = node.closest('[data-player-index]');
+    if (!row) return;
+    const input = row.querySelector('[data-role="player-photo"]');
+    if (input) input.click();
+  },
+  'skip-photo': (node) => {
+    const row = node.closest('[data-player-index]');
+    if (row) skipPhoto(Number(row.dataset.playerIndex));
   },
   'target-dec': () => stepTarget(-1),
   'target-inc': () => stepTarget(1),
@@ -2089,7 +2115,29 @@ function onInput(event) {
   if (node.dataset && node.dataset.role === 'player-name') {
     const row = node.closest('[data-player-index]');
     if (!row) return;
-    view.setup.players[Number(row.dataset.playerIndex)] = node.value;
+    const draft = view.setup.players[Number(row.dataset.playerIndex)];
+    if (!draft) return;
+    draft.name = node.value;
+    // The initial in the circle is the fallback avatar, so it has to keep up
+    // with the name as it is typed.
+    const avatar = row.querySelector('.player-row__avatar [data-field="initial"]');
+    if (avatar) avatar.textContent = initialFor(node.value);
+    return;
+  }
+  if (node.dataset && node.dataset.role === 'player-photo') {
+    const row = node.closest('[data-player-index]');
+    const file = node.files && node.files[0] ? node.files[0] : null;
+    // Clear the input immediately: keeping the selection alive would pin a
+    // multi-megabyte capture in memory for the rest of the session, and it also
+    // means picking the same file twice in a row still fires a change event.
+    node.value = '';
+    if (!row || !file) return;
+    const draft = view.setup.players[Number(row.dataset.playerIndex)];
+    acceptPhoto(draft, file).catch(() => {
+      if (draft) draft.pending = false;
+      alertUser('That photo could not be read. Try another one, or tap Skip photo.');
+      render();
+    });
     return;
   }
   if (node.name === 'mode') {
