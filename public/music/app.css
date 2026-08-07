@@ -37,6 +37,17 @@
   --accent:        linear-gradient(112deg, var(--violet) 0%, #b53cf0 46%, var(--pink) 100%);
   --accent-soft:   linear-gradient(112deg, rgba(124, 58, 255, 0.22), rgba(255, 47, 160, 0.18));
 
+  /* Per-seat accent. engine.js owns the palette (SEAT_COLORS) and ui.js
+     publishes the active player's into these three, so no rule below ever names
+     a player colour. The defaults are the house violet: an unset --seat has to
+     look like the rest of the app, never like a missing value. */
+  --seat:          var(--violet-lift);
+  --seat-soft:     rgba(169, 124, 255, 0.18);
+  --seat-glow:     rgba(169, 124, 255, 0.45);
+  /* Ink for text sitting ON a seat colour. Every seat colour is a light one, so
+     this is always the dark end - it never has to flip. */
+  --seat-ink:      #0a0614;
+
   /* Warm gold is tokens and only tokens. Green / red are verdicts only. */
   --gold:          #ffc247;
   --gold-deep:     #c9820f;
@@ -590,6 +601,61 @@ body[data-busy="true"] .app {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
+/* --- avatars --- */
+/* One circle, five sizes, two states. The photo state is a real photograph; the
+   fallback is the player's initial on their seat colour, and it has to look like
+   a chosen design rather than a failed <img> - so it gets the same ring, the
+   same shadow and a lit gradient, not a grey placeholder. */
+.avatar {
+  --avatar-size: 44px;
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  border-radius: 50%;
+  border: 2px solid var(--seat);
+  background: #140f24;
+  box-shadow: 0 0 0 1px rgba(6, 4, 12, 0.9),
+              0 10px 24px -12px var(--seat-glow);
+  overflow: hidden;
+  color: var(--seat-ink);
+  font-weight: 850;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.avatar__img {
+  grid-area: 1 / 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.avatar__initial {
+  grid-area: 1 / 1;
+  font-size: calc(var(--avatar-size) * 0.42);
+  text-transform: uppercase;
+}
+.avatar[data-photo="true"] .avatar__initial { display: none; }
+.avatar[data-photo="false"] .avatar__img { display: none; }
+.avatar[data-photo="false"] {
+  background-color: var(--seat);
+  background-image: linear-gradient(163deg, rgba(255, 255, 255, 0.34), rgba(0, 0, 0, 0.26));
+}
+
+.avatar--sm { --avatar-size: 40px; }
+.avatar--md { --avatar-size: 52px; }
+.avatar--lg { --avatar-size: 62px; }
+.avatar--xl {
+  --avatar-size: min(46vw, 188px);
+  border-width: 3px;
+  box-shadow: 0 0 0 1px rgba(6, 4, 12, 0.9),
+              0 0 0 8px var(--seat-soft),
+              0 26px 60px -26px var(--seat-glow);
+}
+
 /* --- token pills --- */
 .tokens {
   display: flex;
@@ -852,20 +918,101 @@ body[data-busy="true"] .app {
 
 /* --- setup --- */
 .setup { padding-top: var(--s-1); }
+.panel__hint--privacy {
+  margin-top: var(--s-2);
+  padding-left: var(--s-4);
+  position: relative;
+  font-size: var(--f-xs);
+  color: var(--text-faint);
+}
+/* A padlock drawn in CSS: the claim "this stays on your phone" is worth a mark
+   that reads before the sentence does, and this one costs no request. */
+.panel__hint--privacy::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 0.45em;
+  width: 8px;
+  height: 7px;
+  border-radius: 1.5px;
+  border: 1.5px solid var(--text-faint);
+  border-top-width: 4px;
+  border-top-color: transparent;
+  box-shadow: inset 0 -4px 0 -1px var(--text-faint);
+}
+
 .player-list { display: grid; gap: var(--s-2); margin-bottom: var(--s-3); }
 .player-row {
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 44px;
+  grid-template-columns: auto minmax(0, 1fr) 44px;
   align-items: center;
   gap: var(--s-2);
+  padding: var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.player-row__avatar { grid-column: 1; grid-row: 1 / span 2; }
+.player-row__input { grid-column: 2; grid-row: 1; }
+.player-row__remove { grid-column: 3; grid-row: 1; }
+.player-row__foot {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-2);
 }
 .player-row__num {
-  font-size: var(--f-sm);
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--seat-soft);
+  color: var(--seat);
+  font-size: var(--f-2xs);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+}
+.player-row__status {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--f-xs);
   color: var(--text-faint);
+}
+/* Gold is this app's "look at me" - the same colour the deck warning and the
+   buy-a-card reason use. An outstanding photo is the only thing between the
+   family and a game, so it gets that colour until it is dealt with. */
+.player-row[data-photo-state="none"] .player-row__status { color: var(--gold); font-weight: 650; }
+.player-row__skip { flex: 0 0 auto; }
+.chip--sm { min-height: 44px; padding: 4px var(--s-3); font-size: var(--f-xs); }
+
+/* The camera mark sits inside the circle, so a 12MP portrait is never fighting
+   a badge for the same corner. */
+.player-row__camera {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 42%;
+  display: grid;
+  place-items: end center;
+  padding-bottom: 4px;
+  background: linear-gradient(to top, rgba(4, 2, 10, 0.85), rgba(4, 2, 10, 0));
+  color: #fff;
+  transition: opacity var(--t-fast) var(--ease);
+}
+.player-row__camera svg { width: 19px; height: 19px; }
+.player-row[data-photo-state="photo"] .player-row__camera { opacity: 0.7; }
+.player-row[data-photo-state="skipped"] .player-row__camera { opacity: 0.45; }
+
+.setup__reason {
+  margin-bottom: var(--s-2);
+  font-size: var(--f-sm);
+  font-weight: 650;
+  color: var(--gold);
   text-align: center;
 }
+
 .player-row__input {
   min-width: 0;
   width: 100%;
@@ -949,7 +1096,8 @@ body[data-busy="true"] .app {
   text-align: center;
   gap: var(--s-4);
 }
-.pass__head { padding-top: var(--s-5); font-weight: 400; }
+.pass__avatar { margin: var(--s-4) auto 0; }
+.pass__head { padding-top: var(--s-3); font-weight: 400; }
 .pass__lead {
   display: block;
   font-size: var(--f-lg);
@@ -957,6 +1105,8 @@ body[data-busy="true"] .app {
   letter-spacing: 0.02em;
   color: var(--text-dim);
 }
+/* The name takes the seat colour rather than the house gradient: on this screen
+   the colour IS the answer to "who?", and it has to match the ring above it. */
 .pass__name {
   display: block;
   margin-top: var(--s-2);
@@ -965,16 +1115,13 @@ body[data-busy="true"] .app {
   line-height: 1.02;
   letter-spacing: -0.04em;
   overflow-wrap: anywhere;
-  background: var(--accent);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--seat);
 }
 .pass__tap {
   position: relative;
   flex: 1 1 auto;
-  min-height: 220px;
-  margin: var(--s-4) 0;
+  min-height: 132px;
+  margin: var(--s-3) 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -990,10 +1137,10 @@ body[data-busy="true"] .app {
 }
 .pass__tap-ring {
   position: absolute;
-  width: 190px;
-  height: 190px;
+  width: 160px;
+  height: 160px;
   border-radius: 50%;
-  border: 1px solid rgba(169, 124, 255, 0.35);
+  border: 1px solid var(--seat-glow);
   animation: pulse calc(var(--motion) * 2600ms) var(--ease) infinite;
 }
 @keyframes pulse {
@@ -1015,13 +1162,32 @@ body[data-busy="true"] .app {
 .pass__meta { font-size: var(--f-sm); color: var(--text-faint); }
 
 /* --- play --- */
+/* Whose turn it is has to survive a glance from across the room, so the bar
+   carries three signals at once: a tint, a rail along its bottom edge, and the
+   ring on the photo. One of them alone reads as decoration; together they read
+   as "this phone belongs to Sofia right now". */
 .topbar {
+  position: relative;
   flex: 0 0 auto;
   padding: calc(var(--s-2) + var(--sa-t)) var(--gut-r) var(--s-3) var(--gut-l);
   border-bottom: 1px solid var(--line);
-  background: rgba(8, 6, 15, 0.55);
+  background-color: rgba(8, 6, 15, 0.55);
+  background-image: linear-gradient(180deg, var(--seat-soft), transparent 78%);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+}
+.topbar__rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 3px;
+  background: linear-gradient(90deg, var(--seat), var(--seat) 42%, transparent 100%);
+}
+.topbar__avatar {
+  box-shadow: 0 0 0 1px rgba(6, 4, 12, 0.9),
+              0 0 0 4px var(--seat-soft),
+              0 12px 26px -14px var(--seat-glow);
 }
 .topbar__row {
   display: flex;
@@ -1046,6 +1212,7 @@ body[data-busy="true"] .app {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--seat);
 }
 .progress {
   display: flex;
@@ -1349,8 +1516,34 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
 }
 .reveal__artist { margin-top: 2px; font-size: var(--f-sm); color: var(--text-dim); }
 
+.reveal__who {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  margin: var(--s-2) var(--gut-r) 0 var(--gut-l);
+}
+.reveal__who-text { min-width: 0; text-align: left; }
+.reveal__who-name {
+  display: block;
+  font-size: var(--f-lg);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--seat);
+  overflow-wrap: anywhere;
+}
+.reveal__who-sub {
+  display: block;
+  margin-top: 1px;
+  font-size: var(--f-2xs);
+  font-weight: 750;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
 .verdict {
-  margin: var(--s-4) var(--gut-r) 0 var(--gut-l);
+  margin: 0 var(--gut-r) 0 var(--gut-l);
   padding: var(--s-3) var(--s-4);
   border-radius: var(--r-md);
   border: 1px solid var(--line);
@@ -1432,16 +1625,27 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--surface);
-  box-shadow: var(--sh-2);
+  box-shadow: var(--sh-2), inset 3px 0 0 transparent;
+  transition: box-shadow var(--t-fast) var(--ease),
+              border-color var(--t-fast) var(--ease);
 }
+.score-row[data-active="true"] {
+  border-color: var(--seat-glow);
+  background-image: linear-gradient(100deg, var(--seat-soft), transparent 62%);
+  box-shadow: var(--sh-2), inset 3px 0 0 var(--seat);
+}
+/* Two rows, with the photo spanning both: the name and the "to go" count read
+   as a headline, the tokens and the Playing flag as its footnote. */
 .score-row__head {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--s-3);
-  flex-wrap: wrap;
+  gap: var(--s-1) var(--s-3);
 }
+.score-row__avatar { grid-column: 1; grid-row: 1 / span 2; }
 .score-row__name {
-  flex: 1 1 auto;
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
   font-size: var(--f-lg);
   font-weight: 800;
@@ -1451,7 +1655,8 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
   text-overflow: ellipsis;
 }
 .score-row__togo {
-  flex: 0 0 auto;
+  grid-column: 3;
+  grid-row: 1;
   font-size: var(--f-xs);
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -1459,6 +1664,22 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
+.score-row__head .tokens { grid-column: 2; grid-row: 2; }
+.score-row__flag {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: end;
+  display: none;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  background: var(--seat);
+  color: var(--seat-ink);
+  font-size: var(--f-2xs);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.score-row[data-active="true"] .score-row__flag { display: block; }
 
 /* --- win --- */
 .screen--win {
@@ -1482,6 +1703,7 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
    the buttons stay on the thumb line at the bottom. */
 .win__body { margin-top: auto; }
 .win__body, .win__actions { position: relative; z-index: 1; }
+.win__avatar { margin: 0 auto var(--s-5); }
 .win__eyebrow {
   font-size: var(--f-xs);
   font-weight: 800;
@@ -1683,26 +1905,37 @@ body[data-mode="expert"] #field-year-guess { display: grid; }
 .challenge-option {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--s-3);
   width: 100%;
-  min-height: 56px;
+  min-height: 64px;
   padding: var(--s-2) var(--s-3);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
   text-align: left;
 }
-.challenge-option__name { font-weight: 750; min-width: 0; }
+.challenge-option__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.challenge-option__name {
+  font-weight: 750;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .challenge-option__tokens {
-  flex: 0 0 auto;
   font-size: var(--f-xs);
   font-weight: 700;
   color: var(--gold);
 }
 .challenge-option[aria-pressed="true"] {
-  border-color: var(--violet-lift);
-  background: var(--accent-soft);
+  border-color: var(--seat);
+  background-image: linear-gradient(100deg, var(--seat-soft), transparent 70%);
 }
 .strip--sheet {
   padding-inline: 0;
@@ -1760,6 +1993,9 @@ body[data-motion="reduce"] .strip { scroll-behavior: auto; }
   .stepper { grid-template-columns: minmax(0, 1fr) auto minmax(44px, auto) auto; }
   .stepper__label { font-size: var(--f-xs); }
   .mystery__glyph { font-size: 5.5rem; }
+  .avatar--md { --avatar-size: 46px; }
+  .avatar--lg { --avatar-size: 54px; }
+  .avatar--sm { --avatar-size: 36px; }
 }
 
 /* Landscape phones and small tablets: the play screen gets two columns so the

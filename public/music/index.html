@@ -122,11 +122,13 @@
   TOGGLE BUTTONS - state lives in aria-pressed="true|false", CSS styles from it
     #btn-play-song  #btn-claim-identify  #btn-qr-alt  #btn-confirm-title
     #btn-confirm-artist  every .chip  every .gap  every .challenge-option
+    every .player-row__skip
 
   TEXT SLOTS (set .textContent)
     home        - (none)
     setup       - #player-count-note #target-cards-value #mistake-limit-value
                   #eligible-count-value ; #deck-warning ships [hidden]
+                  #setup-photo-reason (ships [hidden]) - why Start is disabled
     pass        - #pass-player-name #pass-turn-number #pass-progress
     play        - #play-player-name #play-turn-number
                   #play-progress-current #play-progress-target
@@ -136,6 +138,7 @@
     reveal      - #reveal-year #reveal-title-text #reveal-artist
                   #verdict-banner (+ dataset.verdict, see below)
                   #confirm-player-name
+                  #reveal-who-name #reveal-who-sub (whose card it was)
     win         - #win-eyebrow #win-player-name #win-summary
     challenge   - #challenge-player-name
 
@@ -178,6 +181,9 @@
     #verdict-banner[data-verdict] = 'correct' | 'wrong' | 'neutral'
     #reveal-flip[data-flipped]    = 'true' | 'false'   (drives the 3D flip)
     #win[data-outcome]            = 'win' | 'loss'     (co-op loss recolours)
+    .avatar[data-photo]           = 'true' | 'false'
+    .player-row[data-photo-state] = 'none' | 'photo' | 'skipped'
+    .score-row[data-active]       = 'true' | 'false'   (shows .score-row__flag)
     .token-pill[data-state]       = 'full' | 'empty'
     .award[data-delta]            = 'gain' | 'loss'
     .outcome[data-result]         = 'correct' | 'wrong'
@@ -194,6 +200,10 @@
       #btn-resume-game #deck-warning #audio-fallback #streaming-links
       #qr-file-note #btn-qr-alt #qr-alt-warn #btn-buy-card-reason
       #challenge-count #confirm-panel #challenge-step-gap #reveal-artwork
+      #setup-photo-reason #win-avatar
+    The one [hidden] that is NOT yours to reveal: the per-row
+    input[data-role="player-photo"]. It stays hidden forever - the .avatar
+    button is the accessible control and ui.js forwards the tap with .click().
 
   LIVE REGIONS (append text, never replace the element)
     #live-status  role="status"  aria-live="polite"     token + turn changes
@@ -270,7 +280,14 @@
       <!-- players -->
       <fieldset class="panel" aria-labelledby="setup-players-label">
         <h2 class="panel__legend" id="setup-players-label">Players</h2>
-        <p class="panel__hint">Two to eight. Names show up on the pass-the-phone screen.</p>
+        <p class="panel__hint">
+          Two to eight. Everyone needs a name and a face &mdash; tap a circle to take
+          or choose a photo. Not keen? Tap <strong>Skip photo</strong> and that player
+          gets their initial in their own colour instead.
+        </p>
+        <p class="panel__hint panel__hint--privacy">
+          Photos stay on this phone. They are never uploaded and never go in the QR code.
+        </p>
         <ul class="player-list" id="player-list"></ul>
         <button type="button" class="btn btn--ghost btn--block" id="btn-add-player" data-action="add-player">
           <span class="btn__glyph" aria-hidden="true">+</span> Add player
@@ -421,7 +438,10 @@
       </fieldset>
 
       <div class="setup__go">
-        <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-start-game" data-action="start-game">
+        <p class="setup__reason" id="setup-photo-reason" role="status" aria-live="polite" hidden>
+          Everyone needs a photo first
+        </p>
+        <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-start-game" data-action="start-game" aria-describedby="setup-photo-reason">
           Shuffle &amp; start
         </button>
       </div>
@@ -431,6 +451,13 @@
 
   <!-- ================================================================ PASS -->
   <section class="screen screen--pass" id="pass" aria-labelledby="pass-title">
+    <!-- The photo is the handover: the person holding the phone should be able
+         to find the next player across a dark room without reading a word. -->
+    <span class="avatar avatar--xl pass__avatar" id="pass-avatar" data-photo="false">
+      <img class="avatar__img" data-field="photo" alt="">
+      <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
+    </span>
+
     <h1 class="pass__head" id="pass-title" tabindex="-1">
       <span class="pass__lead">Pass the phone to</span>
       <span class="pass__name" id="pass-player-name">Player 1</span>
@@ -452,7 +479,12 @@
   <section class="screen screen--play" id="play" aria-labelledby="play-title">
 
     <header class="topbar">
+      <span class="topbar__rail" aria-hidden="true"></span>
       <div class="topbar__row">
+        <span class="avatar avatar--md topbar__avatar" id="play-avatar" data-photo="false">
+          <img class="avatar__img" data-field="photo" alt="">
+          <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
+        </span>
         <div class="topbar__id">
           <p class="topbar__eyebrow">Turn <span id="play-turn-number">1</span></p>
           <!-- The screen is a landmark named by this heading, so the heading has to
@@ -616,6 +648,17 @@
       </div>
     </div>
 
+    <div class="reveal__who">
+      <span class="avatar avatar--md" id="reveal-avatar" data-photo="false">
+        <img class="avatar__img" data-field="photo" alt="">
+        <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
+      </span>
+      <p class="reveal__who-text">
+        <strong class="reveal__who-name" id="reveal-who-name">Player 1</strong>
+        <span class="reveal__who-sub" id="reveal-who-sub">played this card</span>
+      </p>
+    </div>
+
     <p class="verdict" id="verdict-banner" data-verdict="neutral" role="status" aria-live="polite">
       Waiting for the reveal
     </p>
@@ -667,6 +710,10 @@
   <section class="screen screen--win" id="win" data-outcome="win" aria-labelledby="win-title">
     <canvas class="confetti" id="confetti" aria-hidden="true"></canvas>
     <div class="win__body">
+      <span class="avatar avatar--xl win__avatar" id="win-avatar" data-photo="false" hidden>
+        <img class="avatar__img" data-field="photo" alt="">
+        <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
+      </span>
       <p class="win__eyebrow" id="win-eyebrow">Winner</p>
       <!-- "Winner" is only in the eyebrow above, which is not part of the heading -
            so the accessible name needs its own copy. See the note on #play-title. -->
@@ -866,18 +913,39 @@
 <!-- Every dynamic row in the app comes from one of these. Clone, fill the
      [data-field] nodes, set the noted attributes, append. -->
 
-<!-- #player-list row. Set: li[data-player-index], input id + name (unique),
-     label[for] to match, and the remove button's aria-label. -->
+<!-- #player-list row. Set: li[data-player-index] + li[data-photo-state], the
+     row's --seat properties, input id + name (unique), label[for] to match, the
+     avatar button's aria-label, the remove button's aria-label, the skip
+     toggle's aria-pressed, and [data-field="status"].
+     The file input is deliberately WITHOUT `capture`: on iOS that is what makes
+     the sheet offer "Take Photo" AND "Photo Library" instead of forcing the
+     camera on someone who already has the shot they want. -->
 <template id="tpl-player-row">
-  <li class="player-row" data-player-index="0">
-    <span class="player-row__num" aria-hidden="true">1</span>
+  <li class="player-row" data-player-index="0" data-photo-state="none">
+    <button type="button" class="avatar avatar--lg player-row__avatar" data-action="pick-photo"
+            data-photo="false" aria-label="Add a photo for player 1">
+      <img class="avatar__img" data-field="photo" alt="">
+      <span class="avatar__initial" data-field="initial" aria-hidden="true">1</span>
+      <span class="player-row__camera" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </span>
+    </button>
     <label class="sr-only" for="player-name-0" data-field="label">Player 1 name</label>
     <input class="player-row__input" id="player-name-0" name="player-name-0" type="text"
            value="Player 1" maxlength="16" autocomplete="off" autocapitalize="words"
            spellcheck="false" enterkeyhint="done" data-role="player-name" placeholder="Name">
-    <button type="button" class="icon-btn icon-btn--sm" data-action="remove-player" aria-label="Remove player 1">
+    <button type="button" class="icon-btn icon-btn--sm player-row__remove" data-action="remove-player" aria-label="Remove player 1">
       <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
     </button>
+    <p class="player-row__foot">
+      <span class="player-row__num" aria-hidden="true">1</span>
+      <span class="player-row__status" data-field="status">Photo needed</span>
+      <button type="button" class="chip chip--sm player-row__skip" data-action="skip-photo" aria-pressed="false">
+        Skip photo
+      </button>
+    </p>
+    <input class="player-row__file" type="file" accept="image/*" data-role="player-photo"
+           tabindex="-1" aria-hidden="true" hidden>
   </li>
 </template>
 
@@ -924,14 +992,21 @@
   </li>
 </template>
 
-<!-- Scoreboard row. Set li[data-player-id]; fill the [data-field="timeline"]
-     <ol> with #tpl-mini-card clones and [data-field="tokens"] with token pills. -->
+<!-- Scoreboard row. Set li[data-player-id], li[data-active] and the row's --seat
+     properties; fill the [data-field="timeline"] <ol> with #tpl-mini-card clones
+     and [data-field="tokens"] with token pills. .score-row__flag is static -
+     CSS shows it only on the active row. -->
 <template id="tpl-scoreboard-row">
-  <li class="score-row" data-player-id="">
+  <li class="score-row" data-player-id="" data-active="false">
     <div class="score-row__head">
+      <span class="avatar avatar--sm score-row__avatar" data-photo="false">
+        <img class="avatar__img" data-field="photo" alt="">
+        <span class="avatar__initial" data-field="initial" aria-hidden="true">1</span>
+      </span>
       <p class="score-row__name" data-field="name">Player 1</p>
-      <ul class="tokens tokens--sm" data-field="tokens" aria-label="Tokens"></ul>
       <p class="score-row__togo"><span data-field="togo">4</span> to go</p>
+      <ul class="tokens tokens--sm" data-field="tokens" aria-label="Tokens"></ul>
+      <span class="score-row__flag">Playing</span>
     </div>
     <ol class="mini-timeline" data-field="timeline"></ol>
   </li>
@@ -945,12 +1020,19 @@
   </li>
 </template>
 
-<!-- Challenge sheet: one selectable player. Set button[data-player-id]. -->
+<!-- Challenge sheet: one selectable player. Set button[data-player-id] and the
+     button's --seat properties. You pick a face, not a name. -->
 <template id="tpl-challenge-option">
   <li>
     <button type="button" class="challenge-option" data-action="pick-challenger" data-player-id="" aria-pressed="false">
-      <span class="challenge-option__name" data-field="name">Player 2</span>
-      <span class="challenge-option__tokens" data-field="tokens">2 tokens</span>
+      <span class="avatar avatar--sm" data-photo="false">
+        <img class="avatar__img" data-field="photo" alt="">
+        <span class="avatar__initial" data-field="initial" aria-hidden="true">2</span>
+      </span>
+      <span class="challenge-option__body">
+        <span class="challenge-option__name" data-field="name">Player 2</span>
+        <span class="challenge-option__tokens" data-field="tokens">2 tokens</span>
+      </span>
     </button>
   </li>
 </template>

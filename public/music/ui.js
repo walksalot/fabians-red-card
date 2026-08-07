@@ -27,6 +27,13 @@
  * three nodes (#reveal-year and friends) and it is never put in the QR payload;
  * see `listenUrl()`, which builds its object field by field rather than
  * spreading the card, so a future deck field cannot leak by accident.
+ *
+ * Player photos are the other thing this file is careful with. They are taken on
+ * the setup screen, squashed to a 192px square JPEG here and then handed to the
+ * engine as part of the player object. They go into localStorage and nowhere
+ * else: no upload, no network, and never into the QR payload. The full-size
+ * capture (a phone camera hands over ten-plus megapixels) is decoded, drawn once
+ * and released inside `squareThumbnail()`; nothing holds the File afterwards.
  */
 
 import {
@@ -47,6 +54,7 @@ import {
   isGameOver,
   winners,
   pendingResult,
+  seatColor,
 } from './engine.js';
 import { DECK, DECADES, GENRES, filterDeck } from './deck.js';
 import { resolveTrack, prefetch, streamingLinks, getPlayer } from './audio.js';
@@ -80,6 +88,18 @@ const DEFAULT_YEAR_GUESS = 1985;
 
 /** Head-room over "one card each plus the target" before we stop nagging about deck size. */
 const DECK_SLACK = 10;
+
+/**
+ * Avatar pipeline numbers.
+ *
+ * 192px covers the largest place a photo is ever drawn (the pass screen, capped
+ * at 188 CSS px) at 1x and stays sharp enough at 2x for a face; going bigger
+ * multiplies the localStorage cost of eight players for no visible gain. 0.72 is
+ * where JPEG stops getting smaller much faster than it gets worse on a photo
+ * this small.
+ */
+const PHOTO_SIZE = 192;
+const PHOTO_QUALITY = 0.72;
 
 const SCREEN_HEADINGS = {
   home: 'home-title',
@@ -140,9 +160,14 @@ const view = {
   challengerId: null,
   challengeGap: null,
   lastFocus: null,
-  /** Setup form draft, persisted between sessions. */
+  /**
+   * Setup form draft, persisted between sessions. Each player is
+   * `{ name, photo, skipped, pending }`: `photo` is a data URL or null,
+   * `skipped` means "this one deliberately uses the generated initial", and
+   * `pending` is true only while a chosen image is being downscaled.
+   */
   setup: {
-    players: ['Player 1', 'Player 2', 'Player 3', 'Player 4'],
+    players: [0, 1, 2, 3].map((i) => playerDraft(i)),
     target: 10,
     mode: 'classic',
     mistakeLimit: 3,
@@ -233,6 +258,242 @@ function announce(message) {
 function alertUser(message) {
   const node = el('live-alert');
   if (node) node.textContent = String(message);
+}
+
+/* ========================================================================== */
+/* Seat colour + avatars                                                      */
+/* ========================================================================== */
+
+/**
+ * The seat hex at an alpha, as `rgba()`.
+ *
+ * Done in JS rather than with `color-mix()` because this app has to work on
+ * iOS Safari 16.0, which shipped before `color-mix()` did, and a tint that
+ * silently evaluates to nothing would leave the play screen with no accent at
+ * all - the one thing this whole feature exists to prevent.
+ */
+function seatAlpha(hex, alpha) {
+  const match = /^#([0-9a-f]{6})$/i.exec(typeof hex === 'string' ? hex : '');
+  if (!match) return `rgba(169, 124, 255, ${alpha})`;
+  const value = Number.parseInt(match[1], 16);
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+}
+
+/** Publish one player's accent onto an element for its subtree to read. */
+function applySeat(node, color) {
+  if (!node) return;
+  const hex = typeof color === 'string' && color ? color : seatColor(0);
+  node.style.setProperty('--seat', hex);
+  node.style.setProperty('--seat-soft', seatAlpha(hex, 0.18));
+  node.style.setProperty('--seat-glow', seatAlpha(hex, 0.45));
+}
+
+/**
+ * First character of a name, upper-cased.
+ * Spread rather than `[0]` so an emoji or an accented astral character comes
+ * back whole instead of as half a surrogate pair.
+ */
+function initialFor(name) {
+  const trimmed = String(name === null || name === undefined ? '' : name).trim();
+  if (!trimmed) return '?';
+  return [...trimmed][0].toLocaleUpperCase();
+}
+
+/**
+ * Only a data URL for an image is ever allowed near an `<img src>`. Photos come
+ * back out of localStorage, which a curious teenager can edit, and this is the
+ * one place a hand-written value would turn into a request.
+ */
+function safePhoto(value) {
+  return typeof value === 'string' && /^data:image\//.test(value) ? value : null;
+}
+
+/**
+ * Paint one `.avatar` block from anything shaped `{ name, photo, color }` -
+ * a player, a scoreboard row, a setup draft.
+ */
+function paintAvatar(node, person) {
+  if (!node) return;
+  const photo = safePhoto(person && person.photo);
+  applySeat(node, person && person.color);
+  node.dataset.photo = photo ? 'true' : 'false';
+  const img = node.querySelector('[data-field="photo"]');
+  if (img) {
+    // Never leave a stale src behind a hidden <img>: it would keep the old
+    // player's face one CSS rule away from the screen.
+    if (photo) {
+      if (img.getAttribute('src') !== photo) img.src = photo;
+    } else if (img.hasAttribute('src')) {
+      img.removeAttribute('src');
+    }
+  }
+  const initial = node.querySelector('[data-field="initial"]');
+  if (initial) initial.textContent = initialFor(person && person.name);
+}
+
+/* ========================================================================== */
+/* Taking a photo                                                             */
+/* ========================================================================== */
+
+/** A fresh setup row. */
+function playerDraft(index, name) {
+  return {
+    name: typeof name === 'string' && name ? name : `Player ${index + 1}`,
+    photo: null,
+    skipped: false,
+    pending: false,
+  };
+}
+
+/**
+ * Decode `file` into something drawable.
+ *
+ * `createImageBitmap` with `imageOrientation: 'from-image'` is the cheap way to
+ * respect EXIF - it hands back an already-rotated bitmap, so a portrait taken
+ * on a phone held sideways is not stored on its side. Where it is missing (or
+ * refuses the option, which some older WebKit builds do) we fall back to a plain
+ * `Image`; those browsers apply EXIF themselves when drawing to a canvas.
+ */
+async function decodeImage(file) {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      return await createImageBitmap(file, { imageOrientation: 'from-image' });
+    } catch {
+      // Old implementations reject the options object rather than ignoring it.
+      try {
+        return await createImageBitmap(file);
+      } catch {
+        /* fall through to the <img> path */
+      }
+    }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    return await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('image decode failed'));
+      img.src = url;
+    });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * A centre-cropped square JPEG data URL, at PHOTO_SIZE.
+ *
+ * The whole point is that the full-resolution capture exists for as short a
+ * time as possible: it is decoded, drawn once into a 192px canvas and then
+ * closed. Nothing keeps the File, the bitmap or the original pixels afterwards,
+ * and the raw image is never stored anywhere.
+ */
+async function squareThumbnail(file) {
+  const source = await decodeImage(file);
+  try {
+    const width = source.width || source.naturalWidth || 0;
+    const height = source.height || source.naturalHeight || 0;
+    if (!width || !height) throw new Error('image has no size');
+    const side = Math.min(width, height);
+    const canvas = document.createElement('canvas');
+    canvas.width = PHOTO_SIZE;
+    canvas.height = PHOTO_SIZE;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no 2d context');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(
+      source,
+      (width - side) / 2,
+      (height - side) / 2,
+      side,
+      side,
+      0,
+      0,
+      PHOTO_SIZE,
+      PHOTO_SIZE,
+    );
+    const url = canvas.toDataURL('image/jpeg', PHOTO_QUALITY);
+    // Drop the backing store now rather than waiting for the next GC.
+    canvas.width = 0;
+    canvas.height = 0;
+    if (!/^data:image\/jpeg/.test(url)) throw new Error('canvas would not encode');
+    return url;
+  } finally {
+    if (source && typeof source.close === 'function') source.close();
+  }
+}
+
+/** True once every player has either a photo or a deliberate skip. */
+function rosterReady() {
+  return view.setup.players.every((p) => !!p.photo || p.skipped);
+}
+
+function photosOutstanding() {
+  return view.setup.players.filter((p) => !p.photo && !p.skipped).length;
+}
+
+/**
+ * Persist the roster - names and faces - so a regular group does not re-shoot
+ * everybody every week. storage.js drops the photos first if the quota bites,
+ * because losing the faces is survivable and losing the names is just rude.
+ */
+function rememberRoster() {
+  savePlayers(
+    view.setup.players.map((p) => ({
+      name: (p.name || '').trim(),
+      photo: p.photo,
+      skipped: !!p.skipped,
+    })),
+  );
+}
+
+/** Handle one chosen file. Async, so the draft is re-checked after the await. */
+async function acceptPhoto(draft, file) {
+  if (!draft || !file) return;
+  if (file.type && !/^image\//.test(file.type)) {
+    alertUser('That file is not a photo. Pick an image, or tap Skip photo.');
+    return;
+  }
+  draft.pending = true;
+  render();
+
+  let photo = null;
+  try {
+    photo = await squareThumbnail(file);
+  } catch {
+    photo = null;
+  }
+
+  // The row may have been deleted while a big capture was being decoded.
+  if (!view.setup.players.includes(draft)) return;
+  draft.pending = false;
+  if (!photo) {
+    alertUser('That photo could not be read. Try another one, or tap Skip photo.');
+    render();
+    return;
+  }
+  draft.photo = photo;
+  draft.skipped = false;
+  rememberRoster();
+  render();
+  announce(`Photo added for ${draft.name || 'this player'}.`);
+}
+
+/** The escape hatch: nobody's grandmother can block the game from starting. */
+function skipPhoto(index) {
+  const draft = view.setup.players[index];
+  if (!draft) return;
+  const next = !(draft.skipped && !draft.photo);
+  draft.skipped = next;
+  if (next) draft.photo = null;
+  rememberRoster();
+  render();
+  announce(
+    next
+      ? `${draft.name || 'This player'} will use their initial.`
+      : `${draft.name || 'This player'} still needs a photo.`,
+  );
 }
 
 /* ========================================================================== */
@@ -367,14 +628,27 @@ function renderHome() {
 /* Setup                                                                      */
 /* ========================================================================== */
 
+/**
+ * Restore the last roster. Tolerates the old shape (a plain array of names)
+ * because a phone that played last week has one of those in localStorage.
+ */
 function loadSavedPlayers() {
   const saved = loadPlayers();
   if (!Array.isArray(saved) || saved.length < MIN_PLAYERS) return;
-  const names = saved
-    .map((entry) => (typeof entry === 'string' ? entry : entry && entry.name))
-    .filter((name) => typeof name === 'string' && name.trim() !== '')
+  const roster = saved
+    .map((entry, index) => {
+      const raw = typeof entry === 'string' ? { name: entry } : entry;
+      if (!raw || typeof raw !== 'object') return null;
+      const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+      if (!name) return null;
+      const draft = playerDraft(index, name);
+      draft.photo = safePhoto(raw.photo);
+      draft.skipped = draft.photo ? false : raw.skipped === true;
+      return draft;
+    })
+    .filter((entry) => entry !== null)
     .slice(0, MAX_PLAYERS);
-  if (names.length >= MIN_PLAYERS) view.setup.players = names;
+  if (roster.length >= MIN_PLAYERS) view.setup.players = roster;
 }
 
 /** Rebuild the chip rows from deck.js, which is the authority on what exists. */
@@ -411,16 +685,23 @@ function buildChips() {
   }
 }
 
+const PHOTO_STATUS = {
+  none: 'Photo needed',
+  photo: 'Photo added',
+  skipped: 'Using their initial',
+  pending: 'Shrinking the photo...',
+};
+
 function renderPlayerRows() {
   const list = el('player-list');
   if (!list) return;
-  const names = view.setup.players;
+  const drafts = view.setup.players;
   // Only rebuild when the count changed - rebuilding on every keystroke would
   // steal the caret out of the input being typed into.
-  if (list.children.length !== names.length) {
+  if (list.children.length !== drafts.length) {
     replaceChildren(
       list,
-      names.map((name, index) => {
+      drafts.map((draft, index) => {
         const row = clone('tpl-player-row');
         if (!row) return null;
         row.dataset.playerIndex = String(index);
@@ -428,32 +709,61 @@ function renderPlayerRows() {
         if (num) num.textContent = String(index + 1);
         const label = row.querySelector('[data-field="label"]');
         const input = row.querySelector('[data-role="player-name"]');
-        const remove = row.querySelector('[data-action="remove-player"]');
         if (input) {
           input.id = `player-name-${index}`;
           input.name = `player-name-${index}`;
-          input.value = name;
+          input.value = draft.name;
         }
         if (label) {
           label.setAttribute('for', `player-name-${index}`);
           label.textContent = `Player ${index + 1} name`;
         }
-        if (remove) remove.setAttribute('aria-label', `Remove player ${index + 1}`);
         return row;
       }),
     );
-  } else {
-    names.forEach((name, index) => {
-      const input = list.children[index].querySelector('[data-role="player-name"]');
-      if (input && input.value !== name && document.activeElement !== input) input.value = name;
-    });
   }
 
-  for (const button of list.querySelectorAll('[data-action="remove-player"]')) {
-    disable(button, names.length <= MIN_PLAYERS, 'At least two players');
-  }
-  text('player-count-note', `${names.length} player${names.length === 1 ? '' : 's'}`);
-  disable(el('btn-add-player'), names.length >= MAX_PLAYERS, 'Eight players is the maximum');
+  drafts.forEach((draft, index) => {
+    const row = list.children[index];
+    if (!row) return;
+    const input = row.querySelector('[data-role="player-name"]');
+    if (input && input.value !== draft.name && document.activeElement !== input) {
+      input.value = draft.name;
+    }
+
+    // Seat colours come from the same palette the engine will hand out, so the
+    // face somebody sets up in row 3 is the face - and the colour - they play
+    // with. Nothing is re-rolled at Shuffle & start.
+    const who = { name: draft.name, photo: draft.photo, color: seatColor(index) };
+    applySeat(row, who.color);
+    const avatar = row.querySelector('.player-row__avatar');
+    paintAvatar(avatar, who);
+
+    const stateName = draft.photo ? 'photo' : draft.skipped ? 'skipped' : 'none';
+    row.dataset.photoState = stateName;
+    const label = row.querySelector('[data-field="status"]');
+    if (label) label.textContent = draft.pending ? PHOTO_STATUS.pending : PHOTO_STATUS[stateName];
+
+    const person = draft.name || `player ${index + 1}`;
+    if (avatar) {
+      avatar.setAttribute(
+        'aria-label',
+        draft.photo ? `Replace the photo for ${person}` : `Add a photo for ${person}`,
+      );
+    }
+    const skip = row.querySelector('[data-action="skip-photo"]');
+    pressed(skip, stateName === 'skipped');
+    if (skip) {
+      skip.textContent = stateName === 'skipped' ? 'Photo skipped' : 'Skip photo';
+      skip.setAttribute('aria-label', `Skip the photo for ${person}`);
+    }
+    const remove = row.querySelector('[data-action="remove-player"]');
+    if (remove) remove.setAttribute('aria-label', `Remove ${person}`);
+    disable(remove, drafts.length <= MIN_PLAYERS, 'At least two players');
+  });
+
+  text('player-count-note', `${drafts.length} player${drafts.length === 1 ? '' : 's'}`);
+  disable(el('btn-add-player'), drafts.length >= MAX_PLAYERS, 'Eight players is the maximum');
 }
 
 function eligibleDeck() {
@@ -487,30 +797,54 @@ function renderSetup() {
   const comfortable = seats * view.setup.target + DECK_SLACK;
   const dealable = view.setup.mode === 'coop' ? 2 : view.setup.players.length + 1;
   show(el('deck-warning'), eligible.length < comfortable);
-  disable(
-    el('btn-start-game'),
-    eligible.length < dealable,
-    'Not enough songs match these filters',
-  );
+
+  // Two ways to be blocked, one line to say which. The photo one names the
+  // escape hatch in the same breath as the requirement - a photo somebody does
+  // not want to take must never be the reason a family cannot play.
+  const outstanding = photosOutstanding();
+  let blocked = null;
+  if (eligible.length < dealable) blocked = 'Not enough songs match these filters';
+  else if (outstanding > 0) {
+    blocked =
+      outstanding === 1
+        ? 'One player still needs a photo - or tap Skip photo for them'
+        : `${outstanding} players still need a photo - or tap Skip photo for them`;
+  }
+  const reason = el('setup-photo-reason');
+  if (reason) {
+    if (blocked) reason.textContent = blocked;
+    show(reason, !!blocked);
+  }
+  disable(el('btn-start-game'), blocked !== null, blocked || undefined);
 }
 
 function startGame() {
   const eligible = eligibleDeck();
-  const names = view.setup.players.map((name, i) => name.trim() || `Player ${i + 1}`);
-  const dealable = view.setup.mode === 'coop' ? 2 : names.length + 1;
+  // The engine hands out the seat colour; the photo rides along so every screen
+  // can read a player's face straight off game state instead of a side map that
+  // a reload would lose.
+  const roster = view.setup.players.map((draft, i) => ({
+    name: (draft.name || '').trim() || `Player ${i + 1}`,
+    photo: draft.photo,
+  }));
+  const dealable = view.setup.mode === 'coop' ? 2 : roster.length + 1;
   if (eligible.length < dealable) {
     alertUser('Not enough songs match these filters. Turn some decades or genres back on.');
     return;
   }
+  if (!rosterReady()) {
+    alertUser('Everyone needs a photo, or a tap on Skip photo, before the game can start.');
+    return;
+  }
 
-  savePlayers(names);
+  rememberRoster();
   const params = new URLSearchParams(window.location.search);
   const forced = Number.parseInt(params.get('seed') || '', 10);
   const seed = Number.isInteger(forced) ? forced : (Date.now() ^ Math.floor(Math.random() * 1e9)) | 0;
 
   try {
     state = createGame({
-      players: names,
+      players: roster,
       deck: eligible,
       targetCards: view.setup.target,
       mode: view.setup.mode,
@@ -971,6 +1305,7 @@ function renderPlay() {
 
   text('play-turn-number', state.turn);
   text('play-player-name', active.name);
+  paintAvatar(el('play-avatar'), active);
 
   const progress = progressFor(state, active.id);
   text('play-progress-current', progress.cards);
@@ -1070,6 +1405,7 @@ function paintStreamingLinks() {
 function renderPass() {
   const active = currentPlayer(state);
   if (!active) return;
+  paintAvatar(el('pass-avatar'), active);
   text('pass-player-name', active.name);
   text('pass-turn-number', state.turn);
   const progress = progressFor(state, active.id);
@@ -1080,8 +1416,12 @@ function renderPass() {
 /* Reveal screen                                                              */
 /* ========================================================================== */
 
+function playerOf(playerId) {
+  return state.players.find((p) => p.id === playerId) || null;
+}
+
 function nameOf(playerId) {
-  const found = state.players.find((p) => p.id === playerId);
+  const found = playerOf(playerId);
   return found ? found.name : 'Someone';
 }
 
@@ -1102,10 +1442,25 @@ function verdictFor(outcome) {
   return { verdict: 'wrong', message: 'Not quite. The card is discarded.' };
 }
 
+const REVEAL_SUB = {
+  placement: 'played this card',
+  buy: 'bought this card',
+  skip: 'skipped this card',
+};
+
 function renderReveal() {
   const outcome = state.outcome;
   if (!outcome) return;
   const card = outcome.card;
+
+  // Whose card was it? Face first - by the time the reveal lands the phone may
+  // already be halfway to the next person.
+  const who = playerOf(outcome.playerId);
+  const whoAvatar = el('reveal-avatar');
+  paintAvatar(whoAvatar, who);
+  if (whoAvatar) applySeat(whoAvatar.parentElement, who && who.color);
+  text('reveal-who-name', who ? who.name : 'Someone');
+  text('reveal-who-sub', REVEAL_SUB[outcome.kind] || REVEAL_SUB.placement);
 
   text('reveal-year', card.year);
   text('reveal-title-text', card.title || 'Unknown song');
@@ -1250,7 +1605,12 @@ function renderScoreboard() {
     const node = clone('tpl-scoreboard-row');
     if (!node) return null;
     node.dataset.playerId = row.playerId;
-    fill(node, { name: row.isActive ? `${row.name} (playing)` : row.name, togo: row.cardsToGo });
+    // The row already says "Playing" in its own element, so the name stays the
+    // name - a screen reader used to hear it twice.
+    node.dataset.active = row.isActive ? 'true' : 'false';
+    applySeat(node, row.color);
+    paintAvatar(node.querySelector('.score-row__avatar'), row);
+    fill(node, { name: row.name, togo: row.cardsToGo });
     const tokens = node.querySelector('[data-field="tokens"]');
     if (tokens) {
       replaceChildren(
@@ -1290,6 +1650,20 @@ function renderWin() {
   let eyebrow = 'Winner';
   let title = 'Nobody';
   let summary = '';
+
+  // The winner's face, big, and the whole screen in their colour. Co-op has no
+  // single winner and a loss has none at all, so the circle simply goes.
+  const face = el('win-avatar');
+  const champion = state.mode === 'coop' || won.length === 0 ? null : won[0];
+  show(face, !!champion);
+  if (champion) {
+    paintAvatar(face, champion);
+    if (box) applySeat(box, champion.color);
+  } else if (box) {
+    box.style.removeProperty('--seat');
+    box.style.removeProperty('--seat-soft');
+    box.style.removeProperty('--seat-glow');
+  }
 
   if (state.mode === 'coop') {
     const cards = state.sharedTimeline.length;
