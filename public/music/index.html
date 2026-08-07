@@ -8,6 +8,11 @@
   disk. Every screen ships in the markup up front; ui.js only ever toggles
   attributes and fills containers. Nothing here fetches, computes or decides.
 
+  THEME: "record-sleeve pop" - butter paper, ink outlines, sticker cards with
+  hard (never blurred) offset shadows, crayon player colours, one raspberry
+  accent for every interaction. Green and red are reserved exclusively for
+  right/wrong verdicts. See app.css section 1 for the tokens.
+
   ---------------------------------------------------------------------------
   DOM CONTRACT for ui.js  (this is the interface - keep it stable)
   ---------------------------------------------------------------------------
@@ -45,7 +50,11 @@
     screens all read them from there - and inline on any element that has to
     show somebody else: #win (the winner), each .score-row, each
     .challenge-option, each .player-row. Every rule falls back to the house
-    violet, so an unset --seat is ugly, never broken.
+    raspberry, so an unset --seat is ugly, never broken.
+    NOTE: the theme paints the initial on a seat circle in WHITE (--seat-ink),
+    which assumes the crayon palette in the design spec (#0c8599 #f08c00
+    #7048e8 #1c7ed6 #e8590c #74b816 #a87b4f #15aabf). engine.js still ships the
+    old dark-theme neon SEAT_COLORS; swapping them is that file's job.
 
   AVATARS
     One block, used in seven places. The root carries data-photo:
@@ -77,13 +86,15 @@
       #play-roster   #play-roster-seats   #play-roster-team
       #reveal-roster #reveal-roster-seats #reveal-roster-team
     The <ol> is the list ui.js fills from #tpl-roster-chip; the team tile is
-    static markup that CSS shows in co-op only. Each chip is a button whose
-    accessible name ui.js writes as "Ann, 4 cards, playing now" / "Mo, 2 cards,
-    up next" / "Ann, 4 cards, leading" - and whose data-action is
-    show-scoreboard, so a tap anywhere on the rail opens the scoreboard.
+    static markup that CSS shows in co-op only (it is the design's "team X/Y"
+    plus "misses left" pill pair).
+    Each chip is a button whose accessible name ui.js writes as "Ann, 4 cards,
+    playing now" / "Mo, 2 cards, up next" / "Ann, 4 cards, leading" - and whose
+    data-action is show-scoreboard, so a tap anywhere on the rail opens the
+    scoreboard.
     Per-seat state (all on the <li>, all read by CSS):
       [data-rank]   = 'active' | 'next' | 'other'
-      [data-leader] = 'true' | 'false'   (gold crown; ui.js sets it only when
+      [data-leader] = 'true' | 'false'   (crown; ui.js sets it only when
                                           somebody is STRICTLY ahead)
     The rail scrolls horizontally with the same edge fade as .strip, and ui.js
     scrolls the active chip into view when the active player changes - it tracks
@@ -131,6 +142,7 @@
                            we already hold for this NAME back on the row]
       target-dec/target-inc         [#field-target-cards stepper]
       mistakes-dec/mistakes-inc     [#field-mistake-limit stepper]
+      buyin-dec/buyin-inc           [#field-buyin-amount stepper]   * NEW *
       toggle-decade       [buttons in #decade-chips, data-decade="1980"]
       toggle-genre        [buttons in #genre-chips,  data-genre="pop"]
       chips-all           [#btn-decades-all, #btn-genres-all, data-target]
@@ -163,6 +175,7 @@
       confirm-artist      [#btn-confirm-artist]       (aria-pressed toggle)
       next-turn           [#btn-next-player]
       play-again          [#btn-play-again]
+      pay-venmo           [#btn-venmo]                (ships inside [hidden])  * NEW *
 
   TOGGLE BUTTONS - state lives in aria-pressed="true|false", CSS styles from it
     #btn-play-song  #btn-claim-identify  #btn-qr-alt  #btn-confirm-title
@@ -170,10 +183,14 @@
     every .player-row__skip
 
   TEXT SLOTS (set .textContent)
-    home        - (none)
+    home        - #home-deck-stat  * NEW *  ("1080 songs - 1955-2024"; ships
+                  with today's deck figures baked in, so it is honest even if
+                  nothing ever writes it)
     setup       - #player-count-note #target-cards-value #mistake-limit-value
                   #eligible-count-value ; #deck-warning ships [hidden]
                   #setup-photo-reason (ships [hidden]) - why Start is disabled
+                  #target-cards-hint  * NEW *  ("~ 45 min" per target)
+                  #buyin-amount-value #buyin-pot  * NEW *  (see BUY-IN below)
     pass        - #pass-player-name #pass-turn-number #pass-progress
                   #pass-next-name ; hide the whole #pass-then line when there
                   is nobody after them
@@ -187,6 +204,8 @@
                   #verdict-banner (+ dataset.verdict, see below)
                   #confirm-player-name
                   #reveal-who-name #reveal-who-sub (whose card it was)
+                  #reveal-belongs #reveal-streak  * NEW *  (both ship [hidden])
+    scoreboard  - #scoreboard-meta  * NEW *  (ships [hidden]; "6 cards left")
     win         - #win-eyebrow #win-player-name #win-summary
     challenge   - #challenge-player-name
 
@@ -212,6 +231,15 @@
     #challenge-players    <- #tpl-challenge-option
     #qr-code              <- innerHTML = qrSvg(...) from qr.js
     #streaming-links      <- <a> elements; ships [hidden]
+    #challenge-locks   * NEW *  <- #tpl-challenge-lock, one pill per locked
+                          challenge ("Mo challenged"); ships [hidden]
+    #reveal-strip      * NEW *  <- #tpl-mini-card, the placed year between its
+                          neighbours; set [data-highlight="true"] on the card
+                          that was just placed. Ships [hidden]
+    #win-recap         * NEW *  <- #tpl-recap-row (Hardest song / Best decade /
+                          Boldest call / Skipped); ships [hidden]
+    #win-qr            * NEW *  <- innerHTML = qrSvg(venmo url); ships inside
+                          #win-pot[hidden]
   Inside a cloned template, fill by [data-field="..."] and set the ids/values
   noted on each template below. Templates are the ONLY source of row markup -
   do not hand-write these rows in JS.
@@ -219,7 +247,9 @@
   STATIC CONTENT ui.js MAY REBUILD
     #decade-chips / #genre-chips ship with sensible defaults so the page is
     usable with no JS work; if deck.js exports a different DECADES/GENRES set,
-    clear the container and rebuild from #tpl-chip.
+    clear the container and rebuild from #tpl-chip. The leading "All decades" /
+    "All genres" chip (#btn-decades-all / #btn-genres-all) is NOT part of that
+    rebuild - it lives in the same row but outside the container.
     #play-tokens ships 5 .token-pill <li>s; set each one's dataset.state to
     'full' or 'empty' and update the <ul>'s aria-label.
 
@@ -231,12 +261,34 @@
                                         #mode-expert #mode-coop
     playback:     <select id="playback-source">  (menu copy: #opt-playback-source)
     settings:     #opt-skip-pass #opt-sound #opt-reduced-motion (checkboxes)
+    house rules:  #opt-streak-bonus  * NEW *  (checkbox, setup, off by default -
+                  three right in a row earns a token)
+    buy-in:       #opt-buyin #buyin-venmo      * NEW *  (see BUY-IN below)
     Steppers are buttons + an <output>; the current value is the <output>'s
-    textContent (#target-cards-value #mistake-limit-value #year-guess-value).
+    textContent (#target-cards-value #mistake-limit-value #year-guess-value
+    #buyin-amount-value).
+
+  BUY-IN  * NEW, MARKUP + STYLES ONLY - nothing is wired yet *
+    An informal per-head pot settled over Venmo. Setup carries the switch and
+    the numbers; the winner screen carries the payout.
+      #opt-buyin           checkbox, OFF by default
+      #buyin-block         wrapper that ships [hidden]; unhide it while
+                           #opt-buyin is checked, hide it again when it is not
+      #field-buyin-amount  stepper, data-action="buyin-dec" / "buyin-inc"
+      #buyin-amount-value  <output>, whole dollars, ships "2"
+      #buyin-venmo         optional text input, the host's Venmo handle
+      #buyin-pot           live line, e.g. "Pot: $8 with 4 players"
+      #win-pot             winner-screen block, ships [hidden]
+                           [data-field="pot"]    the total, e.g. "$8"
+                           [data-field="venmo"]  the handle to pay
+                           #btn-venmo            data-action="pay-venmo"
+                           #win-qr               inject a QR so other phones can
+                                                 scan to pay
 
   STATE ATTRIBUTES CSS REACTS TO
     #verdict-banner[data-verdict] = 'correct' | 'wrong' | 'neutral'
-    #reveal-flip[data-flipped]    = 'true' | 'false'   (drives the 3D flip)
+                                  (also tints the whole reveal screen, via :has)
+    #reveal-flip[data-flipped]    = 'true' | 'false'   (mystery card -> reveal)
     #win[data-outcome]            = 'win' | 'loss'     (co-op loss recolours)
     .avatar[data-photo]           = 'true' | 'false'
     .player-row[data-photo-state] = 'none' | 'photo' | 'skipped'
@@ -249,6 +301,8 @@
     .token-pill[data-state]       = 'full' | 'empty'
     .award[data-delta]            = 'gain' | 'loss'
     .outcome[data-result]         = 'correct' | 'wrong'
+    .mini-card[data-highlight]    = 'true'   * NEW *  (the just-placed year in
+                                    #reveal-strip)
     #countdown-ring style property --ring-progress = 1 -> 0 (fraction of the
     30s preview remaining). Set with
       ring.style.setProperty('--ring-progress', String(remaining / 30))
@@ -261,13 +315,17 @@
                           hidden, because one shared pile is not a race.
     #pass-coop            shown only while body[data-mode="coop"];
     #pass-standings       hidden in exactly that case.
+    #btn-challenge        hidden in co-op - there is nobody to challenge.
     .sheet-layer          visibility/inertness follows [data-open].
     .screen               visibility follows body[data-screen].
+    .gap__mark ("+")      shown only on the selected gap.
     Elements that ship [hidden] and are yours to reveal:
       #btn-resume-game #deck-warning #audio-fallback #streaming-links
       #qr-file-note #btn-qr-alt #qr-alt-warn #btn-buy-card-reason
       #challenge-count #confirm-panel #challenge-step-gap #reveal-artwork
       #setup-photo-reason #win-avatar
+      #buyin-block #win-pot #challenge-locks #reveal-strip #reveal-belongs
+      #reveal-streak #scoreboard-meta #win-recap #toast          (all * NEW *)
     The per-row input[data-role="player-photo"] is NOT one of them: it is
     visually hidden by .player-row__file (not [hidden] - see the note on the
     template) and stays that way forever. The .avatar button is the accessible
@@ -277,6 +335,8 @@
     #live-status  role="status"  aria-live="polite"     token + turn changes
     #live-alert   role="alert"   aria-live="assertive"  errors only
     #verdict-banner and #audio-status are themselves role="status".
+    #toast  * NEW *  is the design's ink pill ("Two players minimum"). It ships
+    [hidden] and is NOT a live region - #live-status still does the announcing.
 
   THINGS THAT MUST NEVER HAPPEN BEFORE THE REVEAL
     Do not write the drawn card's year, title or artist into any node on the
@@ -288,12 +348,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#08060f">
+  <meta name="theme-color" content="#fff8e7">
   <meta name="description" content="Timeline - a phone-based music party game. Hear a song, guess where it lands in your timeline of years. No accounts, no install, works offline.">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Timeline">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="format-detection" content="telephone=no">
   <title>Timeline - music party game</title>
@@ -301,6 +361,10 @@
   <!-- Named explicitly so the browser stops asking for /favicon.ico, which does
        not exist and 404s on every single load. -->
   <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <!-- Self-hosted Paytone One / Sora / IBM Plex Mono. Loaded BEFORE app.css so
+       app.css can override the family tokens it declares. Never Google Fonts:
+       the app promises nothing leaves this phone, and it has to work offline. -->
+  <link rel="stylesheet" href="./fonts.css">
   <link rel="stylesheet" href="./app.css">
   <script type="module" src="./ui.js"></script>
 </head>
@@ -311,53 +375,71 @@
 
   <!-- ================================================================ HOME -->
   <section class="screen screen--home" id="home" aria-labelledby="home-title">
-    <div class="home__lockup">
+    <p class="statusbar">
+      <span class="statusbar__left">timeline</span>
+      <span class="statusbar__right">offline ok</span>
+    </p>
+
+    <span class="rpm" aria-hidden="true">
+      <span class="rpm__num">33&#8531;</span>
+      <span class="rpm__unit">RPM</span>
+    </span>
+
+    <div class="home__hero">
+      <p class="motif" aria-hidden="true">
+        <span class="motif__rule motif__rule--long"></span>
+        <span class="motif__year">1958</span>
+        <span class="motif__rule"></span>
+        <span class="motif__ask">?</span>
+        <span class="motif__rule"></span>
+        <span class="motif__year">1999</span>
+        <span class="motif__rule motif__rule--long"></span>
+      </p>
       <p class="home__kicker">A music party game</p>
-      <h1 class="home__title" id="home-title" tabindex="-1">
-        <span class="home__word">Time</span><span class="home__word home__word--alt">line</span>
-      </h1>
+      <h1 class="home__title" id="home-title" tabindex="-1">timeline</h1>
       <p class="home__tagline">Hear the song. Guess the year. Beat your family.</p>
+      <p class="home__deck" id="home-deck-stat">1080 songs &middot; 1955&ndash;2024</p>
     </div>
 
     <div class="home__actions">
-      <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-new-game" data-action="new-game">
+      <!-- The resume card, not a button-shaped button: a save is a thing you
+           pick up, and the line under it says which game it is. -->
+      <button type="button" class="resume" id="btn-resume-game" data-action="resume-game" hidden>
+        <span class="resume__dot" aria-hidden="true"></span>
+        <span class="resume__body">
+          <span class="resume__title">Resume game</span>
+          <span class="resume__sub" id="btn-resume-detail">Pick up where you left off</span>
+        </span>
+        <span class="resume__cta" aria-hidden="true">Open</span>
+      </button>
+      <button type="button" class="btn btn--primary" id="btn-new-game" data-action="new-game">
         New game
       </button>
-      <button type="button" class="btn btn--ghost btn--block" id="btn-resume-game" data-action="resume-game" hidden>
-        Resume game
-        <span class="btn__sub" id="btn-resume-detail">Pick up where you left off</span>
-      </button>
-      <button type="button" class="btn btn--quiet btn--block" id="btn-how-to-play" data-action="show-rules">
+      <button type="button" class="btn btn--paper" id="btn-how-to-play" data-action="show-rules">
         How to play
       </button>
+      <p class="home__note">
+        Works offline &middot; nothing leaves this phone<br>
+        only previews need Wi-Fi &mdash; offline gets a demo timer
+      </p>
     </div>
-
-    <p class="home__note">Works offline &middot; nothing leaves this phone &middot; only song previews need Wi-Fi</p>
   </section>
 
 
   <!-- =============================================================== SETUP -->
   <section class="screen screen--scroll" id="setup" aria-labelledby="setup-title">
     <header class="bar">
-      <button type="button" class="icon-btn" id="btn-setup-back" data-action="home" aria-label="Back to home">
-        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" class="icon"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
       <h1 class="bar__title" id="setup-title" tabindex="-1">New game</h1>
-      <span class="bar__spacer" aria-hidden="true"></span>
+      <button type="button" class="linkbtn bar__link" id="btn-setup-back" data-action="home"
+              aria-label="Close setup and go home">close</button>
     </header>
 
     <form class="setup" id="setup-form" novalidate>
 
       <!-- players -->
-      <fieldset class="panel" aria-labelledby="setup-players-label">
-        <h2 class="panel__legend" id="setup-players-label">Players</h2>
-        <p class="panel__hint">
-          Two to eight. Tap a circle for a photo, or <strong>Skip photo</strong> for an
-          initial instead.
-        </p>
-        <p class="panel__hint panel__hint--privacy">
-          Photos never leave this phone.
-        </p>
+      <fieldset class="sect" aria-labelledby="setup-players-label">
+        <h2 class="sect__eyebrow" id="setup-players-label">Players &middot; 2&ndash;8</h2>
+
         <!-- Everybody who has played before. ui.js fills and unhides this; it
              stays [hidden] on a first-ever setup, when there is nobody yet. -->
         <div class="people" id="people-block" hidden>
@@ -366,84 +448,142 @@
             <button type="button" class="linkbtn people__edit" id="btn-people-edit"
                     data-action="toggle-people-edit" aria-pressed="false">Edit</button>
           </div>
-          <p class="panel__hint people__hint" id="people-hint">Tap somebody to add them.</p>
+          <p class="sect__hint people__hint" id="people-hint">Tap somebody to add them.</p>
           <ul class="people__list" id="people-list" aria-labelledby="people-label"></ul>
         </div>
+
         <ul class="player-list" id="player-list"></ul>
-        <button type="button" class="btn btn--ghost btn--block" id="btn-add-player" data-action="add-player">
-          <span class="btn__glyph" aria-hidden="true">+</span> Add player
+        <button type="button" class="dashrow" id="btn-add-player" data-action="add-player">
+          <span aria-hidden="true">+</span> Add player
         </button>
-        <p class="panel__tally" id="player-count-note" role="status" aria-live="polite">4 players</p>
+        <p class="sect__hint">
+          Tap a circle to add a photo &mdash; optional, it stays on this phone.
+          No photo? You play as your initial.
+        </p>
+        <p class="sect__tally" id="player-count-note" role="status" aria-live="polite">4 players</p>
       </fieldset>
 
       <!-- target cards -->
-      <fieldset class="panel" aria-labelledby="setup-target-label">
-        <h2 class="panel__legend" id="setup-target-label">Cards to win</h2>
+      <fieldset class="sect" aria-labelledby="setup-target-label">
+        <div class="sect__head">
+          <h2 class="sect__eyebrow" id="setup-target-label">Cards to win</h2>
+          <p class="sect__note" id="target-cards-hint">&asymp; 45 min</p>
+        </div>
         <div class="stepper" id="field-target-cards" role="group" aria-labelledby="target-cards-label">
           <span class="stepper__label" id="target-cards-label">First to</span>
           <button type="button" class="stepper__btn" data-action="target-dec" aria-label="Fewer cards to win">&minus;</button>
           <output class="stepper__value" id="target-cards-value" aria-live="polite">10</output>
           <button type="button" class="stepper__btn" data-action="target-inc" aria-label="More cards to win">+</button>
         </div>
-        <p class="panel__hint">5 is a quick round, 10 is the classic, 15 is a long night.</p>
+        <p class="sect__hint">5 is a quick round, 10 is the classic, 15 is a long night.</p>
       </fieldset>
 
-      <!-- mode -->
-      <fieldset class="panel" aria-labelledby="setup-mode-label">
-        <h2 class="panel__legend" id="setup-mode-label">Mode</h2>
-        <!-- Four titles in a grid, and ONE hint underneath for whichever is
-             selected. All four hints ship in the markup; CSS shows the one
-             matching body[data-mode], which ui.js already sets - so the panel
-             costs one line instead of four without losing a word. -->
-        <ul class="mode-grid">
+      <!-- mode. One row per mode: name, em dash, what it changes - the design's
+           four cards, with the selected one on the pink tint. -->
+      <fieldset class="sect" aria-labelledby="setup-mode-label">
+        <h2 class="sect__eyebrow" id="setup-mode-label">Mode</h2>
+        <ul class="mode-list">
           <li>
-            <label class="mode-chip" for="mode-classic">
+            <label class="mode-row" for="mode-classic">
               <input type="radio" name="mode" id="mode-classic" value="classic" checked>
-              <span class="mode-chip__title">Classic</span>
+              <span class="mode-row__text">
+                <b class="mode-row__name">Classic</b>
+                <span class="mode-row__desc">&mdash; put the song in the right spot. That is the whole game.</span>
+              </span>
             </label>
           </li>
           <li>
-            <label class="mode-chip" for="mode-advanced">
+            <label class="mode-row" for="mode-advanced">
               <input type="radio" name="mode" id="mode-advanced" value="advanced">
-              <span class="mode-chip__title">Advanced</span>
+              <span class="mode-row__text">
+                <b class="mode-row__name">Advanced</b>
+                <span class="mode-row__desc">&mdash; the spot only counts if you also name title and artist.</span>
+              </span>
             </label>
           </li>
           <li>
-            <label class="mode-chip" for="mode-expert">
+            <label class="mode-row" for="mode-expert">
               <input type="radio" name="mode" id="mode-expert" value="expert">
-              <span class="mode-chip__title">Expert</span>
+              <span class="mode-row__text">
+                <b class="mode-row__name">Expert</b>
+                <span class="mode-row__desc">&mdash; advanced, plus call the exact release year.</span>
+              </span>
             </label>
           </li>
           <li>
-            <label class="mode-chip" for="mode-coop">
+            <label class="mode-row" for="mode-coop">
               <input type="radio" name="mode" id="mode-coop" value="coop">
-              <span class="mode-chip__title">Co-op</span>
+              <span class="mode-row__text">
+                <b class="mode-row__name">Co-op</b>
+                <span class="mode-row__desc">&mdash; one shared timeline. Too many misses and everyone loses.</span>
+              </span>
             </label>
           </li>
         </ul>
-        <p class="panel__hint mode-hint" aria-live="polite">
-          <span data-mode-hint="classic">Put the song in the right spot. That is the whole game.</span>
-          <span data-mode-hint="advanced">The spot only counts if you also name the title and the artist.</span>
-          <span data-mode-hint="expert">Advanced, plus you must call the exact release year.</span>
-          <span data-mode-hint="coop">One shared timeline, shared tokens. Too many misses and everyone loses.</span>
-        </p>
       </fieldset>
 
       <!-- co-op only -->
-      <fieldset class="panel" id="field-mistake-limit" aria-labelledby="setup-mistakes-label">
-        <h2 class="panel__legend" id="setup-mistakes-label">Mistakes allowed</h2>
+      <fieldset class="sect" id="field-mistake-limit" aria-labelledby="setup-mistakes-label">
+        <h2 class="sect__eyebrow" id="setup-mistakes-label">Mistakes allowed</h2>
         <div class="stepper" role="group" aria-labelledby="mistake-limit-label">
           <span class="stepper__label" id="mistake-limit-label">Lose after</span>
           <button type="button" class="stepper__btn" data-action="mistakes-dec" aria-label="Fewer mistakes allowed">&minus;</button>
           <output class="stepper__value" id="mistake-limit-value" aria-live="polite">3</output>
           <button type="button" class="stepper__btn" data-action="mistakes-inc" aria-label="More mistakes allowed">+</button>
         </div>
-        <p class="panel__hint">Every wrong placement uses one. Run out and the whole table loses.</p>
+        <p class="sect__hint">Every wrong placement burns one. Run out and the whole table loses.</p>
       </fieldset>
 
+      <!-- house rule: streak bonus. Markup + styles only for now. -->
+      <div class="sect">
+        <div class="optcard">
+          <label class="switch" for="opt-streak-bonus">
+            <input type="checkbox" id="opt-streak-bonus">
+            <span class="switch__text">
+              <span class="switch__title">Streak bonus</span>
+              <span class="switch__hint">House rule &mdash; three right in a row earns a token.</span>
+            </span>
+            <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- the buy-in. A family-reunion house rule: everyone drops the same
+           couple of dollars in and the winner gets paid over Venmo. Markup and
+           styles only - a later pass wires the numbers. -->
+      <div class="sect">
+        <div class="optcard">
+          <label class="switch" for="opt-buyin">
+            <input type="checkbox" id="opt-buyin">
+            <span class="switch__text">
+              <span class="switch__title">Buy-in</span>
+              <span class="switch__hint">Everyone chips in the same. Winner takes the pot.</span>
+            </span>
+            <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+          </label>
+
+          <div class="buyin" id="buyin-block" hidden>
+            <div class="stepper" id="field-buyin-amount" role="group" aria-labelledby="buyin-amount-label">
+              <span class="stepper__label" id="buyin-amount-label">Each</span>
+              <button type="button" class="stepper__btn" data-action="buyin-dec" aria-label="Lower the buy-in">&minus;</button>
+              <span class="stepper__value stepper__value--money"><span class="stepper__unit" aria-hidden="true">$</span><output id="buyin-amount-value" aria-live="polite">2</output></span>
+              <button type="button" class="stepper__btn" data-action="buyin-inc" aria-label="Raise the buy-in">+</button>
+            </div>
+            <div class="field">
+              <label class="field__label" for="buyin-venmo">Venmo handle &mdash; optional</label>
+              <input class="field__input" type="text" id="buyin-venmo" name="buyin-venmo"
+                     placeholder="&#64;yourname" maxlength="32" autocomplete="off"
+                     autocapitalize="none" spellcheck="false" enterkeyhint="done">
+            </div>
+            <p class="buyin__pot" id="buyin-pot" role="status" aria-live="polite">Pot: $8 with 4 players</p>
+            <p class="sect__hint">Nothing is charged here. This is a note to settle up in the room.</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Deck filters and playback: every option kept, but folded away. These
-           are set-once choices, and open they were 769px - most of a phone screen
-           of scrolling before you reach Start. The summary carries the live state,
+           are set-once choices, and open they were most of a phone screen of
+           scrolling before you reach Start. The summary carries the live state,
            so folding hides the controls, never what is actually switched on. -->
       <details class="foldout" id="setup-more">
         <summary class="foldout__summary">
@@ -451,16 +591,20 @@
           <span class="foldout__state" id="setup-more-state">All decades &middot; all genres</span>
           <svg viewBox="0 0 24 24" class="foldout__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </summary>
+
         <!-- deck -->
-        <fieldset class="panel" aria-labelledby="setup-deck-label">
-          <h2 class="panel__legend" id="setup-deck-label">The deck</h2>
+        <fieldset class="sect" aria-labelledby="setup-deck-label">
+          <div class="sect__head">
+            <h2 class="sect__eyebrow" id="setup-deck-label">The deck</h2>
+            <p class="sect__match" id="eligible-count" role="status" aria-live="polite">
+              <strong id="eligible-count-value">&mdash;</strong> songs match
+            </p>
+          </div>
 
           <div class="chipset">
-            <div class="chipset__head">
-              <h3 class="chipset__title" id="decades-label">Decades</h3>
-              <button type="button" class="linkbtn" id="btn-decades-all" data-action="chips-all" data-target="decade">All</button>
-            </div>
+            <h3 class="sr-only" id="decades-label">Decades</h3>
             <div class="chips" id="decade-chips" role="group" aria-labelledby="decades-label">
+              <button type="button" class="chip chip--all" id="btn-decades-all" data-action="chips-all" data-target="decade">All decades</button>
               <button type="button" class="chip" data-action="toggle-decade" data-decade="1950" aria-pressed="true">50s</button>
               <button type="button" class="chip" data-action="toggle-decade" data-decade="1960" aria-pressed="true">60s</button>
               <button type="button" class="chip" data-action="toggle-decade" data-decade="1970" aria-pressed="true">70s</button>
@@ -473,11 +617,9 @@
           </div>
 
           <div class="chipset">
-            <div class="chipset__head">
-              <h3 class="chipset__title" id="genres-label">Genres</h3>
-              <button type="button" class="linkbtn" id="btn-genres-all" data-action="chips-all" data-target="genre">All</button>
-            </div>
+            <h3 class="sr-only" id="genres-label">Genres</h3>
             <div class="chips" id="genre-chips" role="group" aria-labelledby="genres-label">
+              <button type="button" class="chip chip--all" id="btn-genres-all" data-action="chips-all" data-target="genre">All genres</button>
               <button type="button" class="chip" data-action="toggle-genre" data-genre="pop" aria-pressed="true">Pop</button>
               <button type="button" class="chip" data-action="toggle-genre" data-genre="rock" aria-pressed="true">Rock</button>
               <button type="button" class="chip" data-action="toggle-genre" data-genre="hiphop" aria-pressed="true">Hip-hop</button>
@@ -495,33 +637,28 @@
             </div>
           </div>
 
-          <p class="tally" id="eligible-count" role="status" aria-live="polite">
-            <strong class="tally__num" id="eligible-count-value">&mdash;</strong>
-            <span class="tally__label">songs match these filters</span>
-          </p>
           <p class="notice notice--warn" id="deck-warning" hidden>
             That is a thin deck for this many players. Add decades or genres.
           </p>
         </fieldset>
 
         <!-- playback -->
-        <fieldset class="panel" aria-labelledby="setup-playback-label">
-          <h2 class="panel__legend" id="setup-playback-label">Playback</h2>
+        <fieldset class="sect" aria-labelledby="setup-playback-label">
+          <h2 class="sect__eyebrow" id="setup-playback-label">Playback</h2>
           <div class="field">
             <label class="field__label" for="playback-source">Play songs with</label>
             <div class="select">
               <select id="playback-source" name="playback-source">
-                <option value="preview" selected>In-app preview (30 seconds)</option>
-                <option value="spotify">Spotify</option>
-                <option value="apple">Apple Music</option>
-                <option value="youtube">YouTube</option>
+                <option value="preview" selected>In-app preview &mdash; 30 seconds, title hidden</option>
+                <option value="spotify">Spotify &mdash; opens on the scanning phone</option>
+                <option value="apple">Apple Music &mdash; opens on the scanning phone</option>
+                <option value="youtube">YouTube &mdash; opens on the scanning phone</option>
               </select>
               <svg viewBox="0 0 24 24" class="select__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
-            <p class="field__hint">
-              The in-app preview plays here and gives nothing away. Pick a streaming
-              service instead and this phone gets a link to open rather than a preview
-              &mdash; which shows the active player the title before they guess.
+            <p class="sect__hint">
+              Previews play here and hide the title. The other options put a link on
+              the QR instead &mdash; the scanning phone will see the title.
             </p>
           </div>
         </fieldset>
@@ -533,7 +670,7 @@
         <p class="setup__reason" id="setup-photo-reason" role="status" aria-live="polite" hidden>
           Everyone needs a photo &mdash; or tap Skip photo for them
         </p>
-        <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-start-game" data-action="start-game" aria-describedby="setup-photo-reason">
+        <button type="button" class="btn btn--primary" id="btn-start-game" data-action="start-game" aria-describedby="setup-photo-reason">
           Shuffle &amp; start
         </button>
       </div>
@@ -542,32 +679,40 @@
 
 
   <!-- ================================================================ PASS -->
+  <!-- The whole hero is one tap target: at a party the phone changes hands in
+       the dark and nobody should have to find a button. The button sits over
+       the hero and the words sit above it with pointer-events:none, so a tap
+       anywhere in that block starts the turn. -->
   <section class="screen screen--pass" id="pass" aria-labelledby="pass-title">
-    <!-- The photo is the handover: the person holding the phone should be able
-         to find the next player across a dark room without reading a word. -->
-    <span class="avatar avatar--xl pass__avatar" id="pass-avatar" data-photo="false">
-      <img class="avatar__img" data-field="photo" alt="">
-      <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
-    </span>
-
-    <h1 class="pass__head" id="pass-title" tabindex="-1">
-      <span class="pass__lead">Pass the phone to</span>
-      <span class="pass__name" id="pass-player-name">Player 1</span>
-    </h1>
-
-    <!-- Turn order, spelled out. The rail says it in pictures on the play
-         screen; here there is room for the sentence. -->
-    <p class="pass__then" id="pass-then">then <span id="pass-next-name">Player 2</span></p>
-
-    <button type="button" class="pass__tap" id="btn-pass-continue" data-action="pass-continue">
-      <span class="pass__tap-ring" aria-hidden="true"></span>
-      <span class="pass__tap-label">Tap to start the turn</span>
-      <span class="pass__tap-sub">Everyone else: no peeking</span>
-    </button>
-
-    <p class="pass__meta">
-      Turn <span id="pass-turn-number">1</span> &middot; <span id="pass-progress">1 / 10 cards</span>
+    <p class="statusbar">
+      <span class="statusbar__left">turn <span id="pass-turn-number">1</span></span>
+      <span class="statusbar__right" id="pass-progress">1 / 10 cards</span>
     </p>
+
+    <div class="pass__hero">
+      <button type="button" class="pass__tap" id="btn-pass-continue" data-action="pass-continue">
+        <span class="sr-only">Start the turn</span>
+      </button>
+
+      <div class="pass__stack">
+        <!-- The photo is the handover: the person holding the phone should be
+             able to find the next player across a dark room without reading. -->
+        <span class="avatar avatar--xl pass__avatar" id="pass-avatar" data-photo="false">
+          <img class="avatar__img" data-field="photo" alt="">
+          <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
+        </span>
+
+        <h1 class="pass__head" id="pass-title" tabindex="-1">
+          <span class="pass__lead">Pass the phone to</span>
+          <span class="pass__name" id="pass-player-name">Player 1</span>
+        </h1>
+
+        <!-- Turn order, spelled out. The rail says it in pictures on the play
+             screen; here there is room for the sentence. -->
+        <p class="pass__then" id="pass-then">then <span id="pass-next-name">Player 2</span></p>
+        <p class="pass__hint">Tap when only they can see the screen</p>
+      </div>
+    </div>
 
     <!-- The handover is the moment the group checks the score, and this screen
          is the only one with room for the whole table at once. -->
@@ -593,28 +738,22 @@
   <section class="screen screen--play" id="play" aria-labelledby="play-title">
 
     <header class="topbar">
-      <span class="topbar__rail" aria-hidden="true"></span>
-      <div class="topbar__row">
+      <p class="statusbar">
+        <span class="statusbar__left">turn <span id="play-turn-number">1</span></span>
+        <button type="button" class="linkbtn statusbar__right" id="btn-menu" data-action="open-menu"
+                aria-haspopup="dialog" aria-expanded="false" aria-controls="menu-sheet">menu</button>
+      </p>
+
+      <div class="whostrip">
         <span class="avatar avatar--md topbar__avatar" id="play-avatar" data-photo="false">
           <img class="avatar__img" data-field="photo" alt="">
           <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
         </span>
-        <div class="topbar__id">
-          <p class="topbar__eyebrow">Turn <span id="play-turn-number">1</span></p>
-          <!-- The screen is a landmark named by this heading, so the heading has to
-               say which screen it is. Sighted players get that from the layout; a
-               bare name would leave a screen reader with two regions both called
-               "Sofia" (here and on the win screen). -->
-          <h1 class="topbar__name" id="play-title" tabindex="-1"><span class="sr-only">Now playing: </span><span id="play-player-name">Player 1</span></h1>
-        </div>
-        <button type="button" class="icon-btn" id="btn-menu" data-action="open-menu"
-                aria-haspopup="dialog" aria-expanded="false" aria-controls="menu-sheet" aria-label="Game menu">
-          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false">
-            <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-          </svg>
-        </button>
-      </div>
-      <div class="topbar__row topbar__row--meta">
+        <!-- The screen is a landmark named by this heading, so the heading has to
+             say which screen it is. Sighted players get that from the layout; a
+             bare name would leave a screen reader with two regions both called
+             "Sofia" (here and on the win screen). -->
+        <h1 class="whostrip__name" id="play-title" tabindex="-1"><span class="sr-only">Now playing: </span><span id="play-player-name">Player 1</span></h1>
         <ul class="tokens" id="play-tokens" aria-label="Tokens: 2 of 5">
           <li class="token-pill" data-state="full"></li>
           <li class="token-pill" data-state="full"></li>
@@ -622,16 +761,15 @@
           <li class="token-pill" data-state="empty"></li>
           <li class="token-pill" data-state="empty"></li>
         </ul>
+        <p class="progress">
+          <span class="progress__num" id="play-progress-current">1</span><span class="progress__slash" aria-hidden="true">/</span><span class="progress__num" id="play-progress-target">10</span>
+        </p>
         <!-- "Who is after me" is the second question every table asks, so it is
              answered in the bar as well as in the rail - the rail scrolls, this
              does not. -->
         <p class="upnext" id="play-next">
-          <span class="upnext__label">Next</span>
+          <span class="upnext__label">next</span>
           <span class="upnext__name" id="play-next-name">Player 2</span>
-        </p>
-        <p class="progress">
-          <span class="progress__num" id="play-progress-current">1</span><span class="progress__slash" aria-hidden="true">/</span><span class="progress__num" id="play-progress-target">10</span>
-          <span class="progress__label">cards</span>
         </p>
       </div>
     </header>
@@ -640,63 +778,58 @@
          chairs between turns and neither should their faces. -->
     <div class="roster" id="play-roster">
       <p class="roster__team" id="play-roster-team">
-        <span class="roster__team-label">Team</span>
-        <span class="roster__team-score"><span data-field="cards">1</span>/<span data-field="target">10</span></span>
-        <span class="roster__team-miss"><span data-field="mistakes">0</span>/<span data-field="limit">3</span> missed</span>
+        <span class="roster__team-pill">team <span data-field="cards">1</span>/<span data-field="target">10</span></span>
+        <span class="roster__team-pill roster__team-pill--miss"><span data-field="mistakes">0</span>/<span data-field="limit">3</span> missed</span>
       </p>
       <ol class="roster__seats" id="play-roster-seats" aria-label="Players - tap for the scoreboard"></ol>
     </div>
 
     <div class="play__scroll">
 
-      <!-- the face-down card + player -->
-      <div class="mystery">
-        <div class="mystery__glyph" aria-hidden="true">?</div>
-        <p class="mystery__label">Mystery song</p>
-
-        <div class="dial">
-          <svg class="ring" id="countdown-ring" viewBox="0 0 120 120" role="img" aria-labelledby="countdown-ring-title">
-            <title id="countdown-ring-title">Preview countdown</title>
-            <circle class="ring__track" cx="60" cy="60" r="52"></circle>
-            <circle class="ring__value" cx="60" cy="60" r="52"></circle>
+      <!-- The record. Outer ring counts the preview down, the disc turns while
+           it plays, the raspberry label is the play/pause button. -->
+      <div class="disc">
+        <svg class="ring" id="countdown-ring" viewBox="0 0 120 120" role="img" aria-labelledby="countdown-ring-title">
+          <title id="countdown-ring-title">Preview countdown</title>
+          <circle class="ring__track" cx="60" cy="60" r="52"></circle>
+          <circle class="ring__value" cx="60" cy="60" r="52"></circle>
+        </svg>
+        <span class="disc__vinyl" aria-hidden="true"><span class="disc__sheen"></span></span>
+        <button type="button" class="disc__hub" id="btn-play-song" data-action="toggle-audio" aria-pressed="false">
+          <svg class="disc__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path class="icon-shape-play" d="M7 4 20 12 7 20Z" fill="currentColor"/>
+            <g class="icon-shape-pause" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+              <line x1="8" y1="5" x2="8" y2="19"/>
+              <line x1="16" y1="5" x2="16" y2="19"/>
+            </g>
           </svg>
-          <button type="button" class="dial__btn" id="btn-play-song" data-action="toggle-audio" aria-pressed="false">
-            <svg class="dial__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path class="icon-shape-play" d="M8.5 5.6v12.8L19 12z" fill="currentColor"/>
-              <g class="icon-shape-pause" fill="currentColor">
-                <rect x="7.4" y="5.6" width="3.6" height="12.8" rx="1.3"/>
-                <rect x="13" y="5.6" width="3.6" height="12.8" rx="1.3"/>
-              </g>
-            </svg>
-            <span class="dial__label" id="btn-play-label">Play song</span>
-          </button>
-        </div>
-
-        <div class="mystery__row">
-          <p class="mystery__count"><span id="countdown-value">30</span>s</p>
-          <button type="button" class="btn btn--quiet btn--sm" id="btn-replay" data-action="replay-audio">
-            <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false">
-              <path d="M4 12a8 8 0 1 0 2.6-5.9M4 4.5V10h5.5" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            Replay
-          </button>
-        </div>
-
-        <p class="mystery__status" id="audio-status" role="status" aria-live="polite">Tap play when everyone is listening.</p>
-
-        <div class="fallback" id="audio-fallback" hidden>
-          <button type="button" class="btn btn--quiet btn--sm" id="btn-show-links" data-action="show-streaming-links">
-            Show streaming links
-          </button>
-          <p class="fallback__warn">Opening a link reveals the song title.</p>
-          <div class="fallback__links" id="streaming-links" hidden></div>
-          <button type="button" class="btn btn--quiet btn--sm" id="btn-skip-card" data-action="skip-card">
-            Skip this card
-          </button>
-        </div>
+          <span class="sr-only" id="btn-play-label">Play song</span>
+          <span class="disc__time" aria-hidden="true"><span id="countdown-value">30</span>s</span>
+        </button>
       </div>
 
-      <!-- QR: the phone becomes the card -->
+      <p class="playstatus" id="audio-status" role="status" aria-live="polite">Tap play when everyone is listening.</p>
+
+      <p class="linkrow">
+        <button type="button" class="linkbtn linkbtn--accent" id="btn-buy-card" data-action="buy-card" aria-describedby="btn-buy-card-reason">
+          buy a card &middot; 3 tokens
+        </button>
+        <button type="button" class="linkbtn" id="btn-replay" data-action="replay-audio">replay</button>
+        <button type="button" class="linkbtn linkbtn--quiet" id="btn-skip-card" data-action="skip-card">skip this card</button>
+      </p>
+      <p class="linkrow__reason" id="btn-buy-card-reason" hidden>Not enough tokens</p>
+
+      <div class="fallback" id="audio-fallback" hidden>
+        <button type="button" class="btn btn--paper btn--sm" id="btn-show-links" data-action="show-streaming-links" aria-pressed="false">
+          Show streaming links
+        </button>
+        <p class="fallback__warn">Opening a link reveals the song title.</p>
+        <div class="fallback__links" id="streaming-links" hidden></div>
+      </div>
+
+      <!-- QR: the phone becomes the card. It stays on the screen rather than
+           living in a sheet, because nothing in ui.js can open a sheet for it -
+           and a code nobody can reach is the same as no code at all. -->
       <section class="qr" id="qr-block" aria-labelledby="qr-caption">
         <div class="qr__frame">
           <div class="qr__code" id="qr-code" role="img" aria-label="QR code that opens this song on another phone"></div>
@@ -721,43 +854,45 @@
       </section>
     </div>
 
-    <!-- the timeline -->
-    <div class="timeline">
-      <div class="timeline__head">
-        <h2 class="timeline__title" id="timeline-heading">Your timeline</h2>
-        <p class="timeline__hint" id="timeline-hint">Swipe, then tap a gap</p>
-      </div>
-      <ol class="strip" id="timeline-strip" aria-labelledby="timeline-heading"></ol>
-    </div>
-
-    <!-- actions -->
-    <div class="actions" id="play-actions">
-      <button type="button" class="btn btn--ghost" id="btn-buy-card" data-action="buy-card" aria-describedby="btn-buy-card-reason">
-        Buy a card
-        <span class="btn__sub">3 tokens</span>
-      </button>
-      <button type="button" class="btn btn--ghost" id="btn-claim-identify" data-action="toggle-identify" aria-pressed="false">
-        I can name it
-        <span class="btn__sub">Title + artist</span>
-      </button>
-
-      <p class="actions__reason" id="btn-buy-card-reason" hidden>Not enough tokens</p>
-
-      <div class="stepper stepper--inline" id="field-year-guess" role="group" aria-labelledby="year-guess-label">
-        <span class="stepper__label" id="year-guess-label">Year guess</span>
+    <div class="playfoot">
+      <!-- expert only -->
+      <div class="yearcall" id="field-year-guess" role="group" aria-labelledby="year-guess-label">
+        <span class="yearcall__label" id="year-guess-label">Your year call</span>
         <button type="button" class="stepper__btn" data-action="year-dec" aria-label="Earlier year">&minus;</button>
-        <output class="stepper__value stepper__value--year" id="year-guess-value">1985</output>
+        <output class="yearcall__value" id="year-guess-value">1985</output>
         <button type="button" class="stepper__btn" data-action="year-inc" aria-label="Later year">+</button>
       </div>
 
-      <button type="button" class="btn btn--ghost" id="btn-challenge" data-action="open-challenge"
-              aria-haspopup="dialog" aria-controls="challenge-sheet">
-        Challenge
-        <span class="badge" id="challenge-count" hidden>0</span>
-      </button>
-      <button type="button" class="btn btn--primary" id="btn-place" data-action="commit-placement" disabled>
-        Place here
-      </button>
+      <!-- the timeline -->
+      <div class="timeline">
+        <div class="timeline__head">
+          <h2 class="sect__eyebrow" id="timeline-heading">Your timeline</h2>
+          <p class="timeline__aside">tap a gap</p>
+        </div>
+        <ol class="strip" id="timeline-strip" aria-labelledby="timeline-heading"></ol>
+        <p class="timeline__hint" id="timeline-hint">Swipe, then tap a gap</p>
+      </div>
+
+      <!-- actions -->
+      <div class="actions" id="play-actions">
+        <div class="actions__row">
+          <button type="button" class="betbtn" id="btn-claim-identify" data-action="toggle-identify" aria-pressed="false">
+            I can name it
+          </button>
+          <button type="button" class="betbtn betbtn--dash" id="btn-challenge" data-action="open-challenge"
+                  aria-haspopup="dialog" aria-controls="challenge-sheet">
+            Challenge &middot; 1 token
+            <span class="badge" id="challenge-count" hidden>0</span>
+          </button>
+        </div>
+
+        <!-- One pill per locked challenge, in the challenger's own colour. -->
+        <ul class="locks" id="challenge-locks" hidden></ul>
+
+        <button type="button" class="btn btn--primary" id="btn-place" data-action="commit-placement" disabled>
+          Place here
+        </button>
+      </div>
     </div>
   </section>
 
@@ -766,9 +901,8 @@
   <section class="screen screen--scroll screen--reveal" id="reveal" aria-labelledby="reveal-title">
     <div class="roster roster--reveal" id="reveal-roster">
       <p class="roster__team" id="reveal-roster-team">
-        <span class="roster__team-label">Team</span>
-        <span class="roster__team-score"><span data-field="cards">1</span>/<span data-field="target">10</span></span>
-        <span class="roster__team-miss"><span data-field="mistakes">0</span>/<span data-field="limit">3</span> missed</span>
+        <span class="roster__team-pill">team <span data-field="cards">1</span>/<span data-field="target">10</span></span>
+        <span class="roster__team-pill roster__team-pill--miss"><span data-field="mistakes">0</span>/<span data-field="limit">3</span> missed</span>
       </p>
       <ol class="roster__seats" id="reveal-roster-seats" aria-label="Players - tap for the scoreboard"></ol>
     </div>
@@ -804,30 +938,43 @@
     </div>
 
     <p class="verdict" id="verdict-banner" data-verdict="neutral" role="status" aria-live="polite">
-      Waiting for the reveal
+      <span class="verdict__dot" aria-hidden="true"></span>
+      <span class="verdict__text">Waiting for the reveal</span>
     </p>
 
-    <section class="panel panel--tight" id="confirm-panel" hidden>
-      <h2 class="panel__legend" id="confirm-heading">Did <span id="confirm-player-name">Player 1</span> name it?</h2>
-      <p class="panel__hint">Everyone decides together. Tap what they got right.</p>
-      <div class="confirm__row">
-        <button type="button" class="btn btn--ghost" id="btn-confirm-title" data-action="confirm-title" aria-pressed="false">Title</button>
-        <button type="button" class="btn btn--ghost" id="btn-confirm-artist" data-action="confirm-artist" aria-pressed="false">Artist</button>
+    <!-- Where the card actually belonged, on a miss. Ships hidden. -->
+    <p class="reveal__belongs" id="reveal-belongs" hidden></p>
+
+    <!-- The placed year between its neighbours. Ships hidden; fill from
+         #tpl-mini-card and mark the new one [data-highlight="true"]. -->
+    <ol class="mini-timeline mini-timeline--context" id="reveal-strip" hidden aria-label="Where the card landed"></ol>
+
+    <!-- House rule note, earned. Ships hidden. -->
+    <p class="streaknote" id="reveal-streak" hidden>Streak bonus &mdash; three in a row, +1 token</p>
+
+    <section class="card card--tight" id="confirm-panel" hidden aria-labelledby="confirm-heading">
+      <h2 class="sect__eyebrow sect__eyebrow--accent" id="confirm-heading">Did <span id="confirm-player-name">Player 1</span> name it?</h2>
+      <p class="card__lead">Group votes &mdash; tap what they got right, then reveal.</p>
+      <div class="votes">
+        <button type="button" class="vote" id="btn-confirm-title" data-action="confirm-title" aria-pressed="false">Title</button>
+        <button type="button" class="vote" id="btn-confirm-artist" data-action="confirm-artist" aria-pressed="false">Artist</button>
       </div>
     </section>
 
-    <section class="panel panel--tight" aria-labelledby="awards-heading">
-      <h2 class="panel__legend" id="awards-heading">Tokens</h2>
+    <!-- .panel is load-bearing: ui.js hides an empty list by walking
+         closest('.panel') from #token-awards / #challenge-outcomes. -->
+    <section class="card card--tight panel" aria-labelledby="awards-heading">
+      <h2 class="sect__eyebrow sect__eyebrow--accent" id="awards-heading">Tokens</h2>
       <ul class="awards" id="token-awards" aria-live="polite"></ul>
     </section>
 
-    <section class="panel panel--tight" aria-labelledby="outcomes-heading">
-      <h2 class="panel__legend" id="outcomes-heading">Challenges</h2>
+    <section class="card card--tight panel" aria-labelledby="outcomes-heading">
+      <h2 class="sect__eyebrow sect__eyebrow--accent" id="outcomes-heading">Challenges</h2>
       <ul class="outcomes" id="challenge-outcomes" aria-live="polite"></ul>
     </section>
 
     <div class="screen__foot">
-      <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-next-player" data-action="next-turn">
+      <button type="button" class="btn btn--primary" id="btn-next-player" data-action="next-turn">
         Next player
       </button>
     </div>
@@ -837,13 +984,13 @@
   <!-- ========================================================== SCOREBOARD -->
   <section class="screen screen--scroll" id="scoreboard" aria-labelledby="scoreboard-title">
     <header class="bar">
-      <span class="bar__spacer" aria-hidden="true"></span>
-      <h1 class="bar__title" id="scoreboard-title" tabindex="-1">Scoreboard</h1>
-      <span class="bar__spacer" aria-hidden="true"></span>
+      <h1 class="bar__title" id="scoreboard-title" tabindex="-1">Standings</h1>
+      <p class="bar__meta" id="scoreboard-meta" hidden></p>
     </header>
     <ol class="score-list" id="scoreboard-list"></ol>
+    <p class="score-foot">Tokens shown as dots &middot; years are the cards already landed</p>
     <div class="screen__foot">
-      <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-scoreboard-back" data-action="close-scoreboard">
+      <button type="button" class="btn btn--paper" id="btn-scoreboard-back" data-action="close-scoreboard">
         Back to the game
       </button>
     </div>
@@ -864,10 +1011,25 @@
       <h1 class="win__name" id="win-title" tabindex="-1"><span class="sr-only">Winner: </span><span id="win-player-name">Player 1</span></h1>
       <p class="win__summary" id="win-summary">10 cards, 3 tokens left</p>
       <ol class="mini-timeline mini-timeline--win" id="win-timeline"></ol>
+
+      <!-- The game recap. Only the rows that earned themselves; ships hidden. -->
+      <ul class="recap" id="win-recap" hidden></ul>
+
+      <!-- The buy-in payout. Markup and styles only; ships hidden. -->
+      <section class="pot" id="win-pot" hidden aria-labelledby="win-pot-title">
+        <h2 class="sect__eyebrow sect__eyebrow--accent" id="win-pot-title">The pot</h2>
+        <p class="pot__amount" data-field="pot">$8</p>
+        <p class="pot__venmo">Send it to <b data-field="venmo">&#64;yourname</b></p>
+        <button type="button" class="btn btn--paper btn--sm" id="btn-venmo" data-action="pay-venmo">Open Venmo</button>
+        <div class="pot__frame">
+          <div class="pot__qr" id="win-qr" role="img" aria-label="QR code to pay the pot"></div>
+        </div>
+        <p class="pot__note">Other phones can scan this to pay.</p>
+      </section>
     </div>
     <div class="win__actions">
-      <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-play-again" data-action="play-again">Play again</button>
-      <button type="button" class="btn btn--quiet btn--block" id="btn-win-home" data-action="home">Home</button>
+      <button type="button" class="btn btn--primary" id="btn-play-again" data-action="play-again">Play again &mdash; same players</button>
+      <button type="button" class="btn btn--paper" id="btn-win-home" data-action="home">Home</button>
     </div>
   </section>
 
@@ -875,17 +1037,27 @@
   <!-- =============================================================== RULES -->
   <section class="screen screen--scroll" id="rules" aria-labelledby="rules-title">
     <header class="bar">
-      <button type="button" class="icon-btn" id="btn-rules-back" data-action="rules-back" aria-label="Back">
-        <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
       <h1 class="bar__title" id="rules-title" tabindex="-1">How to play</h1>
-      <span class="bar__spacer" aria-hidden="true"></span>
+      <button type="button" class="linkbtn bar__link" id="btn-rules-back" data-action="rules-back" aria-label="Close">close</button>
     </header>
 
     <div class="prose">
       <p class="prose__lead">
         Be the first to build a timeline of correctly ordered songs. You never see a year
         until you have committed to a spot.
+      </p>
+
+      <h2>A turn</h2>
+      <ol class="steps">
+        <li>The phone is passed to the active player. Everyone else looks away.</li>
+        <li>They play the 30-second preview &mdash; or scan the QR to hear it on another phone. The year stays hidden.</li>
+        <li>They tap a gap in their own timeline, then <strong>Place here</strong>.</li>
+        <li class="steps__good">Right spot &mdash; the card joins their timeline.</li>
+        <li class="steps__bad">Wrong spot &mdash; the card is discarded. Next player.</li>
+      </ol>
+      <p class="prose__aside">
+        Ties are kind: if the song came out in the same year as a card you already hold, either
+        side of that card counts as correct.
       </p>
 
       <h2>Setting up</h2>
@@ -896,22 +1068,14 @@
         <li>Choose a target of 5, 10 or 15 cards, a mode, and which decades and genres are in play.</li>
       </ul>
 
-      <h2>A turn</h2>
-      <ol>
-        <li>The phone is passed to the active player. Everyone else looks away.</li>
-        <li>They draw the top card and play the 30-second preview. The year is hidden. Anyone can scan the QR code to listen on their own phone &mdash; that page never shows the year either.</li>
-        <li>They pick a gap in their own timeline: before the earliest card, after the latest, or between any two. Tap the gap, then tap <strong>Place here</strong>.</li>
-        <li>The card flips. Right spot &rarr; it joins their timeline. Wrong spot &rarr; it is discarded.</li>
-        <li>Play passes to the left.</li>
-      </ol>
-      <p class="prose__aside">
-        Ties are kind: if the song came out in the same year as a card you already hold, either
-        side of that card counts as correct.
-      </p>
+      <h2>Tokens &middot; start with 2, hold at most 5</h2>
+      <ul class="tokenrules">
+        <li><span class="tokenrules__delta tokenrules__delta--loss">&minus;1</span><span><b>Challenge</b> &mdash; bet the card fits your timeline. If the active player is wrong and you are right, it is yours.</span></li>
+        <li><span class="tokenrules__delta tokenrules__delta--gain">+1</span><span><b>Name it</b> &mdash; call the title and artist before the reveal. The group votes.</span></li>
+        <li><span class="tokenrules__delta tokenrules__delta--loss">&minus;3</span><span><b>Buy a card</b> &mdash; before hearing the song, the top card drops into the right spot. Turn over.</span></li>
+      </ul>
 
-      <h2>Tokens</h2>
-      <p>You start with 2 and can never hold more than 5. There are three things to spend them on.</p>
-      <h3>Challenge &mdash; 1 token</h3>
+      <h3>Challenge &mdash; the small print</h3>
       <ul>
         <li>Before the reveal, any player other than the active one may challenge.</li>
         <li>You spend a token and nominate a gap in <strong>your own</strong> timeline.</li>
@@ -920,18 +1084,6 @@
         <li>A wrong challenge just costs the token. Challenging a correct placement is allowed &mdash; it also just costs the token.</li>
         <li>Only the <em>spot</em> counts here. In advanced and expert, a card that was placed correctly but lost on the title, artist or year is discarded rather than won &mdash; challengers get nothing.</li>
         <li>One challenge per player per turn.</li>
-      </ul>
-      <h3>Name that song &mdash; earn 1 token</h3>
-      <ul>
-        <li>During your turn, tap <strong>I can name it</strong> if you can give the title <em>and</em> the artist.</li>
-        <li>At the reveal the group votes with the Title and Artist buttons.</li>
-        <li>Get both and you gain a token, whether or not the placement was right.</li>
-      </ul>
-      <h3>Buy a card &mdash; 3 tokens</h3>
-      <ul>
-        <li>Only at the start of your turn, before you have heard the song.</li>
-        <li>The top card is dropped into the correct spot for you. No guessing, no risk.</li>
-        <li>Your turn then ends.</li>
       </ul>
 
       <h2>Winning</h2>
@@ -949,7 +1101,7 @@
         <dt>Advanced</dt>
         <dd>The placement only counts if you also name the title and the artist. The group confirms both at the reveal.</dd>
         <dt>Expert</dt>
-        <dd>Advanced, plus you must call the exact release year with the year stepper before you place. Exact match or nothing.</dd>
+        <dd>Advanced, plus you must call the exact release year before you place. Exact match or nothing.</dd>
         <dt>Co-op</dt>
         <dd>One shared timeline and one shared token pool. Everyone still takes turns placing, but you are all on the same side. Reach the target together and you win; hit the mistake limit (3 by default) and the game is over for everybody.</dd>
       </dl>
@@ -961,7 +1113,7 @@
 
       <h2>House notes</h2>
       <ul>
-        <li>Song previews need internet. Everything else works offline.</li>
+        <li>Song previews need internet. Everything else works offline &mdash; offline you get a silent demo timer.</li>
         <li>The pass-the-phone screen exists so nobody sees the previous reveal. You can switch it off in the menu.</li>
         <li>If a preview will not load, skip the card. No penalty.</li>
       </ul>
@@ -983,48 +1135,57 @@
       <li><button type="button" class="menu-item" id="btn-menu-rules" data-action="show-rules">How to play</button></li>
     </ul>
 
-    <h3 class="sheet__sub">Settings</h3>
     <ul class="switch-list">
       <li>
         <label class="switch" for="opt-skip-pass">
           <input type="checkbox" id="opt-skip-pass">
+          <span class="switch__text">
+            <span class="switch__title">Skip pass-the-phone</span>
+            <span class="switch__hint">for single-device speed runs</span>
+          </span>
           <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
-          <span class="switch__text">Skip pass-the-phone<span class="switch__hint">No handover screen &mdash; the next player sees the last reveal</span></span>
         </label>
       </li>
       <li>
         <label class="switch" for="opt-sound">
           <input type="checkbox" id="opt-sound" checked>
+          <span class="switch__text">
+            <span class="switch__title">Sound</span>
+            <span class="switch__hint">song previews and effects</span>
+          </span>
           <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
-          <span class="switch__text">Sound<span class="switch__hint">Song previews and effects</span></span>
         </label>
       </li>
       <li>
         <label class="switch" for="opt-reduced-motion">
           <input type="checkbox" id="opt-reduced-motion">
+          <span class="switch__text">
+            <span class="switch__title">Reduce motion</span>
+            <span class="switch__hint">calms the entrances and the reveal</span>
+          </span>
           <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
-          <span class="switch__text">Reduce motion<span class="switch__hint">Calms the background and the card flip</span></span>
         </label>
       </li>
     </ul>
 
-    <div class="field">
+    <div class="menu-card">
       <label class="field__label" for="opt-playback-source">Play songs with</label>
       <div class="select">
         <select id="opt-playback-source">
-          <option value="preview" selected>In-app preview (30 seconds)</option>
-          <option value="spotify">Spotify</option>
-          <option value="apple">Apple Music</option>
-          <option value="youtube">YouTube</option>
+          <option value="preview" selected>In-app preview &mdash; 30 seconds, title hidden</option>
+          <option value="spotify">Spotify &mdash; opens on the scanning phone</option>
+          <option value="apple">Apple Music &mdash; opens on the scanning phone</option>
+          <option value="youtube">YouTube &mdash; opens on the scanning phone</option>
         </select>
         <svg viewBox="0 0 24 24" class="select__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
+      <p class="menu-card__note">Previews hide the title. The others put a link on the QR, and the scanning phone will see it.</p>
     </div>
 
     <div class="sheet__foot">
-      <button type="button" class="btn btn--danger btn--block" id="btn-end-game" data-action="end-game">End game</button>
-      <button type="button" class="btn btn--quiet btn--block" id="btn-menu-home" data-action="home">Home</button>
-      <button type="button" class="btn btn--ghost btn--block" id="btn-menu-close" data-action="close-menu">Close</button>
+      <button type="button" class="menu-item" id="btn-menu-home" data-action="home">Home &mdash; the game stays saved</button>
+      <button type="button" class="menu-item menu-item--danger" id="btn-end-game" data-action="end-game">End game</button>
+      <button type="button" class="linkbtn sheet__done" id="btn-menu-close" data-action="close-menu">done</button>
     </div>
   </div>
 </div>
@@ -1035,28 +1196,34 @@
   <div class="sheet__scrim" data-action="close-challenge" aria-hidden="true"></div>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="challenge-sheet-title">
     <div class="sheet__grip" aria-hidden="true"></div>
-    <h2 class="sheet__title" id="challenge-sheet-title">Challenge</h2>
+    <h2 class="sheet__title" id="challenge-sheet-title">Challenge &mdash; 1 token</h2>
     <p class="sheet__lead">
-      A challenger spends 1 token to bet the card belongs in <strong>their</strong> timeline.
-      They only win it if the active player puts it in the wrong spot.
+      Bet the card belongs in <strong>your</strong> timeline. If the active player is wrong
+      and your gap is right, the card is yours.
     </p>
 
-    <h3 class="sheet__sub" id="challenge-players-label">Who is challenging?</h3>
+    <h3 class="sect__eyebrow" id="challenge-players-label">Who is challenging?</h3>
     <ol class="challenge-players" id="challenge-players" aria-labelledby="challenge-players-label"></ol>
 
     <div class="challenge__step" id="challenge-step-gap" hidden>
-      <h3 class="sheet__sub">Where would <span id="challenge-player-name">they</span> put it?</h3>
+      <h3 class="sect__eyebrow"><span id="challenge-player-name">they</span> &mdash; tap a gap in your timeline</h3>
       <ol class="strip strip--sheet" id="challenge-timeline" aria-label="Challenger timeline"></ol>
     </div>
 
     <div class="sheet__foot">
-      <button type="button" class="btn btn--primary btn--block" id="btn-challenge-confirm" data-action="confirm-challenge" disabled>
-        Lock in challenge
+      <button type="button" class="btn btn--primary" id="btn-challenge-confirm" data-action="confirm-challenge" disabled>
+        Lock in &mdash; spend 1 token
       </button>
-      <button type="button" class="btn btn--quiet btn--block" id="btn-challenge-close" data-action="close-challenge">Close</button>
+      <button type="button" class="linkbtn sheet__done" id="btn-challenge-close" data-action="close-challenge">back</button>
     </div>
   </div>
 </div>
+
+
+<!-- ================================================================ TOAST -->
+<!-- The design's ink pill. Ships hidden; #live-status still does the
+     announcing, so this is presentation only. -->
+<p class="toast" id="toast" hidden></p>
 
 
 <!-- ============================================================ TEMPLATES -->
@@ -1084,9 +1251,7 @@
     <input class="player-row__input" id="player-name-0" name="player-name-0" type="text"
            value="Player 1" maxlength="16" autocomplete="off" autocapitalize="words"
            spellcheck="false" enterkeyhint="done" data-role="player-name" placeholder="Name">
-    <button type="button" class="icon-btn icon-btn--sm player-row__remove" data-action="remove-player" aria-label="Remove player 1">
-      <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-    </button>
+    <button type="button" class="linkbtn player-row__remove" data-action="remove-player" aria-label="Remove player 1">remove</button>
     <p class="player-row__foot">
       <span class="player-row__num" aria-hidden="true">1</span>
       <span class="player-row__status" data-field="status">Photo needed</span>
@@ -1146,7 +1311,8 @@
 </template>
 
 <!-- A tappable gap. Set button[data-gap-index] and the sr-only [data-field="label"]
-     to something like "Place before 1975". aria-pressed carries selection. -->
+     to something like "Place before 1975". aria-pressed carries selection, and
+     CSS is what widens the gap and shows the "+". -->
 <template id="tpl-timeline-gap">
   <li class="tl-gap">
     <button type="button" class="gap" data-action="select-gap" data-gap-index="0" aria-pressed="false">
@@ -1174,15 +1340,41 @@
 <!-- Reveal: one challenge result. Set li[data-result] = "correct" | "wrong". -->
 <template id="tpl-outcome-item">
   <li class="outcome" data-result="wrong">
+    <span class="outcome__dot" aria-hidden="true"></span>
     <span class="outcome__who" data-field="who">Player 2</span>
     <span class="outcome__what" data-field="what">Guessed before 1981 &mdash; wrong, token spent</span>
+  </li>
+</template>
+
+<!-- Play screen: one locked challenge, in that challenger's colour. Set the
+     li's --seat properties and [data-field="label"] ("Mo challenged"). Lives in
+     #challenge-locks, which ships [hidden]. -->
+<template id="tpl-challenge-lock">
+  <li class="lock" data-field="label">Player 2 challenged</li>
+</template>
+
+<!-- Winner: one recap row. Set [data-field="key"] ("Hardest song") and
+     [data-field="value"]. Lives in #win-recap, which ships [hidden]. -->
+<template id="tpl-recap-row">
+  <li class="recap__row">
+    <span class="recap__key" data-field="key">Hardest song</span>
+    <span class="recap__value" data-field="value">Africa &mdash; missed 3 times</span>
   </li>
 </template>
 
 <!-- Scoreboard row. Set li[data-player-id], li[data-active] and the row's --seat
      properties; fill the [data-field="timeline"] <ol> with #tpl-mini-card clones
      and [data-field="tokens"] with token pills. .score-row__flag is static -
-     CSS shows it only on the active row. -->
+     CSS shows it only on the active row.
+     Three parts ship [hidden] because nothing computes them yet:
+       [data-field="lead"]        the LEADS badge - unhide for a SOLE leader
+       [data-role="meter"]        progress bar - set --fill ("40%") and unhide
+       [data-role="decades"]      the 8-bar decade histogram - set each bar's
+                                  --bar (0-1 of that player's best decade), put
+                                  [data-strong="true"] on the tallest one so it
+                                  fills in the seat colour, write
+                                  [data-field="strength"] ("owns the 80s" /
+                                  "strong: 60s" / "warming up"), then unhide -->
 <template id="tpl-scoreboard-row">
   <li class="score-row" data-player-id="" data-active="false">
     <div class="score-row__head">
@@ -1191,15 +1383,29 @@
         <span class="avatar__initial" data-field="initial" aria-hidden="true">1</span>
       </span>
       <p class="score-row__name" data-field="name">Player 1</p>
-      <p class="score-row__togo"><span data-field="togo">4</span> to go</p>
+      <span class="score-row__lead" data-field="lead" hidden>LEADS</span>
+      <span class="score-row__flag">up now</span>
       <ul class="tokens tokens--sm" data-field="tokens" aria-label="Tokens"></ul>
-      <span class="score-row__flag">Playing</span>
+      <p class="score-row__togo"><span data-field="togo">4</span> to go</p>
+    </div>
+    <span class="score-row__meter" data-role="meter" aria-hidden="true" hidden><span class="score-row__fill"></span></span>
+    <div class="hist" data-role="decades" hidden>
+      <span class="hist__bar" data-decade="1950"></span>
+      <span class="hist__bar" data-decade="1960"></span>
+      <span class="hist__bar" data-decade="1970"></span>
+      <span class="hist__bar" data-decade="1980"></span>
+      <span class="hist__bar" data-decade="1990"></span>
+      <span class="hist__bar" data-decade="2000"></span>
+      <span class="hist__bar" data-decade="2010"></span>
+      <span class="hist__bar" data-decade="2020"></span>
+      <span class="hist__strength" data-field="strength">warming up</span>
     </div>
     <ol class="mini-timeline" data-field="timeline"></ol>
   </li>
 </template>
 
-<!-- One year chip inside a compact timeline. -->
+<!-- One year chip inside a compact timeline. [data-highlight="true"] marks the
+     card that was just placed, in #reveal-strip. -->
 <template id="tpl-mini-card">
   <li class="mini-card" data-card-id="">
     <span class="mini-card__year" data-field="year">1975</span>
@@ -1263,7 +1469,7 @@
       <span class="standing__crown" aria-hidden="true">
         <svg viewBox="0 0 24 24" focusable="false"><path d="M2.6 18.4 4.4 6.9l5.1 4.4L12 4.3l2.5 7 5.1-4.4 1.8 11.5z" fill="currentColor"/></svg>
       </span>
-      <span class="standing__flag" data-field="flag">Playing now</span>
+      <span class="standing__flag" data-field="flag">up now</span>
     </p>
     <p class="standing__count"><span data-field="cards">1</span><span class="standing__of">/<span data-field="target">10</span></span></p>
     <span class="standings__meter" aria-hidden="true"><span class="standings__fill"></span></span>

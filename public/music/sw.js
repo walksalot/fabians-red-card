@@ -30,7 +30,7 @@
 // Bump this on any deploy that must reach returning players immediately. It is a
 // belt to the stale-while-revalidate braces below: changing it changes this file,
 // which is the only thing that makes a browser reinstall the worker at all.
-const VERSION = 'v6-redesign';
+const VERSION = 'v7-redesign';
 const CACHE = `music-timeline-${VERSION}`;
 const CACHE_PREFIX = 'music-timeline-';
 
@@ -71,6 +71,11 @@ const SHELL = [
   './audio.js',
   './storage.js',
   './confetti.js',
+  // Every ES module index.html imports has to be here. A missing entry is not a
+  // degraded feature offline, it is a blank page: the browser fails the import
+  // and ui.js never runs at all.
+  './sfx.js',
+  './buyin.js',
   './ui.js',
   './listen.js',
 ];
