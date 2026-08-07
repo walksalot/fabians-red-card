@@ -43,6 +43,7 @@ const SHELL = [
   './deck.js',
   './audio.js',
   './storage.js',
+  './confetti.js',
   './ui.js',
   './listen.js',
 ];

@@ -34,6 +34,9 @@ const CACHE_LIMIT = 500;
 /** Negative results expire; a miss is usually the network, not the catalogue. */
 const MISS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** Someone is holding a phone waiting to hear a song. Do not stall past this. */
+const LOOKUP_TIMEOUT_MS = 8000;
+
 /** Candidates are rejected outright below these, before scoring matters. */
 const MIN_TITLE_SIMILARITY = 0.6;
 const MIN_ARTIST_SIMILARITY = 0.5;
@@ -234,9 +237,14 @@ function similarity(a, b) {
     }
   }
   const dice = total > 0 ? (2 * hits) / total : 0;
-  // "take on me" inside "take on me the remaster" should not be punished for
-  // the extra words the bracket-stripper could not see.
-  if (a.includes(b) || b.includes(a)) return Math.max(dice, 0.88);
+  // "take on me" inside "take on me the 2015 remaster" should not be punished
+  // for the extra words the bracket-stripper could not see. Guarded by length,
+  // though: without that, a card called "One" would happily match "One Dance".
+  if (a.includes(b) || b.includes(a)) {
+    const shorter = Math.min(a.length, b.length);
+    const ratio = shorter / Math.max(a.length, b.length);
+    if (shorter >= 5 && ratio >= 0.4) return Math.max(dice, 0.88);
+  }
   return dice;
 }
 
@@ -260,7 +268,10 @@ const TRACK_MARKERS = [
   're recorded',
   're recording',
   'rerecorded',
+  // squash() turns "Taylor's Version" into "taylor s version", so both
+  // spellings are listed rather than relying on the apostrophe surviving.
   'taylors version',
+  'taylor s version',
   'sped up',
   'slowed',
   'in the style of',
@@ -535,10 +546,12 @@ async function lookup(card) {
     if (!term) continue;
     let payload;
     try {
-      payload = await jsonp(searchUrl(term), { timeoutMs: 8000 });
+      payload = await jsonp(searchUrl(term), { timeoutMs: LOOKUP_TIMEOUT_MS });
     } catch {
-      // Offline, blocked, or timed out. Try the next phrasing, then give up.
-      continue;
+      // Offline, blocked, rate-limited or timed out. Rephrasing cannot fix any
+      // of those, and a second 8-second stall in front of a player waiting to
+      // hear a song is worse than falling straight through to the fallback.
+      return null;
     }
     const results =
       payload && typeof payload === 'object' && Array.isArray(payload.results)

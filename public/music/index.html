@@ -1,0 +1,915 @@
+<!doctype html>
+<!--
+  ============================================================================
+  Timeline - the music year-guessing party game (app shell)
+  ============================================================================
+  Why this file exists: the whole game is one static, dependency-free page so it
+  can be served by Next, by scripts/music-server.mjs, or opened straight off
+  disk. Every screen ships in the markup up front; ui.js only ever toggles
+  attributes and fills containers. Nothing here fetches, computes or decides.
+
+  ---------------------------------------------------------------------------
+  DOM CONTRACT for ui.js  (this is the interface - keep it stable)
+  ---------------------------------------------------------------------------
+
+  SCREEN SWITCHING
+    document.body.dataset.screen = 'home' | 'setup' | 'pass' | 'play'
+                                 | 'reveal' | 'scoreboard' | 'win' | 'rules'
+    CSS shows exactly the <section class="screen"> whose id matches and hides
+    every other one. There is no other show/hide mechanism for screens - do not
+    add/remove [hidden] on a <section class="screen">.
+    After switching, focus the matching heading (all are tabindex="-1"):
+      #home-title #setup-title #pass-title #play-title
+      #reveal-title #scoreboard-title #win-title #rules-title
+
+  OTHER BODY-LEVEL ATTRIBUTES (all optional, all read by CSS only)
+    body[data-mode]   = 'classic' | 'advanced' | 'expert' | 'coop'
+                        -> 'expert' is the ONLY thing that reveals the play
+                           screen year stepper (#field-year-guess).
+    body[data-motion] = 'reduce'  -> forces the reduced-motion styles on,
+                        same effect as prefers-reduced-motion: reduce.
+    body[data-busy]   = 'true'    -> dims + blocks pointer events on #app.
+
+  SHEETS (menu + challenge) - NOT screens, they layer over whatever is showing
+    #menu-sheet, #challenge-sheet: set dataset.open = 'true' | 'false'.
+    Open  -> el.dataset.open = 'true';  move focus into the sheet.
+    Close -> el.dataset.open = 'false'; restore focus to the opener.
+    CSS handles visibility/inertness; do NOT toggle [hidden] on sheets.
+    Both sheets contain a .sheet__scrim carrying data-action="close-menu" /
+    data-action="close-challenge".
+    Keep #btn-menu[aria-expanded] in sync with the menu sheet.
+
+  EVENT DELEGATION
+    Every actionable control carries data-action. Delegate one click listener
+    on document and switch on closest('[data-action]').dataset.action.
+    Full action list (element ids in brackets):
+      new-game            [#btn-new-game]
+      resume-game         [#btn-resume-game]          (ships [hidden])
+      show-rules          [#btn-how-to-play, #btn-menu-rules]
+      rules-back          [#btn-rules-back]
+      home                [#btn-setup-back, #btn-menu-home, #btn-win-home]
+      add-player          [#btn-add-player]
+      remove-player       [rows in #player-list]
+      target-dec/target-inc         [#target-cards stepper]
+      mistakes-dec/mistakes-inc     [#field-mistake-limit stepper]
+      toggle-decade       [buttons in #decade-chips, data-decade="1980"]
+      toggle-genre        [buttons in #genre-chips,  data-genre="pop"]
+      chips-all           [#btn-decades-all, #btn-genres-all, data-target]
+      start-game          [#btn-start-game]
+      pass-continue       [#btn-pass-continue]
+      open-menu           [#btn-menu]
+      close-menu          [#btn-menu-close, menu scrim]
+      show-scoreboard     [#btn-menu-scoreboard]
+      close-scoreboard    [#btn-scoreboard-back]
+      end-game            [#btn-end-game]
+      toggle-audio        [#btn-play-song]
+      replay-audio        [#btn-replay]
+      show-streaming-links[#btn-show-links]
+      skip-card           [#btn-skip-card]
+      toggle-qr-alt       [#btn-qr-alt]
+      select-gap          [gap buttons, data-gap-index="0"]
+      buy-card            [#btn-buy-card]
+      toggle-identify     [#btn-claim-identify]
+      year-dec/year-inc   [#field-year-guess stepper]
+      open-challenge      [#btn-challenge]
+      close-challenge     [#btn-challenge-close, challenge scrim]
+      pick-challenger     [options in #challenge-players, data-player-id]
+      confirm-challenge   [#btn-challenge-confirm]
+      commit-placement    [#btn-place]
+      confirm-title       [#btn-confirm-title]        (aria-pressed toggle)
+      confirm-artist      [#btn-confirm-artist]       (aria-pressed toggle)
+      next-turn           [#btn-next-player]
+      play-again          [#btn-play-again]
+
+  TOGGLE BUTTONS - state lives in aria-pressed="true|false", CSS styles from it
+    #btn-play-song  #btn-claim-identify  #btn-qr-alt  #btn-confirm-title
+    #btn-confirm-artist  every .chip  every .gap  every .challenge-option
+
+  TEXT SLOTS (set .textContent)
+    home        - (none)
+    setup       - #player-count-note #target-cards-value #mistake-limit-value
+                  #eligible-count-value ; #deck-warning ships [hidden]
+    pass        - #pass-player-name #pass-turn-number #pass-progress
+    play        - #play-player-name #play-turn-number
+                  #play-progress-current #play-progress-target
+                  #btn-play-label #countdown-value #audio-status
+                  #year-guess-value #challenge-count (badge, ships [hidden])
+                  #btn-buy-card-reason (ships [hidden])
+    reveal      - #reveal-year #reveal-title-text #reveal-artist
+                  #verdict-banner (+ dataset.verdict, see below)
+                  #confirm-player-name
+    win         - #win-eyebrow #win-player-name #win-summary
+    challenge   - #challenge-player-name
+
+  CONTAINERS ui.js FILLS (all ship EMPTY - clone the matching <template>)
+    #player-list          <- #tpl-player-row
+    #timeline-strip       <- #tpl-timeline-gap / #tpl-timeline-card, alternating
+                             gap, card, gap, card, ... gap  (n cards -> n+1 gaps)
+    #challenge-timeline   <- same two templates (challenger's own timeline)
+    #token-awards         <- #tpl-award-item
+    #challenge-outcomes   <- #tpl-outcome-item
+    #scoreboard-list      <- #tpl-scoreboard-row (its [data-field="timeline"]
+                             <ol> takes #tpl-mini-card children)
+    #win-timeline         <- #tpl-mini-card
+    #challenge-players    <- #tpl-challenge-option
+    #qr-code              <- innerHTML = qrSvg(...) from qr.js
+    #streaming-links      <- <a> elements; ships [hidden]
+  Inside a cloned template, fill by [data-field="..."] and set the ids/values
+  noted on each template below. Templates are the ONLY source of row markup -
+  do not hand-write these rows in JS.
+
+  STATIC CONTENT ui.js MAY REBUILD
+    #decade-chips / #genre-chips ship with sensible defaults so the page is
+    usable with no JS work; if deck.js exports a different DECADES/GENRES set,
+    clear the container and rebuild from #tpl-chip.
+    #play-tokens ships 5 .token-pill <li>s; set each one's dataset.state to
+    'full' or 'empty' and update the <ul>'s aria-label.
+
+  FORM CONTROLS (read .value / .checked)
+    #setup-form is a <form> whose buttons are all type="button" - it never
+    submits, so no submit handler is required.
+    player names: inputs [data-role="player-name"] inside #player-list
+    mode:         radios name="mode" -> #mode-classic #mode-advanced
+                                        #mode-expert #mode-coop
+    playback:     <select id="playback-source">  (menu copy: #opt-playback-source)
+    settings:     #opt-skip-pass #opt-sound #opt-reduced-motion (checkboxes)
+    Steppers are buttons + an <output>; the current value is the <output>'s
+    textContent (#target-cards-value #mistake-limit-value #year-guess-value).
+
+  STATE ATTRIBUTES CSS REACTS TO
+    #verdict-banner[data-verdict] = 'correct' | 'wrong' | 'neutral'
+    #reveal-flip[data-flipped]    = 'true' | 'false'   (drives the 3D flip)
+    #win[data-outcome]            = 'win' | 'loss'     (co-op loss recolours)
+    .token-pill[data-state]       = 'full' | 'empty'
+    .award[data-delta]            = 'gain' | 'loss'
+    .outcome[data-result]         = 'correct' | 'wrong'
+    #countdown-ring style property --ring-progress = 1 -> 0 (fraction of the
+    30s preview remaining). Set with
+      ring.style.setProperty('--ring-progress', String(remaining / 30))
+
+  LIVE REGIONS (append text, never replace the element)
+    #live-status  role="status"  aria-live="polite"     token + turn changes
+    #live-alert   role="alert"   aria-live="assertive"  errors only
+    #verdict-banner and #audio-status are themselves role="status".
+
+  THINGS THAT MUST NEVER HAPPEN BEFORE THE REVEAL
+    Do not write the drawn card's year, title or artist into any node on the
+    play screen. #reveal-year / #reveal-title-text / #reveal-artist are the
+    only places that metadata is allowed to land.
+  ============================================================================
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#08060f">
+  <meta name="description" content="Timeline - a phone-based music party game. Hear a song, guess where it lands in your timeline of years. No accounts, no install, works offline.">
+  <meta name="color-scheme" content="dark">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Timeline">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
+  <title>Timeline - music party game</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="./app.css">
+  <script type="module" src="./ui.js"></script>
+</head>
+
+<body data-screen="home" data-mode="classic">
+
+<main class="app" id="app">
+
+  <!-- ================================================================ HOME -->
+  <section class="screen screen--home" id="home" aria-labelledby="home-title">
+    <div class="home__lockup">
+      <p class="home__kicker">A music party game</p>
+      <h1 class="home__title" id="home-title" tabindex="-1">
+        <span class="home__word">Time</span><span class="home__word home__word--alt">line</span>
+      </h1>
+      <p class="home__tagline">Hear the song. Guess the year. Beat your family.</p>
+    </div>
+
+    <div class="home__actions">
+      <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-new-game" data-action="new-game">
+        New game
+      </button>
+      <button type="button" class="btn btn--ghost btn--block" id="btn-resume-game" data-action="resume-game" hidden>
+        Resume game
+        <span class="btn__sub" id="btn-resume-detail">Pick up where you left off</span>
+      </button>
+      <button type="button" class="btn btn--quiet btn--block" id="btn-how-to-play" data-action="show-rules">
+        How to play
+      </button>
+    </div>
+
+    <p class="home__note">Works offline &middot; nothing leaves this phone &middot; only song previews need Wi-Fi</p>
+  </section>
+
+
+  <!-- =============================================================== SETUP -->
+  <section class="screen screen--scroll" id="setup" aria-labelledby="setup-title">
+    <header class="bar">
+      <button type="button" class="icon-btn" id="btn-setup-back" data-action="home" aria-label="Back to home">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" class="icon"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <h1 class="bar__title" id="setup-title" tabindex="-1">New game</h1>
+      <span class="bar__spacer" aria-hidden="true"></span>
+    </header>
+
+    <form class="setup" id="setup-form" novalidate>
+
+      <!-- players -->
+      <fieldset class="panel">
+        <legend class="panel__legend">Players</legend>
+        <p class="panel__hint">Two to eight. Names show up on the pass-the-phone screen.</p>
+        <ul class="player-list" id="player-list"></ul>
+        <button type="button" class="btn btn--ghost btn--block" id="btn-add-player" data-action="add-player">
+          <span class="btn__glyph" aria-hidden="true">+</span> Add player
+        </button>
+        <p class="panel__tally" id="player-count-note" role="status" aria-live="polite">4 players</p>
+      </fieldset>
+
+      <!-- target cards -->
+      <fieldset class="panel">
+        <legend class="panel__legend">Cards to win</legend>
+        <div class="stepper" role="group" aria-labelledby="target-cards-label">
+          <span class="stepper__label" id="target-cards-label">Timeline length</span>
+          <button type="button" class="stepper__btn" data-action="target-dec" aria-label="Fewer cards to win">&minus;</button>
+          <output class="stepper__value" id="target-cards-value" aria-live="polite">10</output>
+          <button type="button" class="stepper__btn" data-action="target-inc" aria-label="More cards to win">+</button>
+        </div>
+        <p class="panel__hint">5 is a quick round, 10 is the classic, 15 is a long night.</p>
+      </fieldset>
+
+      <!-- mode -->
+      <fieldset class="panel">
+        <legend class="panel__legend">Mode</legend>
+        <ul class="radio-list">
+          <li>
+            <label class="radio-card" for="mode-classic">
+              <input type="radio" name="mode" id="mode-classic" value="classic" checked>
+              <span class="radio-card__box" aria-hidden="true"></span>
+              <span class="radio-card__body">
+                <span class="radio-card__title">Classic</span>
+                <span class="radio-card__hint">Put the song in the right spot. That is the whole game.</span>
+              </span>
+            </label>
+          </li>
+          <li>
+            <label class="radio-card" for="mode-advanced">
+              <input type="radio" name="mode" id="mode-advanced" value="advanced">
+              <span class="radio-card__box" aria-hidden="true"></span>
+              <span class="radio-card__body">
+                <span class="radio-card__title">Advanced</span>
+                <span class="radio-card__hint">The spot only counts if you also name the title and the artist.</span>
+              </span>
+            </label>
+          </li>
+          <li>
+            <label class="radio-card" for="mode-expert">
+              <input type="radio" name="mode" id="mode-expert" value="expert">
+              <span class="radio-card__box" aria-hidden="true"></span>
+              <span class="radio-card__body">
+                <span class="radio-card__title">Expert</span>
+                <span class="radio-card__hint">Advanced, plus you must call the exact release year.</span>
+              </span>
+            </label>
+          </li>
+          <li>
+            <label class="radio-card" for="mode-coop">
+              <input type="radio" name="mode" id="mode-coop" value="coop">
+              <span class="radio-card__box" aria-hidden="true"></span>
+              <span class="radio-card__body">
+                <span class="radio-card__title">Co-op</span>
+                <span class="radio-card__hint">One shared timeline, shared tokens. Too many misses and everyone loses.</span>
+              </span>
+            </label>
+          </li>
+        </ul>
+      </fieldset>
+
+      <!-- co-op only -->
+      <fieldset class="panel" id="field-mistake-limit">
+        <legend class="panel__legend">Mistakes allowed</legend>
+        <div class="stepper" role="group" aria-labelledby="mistake-limit-label">
+          <span class="stepper__label" id="mistake-limit-label">Lose after</span>
+          <button type="button" class="stepper__btn" data-action="mistakes-dec" aria-label="Fewer mistakes allowed">&minus;</button>
+          <output class="stepper__value" id="mistake-limit-value" aria-live="polite">3</output>
+          <button type="button" class="stepper__btn" data-action="mistakes-inc" aria-label="More mistakes allowed">+</button>
+        </div>
+        <p class="panel__hint">Co-op only. Every wrong placement burns one.</p>
+      </fieldset>
+
+      <!-- deck -->
+      <fieldset class="panel">
+        <legend class="panel__legend">The deck</legend>
+
+        <div class="chipset">
+          <div class="chipset__head">
+            <h3 class="chipset__title" id="decades-label">Decades</h3>
+            <button type="button" class="linkbtn" id="btn-decades-all" data-action="chips-all" data-target="decade">All</button>
+          </div>
+          <div class="chips" id="decade-chips" role="group" aria-labelledby="decades-label">
+            <button type="button" class="chip" data-action="toggle-decade" data-decade="1950" aria-pressed="true">50s</button>
+            <button type="button" class="chip" data-action="toggle-decade" data-decade="1960" aria-pressed="true">60s</button>
+            <button type="button" class="chip" data-action="toggle-decade" data-decade="1970" aria-pressed="true">70s</button>
+            <button type="button" class="chip" data-action="toggle-decade" data-decade="1980" aria-pressed="true">80s</button>
+            <button type="button" class="chip" data-action="toggle-decade" data-decade="1990" aria-pressed="true">90s</button>
+            <button type="button" class="chip" data-action="toggle-decade" data-decade="2000" aria-pressed="true">00s</button>
+            <button type="button" class="chip" data-action="toggle-decade" data-decade="2010" aria-pressed="true">10s</button>
+            <button type="button" class="chip" data-action="toggle-decade" data-decade="2020" aria-pressed="true">20s</button>
+          </div>
+        </div>
+
+        <div class="chipset">
+          <div class="chipset__head">
+            <h3 class="chipset__title" id="genres-label">Genres</h3>
+            <button type="button" class="linkbtn" id="btn-genres-all" data-action="chips-all" data-target="genre">All</button>
+          </div>
+          <div class="chips" id="genre-chips" role="group" aria-labelledby="genres-label">
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="pop" aria-pressed="true">Pop</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="rock" aria-pressed="true">Rock</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="hiphop" aria-pressed="true">Hip-hop</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="rnb" aria-pressed="true">R&amp;B</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="soul" aria-pressed="true">Soul</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="country" aria-pressed="true">Country</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="dance" aria-pressed="true">Dance</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="latin" aria-pressed="true">Latin</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="metal" aria-pressed="true">Metal</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="folk" aria-pressed="true">Folk</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="jazz" aria-pressed="true">Jazz</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="reggae" aria-pressed="true">Reggae</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="indie" aria-pressed="true">Indie</button>
+            <button type="button" class="chip" data-action="toggle-genre" data-genre="disco" aria-pressed="true">Disco</button>
+          </div>
+        </div>
+
+        <p class="tally" id="eligible-count" role="status" aria-live="polite">
+          <strong class="tally__num" id="eligible-count-value">&mdash;</strong>
+          <span class="tally__label">songs match these filters</span>
+        </p>
+        <p class="notice notice--warn" id="deck-warning" hidden>
+          That is a thin deck for this many players. Add decades or genres.
+        </p>
+      </fieldset>
+
+      <!-- playback -->
+      <fieldset class="panel">
+        <legend class="panel__legend">Playback</legend>
+        <div class="field">
+          <label class="field__label" for="playback-source">Play songs with</label>
+          <div class="select">
+            <select id="playback-source" name="playback-source">
+              <option value="preview" selected>In-app preview (30 seconds)</option>
+              <option value="spotify">Spotify</option>
+              <option value="apple">Apple Music</option>
+              <option value="youtube">YouTube</option>
+            </select>
+            <svg viewBox="0 0 24 24" class="select__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <p class="field__hint">Previews come from Apple's public search. The other options open links on the scanning phone and will reveal the title.</p>
+        </div>
+      </fieldset>
+
+      <div class="setup__go">
+        <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-start-game" data-action="start-game">
+          Shuffle &amp; start
+        </button>
+      </div>
+    </form>
+  </section>
+
+
+  <!-- ================================================================ PASS -->
+  <section class="screen screen--pass" id="pass" aria-labelledby="pass-title">
+    <div class="pass__head">
+      <h1 class="pass__lead" id="pass-title" tabindex="-1">Pass the phone to</h1>
+      <p class="pass__name" id="pass-player-name">Player 1</p>
+    </div>
+
+    <button type="button" class="pass__tap" id="btn-pass-continue" data-action="pass-continue">
+      <span class="pass__tap-ring" aria-hidden="true"></span>
+      <span class="pass__tap-label">Tap to start the turn</span>
+      <span class="pass__tap-sub">Everyone else: no peeking</span>
+    </button>
+
+    <p class="pass__meta">
+      Turn <span id="pass-turn-number">1</span> &middot; <span id="pass-progress">1 / 10 cards</span>
+    </p>
+  </section>
+
+
+  <!-- ================================================================ PLAY -->
+  <section class="screen screen--play" id="play" aria-labelledby="play-title">
+
+    <header class="topbar">
+      <div class="topbar__row">
+        <div class="topbar__id">
+          <p class="topbar__eyebrow">Turn <span id="play-turn-number">1</span></p>
+          <h1 class="topbar__name" id="play-title" tabindex="-1"><span id="play-player-name">Player 1</span></h1>
+        </div>
+        <button type="button" class="icon-btn" id="btn-menu" data-action="open-menu"
+                aria-haspopup="dialog" aria-expanded="false" aria-controls="menu-sheet" aria-label="Game menu">
+          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false">
+            <path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="topbar__row topbar__row--meta">
+        <ul class="tokens" id="play-tokens" aria-label="Tokens: 2 of 5">
+          <li class="token-pill" data-state="full"></li>
+          <li class="token-pill" data-state="full"></li>
+          <li class="token-pill" data-state="empty"></li>
+          <li class="token-pill" data-state="empty"></li>
+          <li class="token-pill" data-state="empty"></li>
+        </ul>
+        <p class="progress">
+          <span class="progress__num" id="play-progress-current">1</span><span class="progress__slash" aria-hidden="true">/</span><span class="progress__num" id="play-progress-target">10</span>
+          <span class="progress__label">cards</span>
+        </p>
+      </div>
+    </header>
+
+    <div class="play__scroll">
+
+      <!-- the face-down card + player -->
+      <div class="mystery">
+        <div class="mystery__glyph" aria-hidden="true">?</div>
+        <p class="mystery__label">Mystery song</p>
+
+        <div class="dial">
+          <svg class="ring" id="countdown-ring" viewBox="0 0 120 120" role="img" aria-labelledby="countdown-ring-title">
+            <title id="countdown-ring-title">Preview countdown</title>
+            <circle class="ring__track" cx="60" cy="60" r="52"></circle>
+            <circle class="ring__value" cx="60" cy="60" r="52"></circle>
+          </svg>
+          <button type="button" class="dial__btn" id="btn-play-song" data-action="toggle-audio" aria-pressed="false">
+            <svg class="dial__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path class="icon-shape-play" d="M8.5 5.6v12.8L19 12z" fill="currentColor"/>
+              <g class="icon-shape-pause" fill="currentColor">
+                <rect x="7.4" y="5.6" width="3.6" height="12.8" rx="1.3"/>
+                <rect x="13" y="5.6" width="3.6" height="12.8" rx="1.3"/>
+              </g>
+            </svg>
+            <span class="dial__label" id="btn-play-label">Play song</span>
+          </button>
+        </div>
+
+        <div class="mystery__row">
+          <p class="mystery__count"><span id="countdown-value">30</span>s</p>
+          <button type="button" class="btn btn--quiet btn--sm" id="btn-replay" data-action="replay-audio">
+            <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false">
+              <path d="M4 12a8 8 0 1 0 2.6-5.9M4 4.5V10h5.5" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Replay
+          </button>
+        </div>
+
+        <p class="mystery__status" id="audio-status" role="status" aria-live="polite">Tap play when everyone is listening.</p>
+
+        <div class="fallback" id="audio-fallback" hidden>
+          <button type="button" class="btn btn--quiet btn--sm" id="btn-show-links" data-action="show-streaming-links">
+            Show streaming links
+          </button>
+          <p class="fallback__warn">Opening a link reveals the song title.</p>
+          <div class="fallback__links" id="streaming-links" hidden></div>
+          <button type="button" class="btn btn--quiet btn--sm" id="btn-skip-card" data-action="skip-card">
+            Skip this card
+          </button>
+        </div>
+      </div>
+
+      <!-- QR: the phone becomes the card -->
+      <section class="qr" id="qr-block" aria-labelledby="qr-caption">
+        <div class="qr__frame">
+          <div class="qr__code" id="qr-code" role="img" aria-label="QR code that opens this song on another phone"></div>
+        </div>
+        <div class="qr__body">
+          <p class="qr__caption" id="qr-caption">Scan to play it on your own phone</p>
+          <p class="qr__sub">The scanned page shows a play button and nothing else. No year, no title.</p>
+          <p class="notice notice--info" id="qr-file-note" hidden>
+            This page was opened from a file, so the code cannot reach other phones.
+            Run <code>node scripts/music-server.mjs</code> on a computer and use the Wi-Fi address it prints.
+          </p>
+          <button type="button" class="linkbtn" id="btn-qr-alt" data-action="toggle-qr-alt" aria-pressed="false" hidden>
+            Encode a YouTube search instead
+          </button>
+          <p class="notice notice--warn" id="qr-alt-warn" hidden>
+            A YouTube link puts the song title on the scanning phone.
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <!-- the timeline -->
+    <div class="timeline">
+      <div class="timeline__head">
+        <h2 class="timeline__title" id="timeline-heading">Your timeline</h2>
+        <p class="timeline__hint" id="timeline-hint">Swipe, then tap a gap</p>
+      </div>
+      <ol class="strip" id="timeline-strip" aria-labelledby="timeline-heading"></ol>
+    </div>
+
+    <!-- actions -->
+    <div class="actions" id="play-actions">
+      <button type="button" class="btn btn--ghost" id="btn-buy-card" data-action="buy-card" aria-describedby="btn-buy-card-reason">
+        Buy a card
+        <span class="btn__sub">3 tokens</span>
+      </button>
+      <button type="button" class="btn btn--ghost" id="btn-claim-identify" data-action="toggle-identify" aria-pressed="false">
+        I can name it
+        <span class="btn__sub">Title + artist</span>
+      </button>
+
+      <p class="actions__reason" id="btn-buy-card-reason" hidden>Not enough tokens</p>
+
+      <div class="stepper stepper--inline" id="field-year-guess" role="group" aria-labelledby="year-guess-label">
+        <span class="stepper__label" id="year-guess-label">Year guess</span>
+        <button type="button" class="stepper__btn" data-action="year-dec" aria-label="Earlier year">&minus;</button>
+        <output class="stepper__value stepper__value--year" id="year-guess-value">1985</output>
+        <button type="button" class="stepper__btn" data-action="year-inc" aria-label="Later year">+</button>
+      </div>
+
+      <button type="button" class="btn btn--ghost" id="btn-challenge" data-action="open-challenge"
+              aria-haspopup="dialog" aria-controls="challenge-sheet">
+        Challenge
+        <span class="badge" id="challenge-count" hidden>0</span>
+      </button>
+      <button type="button" class="btn btn--primary" id="btn-place" data-action="commit-placement" disabled>
+        Place here
+      </button>
+    </div>
+  </section>
+
+
+  <!-- ============================================================== REVEAL -->
+  <section class="screen screen--scroll screen--reveal" id="reveal" aria-labelledby="reveal-title">
+    <h1 class="reveal__heading" id="reveal-title" tabindex="-1">The reveal</h1>
+
+    <div class="flip" id="reveal-flip" data-flipped="false">
+      <div class="flip__inner">
+        <div class="flip__face flip__face--front">
+          <span class="flip__glyph" aria-hidden="true">?</span>
+        </div>
+        <div class="flip__face flip__face--back">
+          <div class="reveal__art">
+            <img class="reveal__art-img" id="reveal-artwork" alt="" hidden>
+            <span class="reveal__art-empty" id="reveal-art-placeholder" aria-hidden="true">&#9834;</span>
+          </div>
+          <p class="reveal__year" id="reveal-year">1975</p>
+          <p class="reveal__song" id="reveal-title-text">Song title</p>
+          <p class="reveal__artist" id="reveal-artist">Artist</p>
+        </div>
+      </div>
+    </div>
+
+    <p class="verdict" id="verdict-banner" data-verdict="neutral" role="status" aria-live="polite">
+      Waiting for the reveal
+    </p>
+
+    <section class="panel panel--tight" id="confirm-panel" hidden>
+      <h2 class="panel__legend" id="confirm-heading">Did <span id="confirm-player-name">Player 1</span> name it?</h2>
+      <p class="panel__hint">Everyone decides together. Tap what they got right.</p>
+      <div class="confirm__row">
+        <button type="button" class="btn btn--ghost" id="btn-confirm-title" data-action="confirm-title" aria-pressed="false">Title</button>
+        <button type="button" class="btn btn--ghost" id="btn-confirm-artist" data-action="confirm-artist" aria-pressed="false">Artist</button>
+      </div>
+    </section>
+
+    <section class="panel panel--tight" aria-labelledby="awards-heading">
+      <h2 class="panel__legend" id="awards-heading">Tokens</h2>
+      <ul class="awards" id="token-awards" aria-live="polite"></ul>
+    </section>
+
+    <section class="panel panel--tight" aria-labelledby="outcomes-heading">
+      <h2 class="panel__legend" id="outcomes-heading">Challenges</h2>
+      <ul class="outcomes" id="challenge-outcomes" aria-live="polite"></ul>
+    </section>
+
+    <div class="screen__foot">
+      <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-next-player" data-action="next-turn">
+        Next player
+      </button>
+    </div>
+  </section>
+
+
+  <!-- ========================================================== SCOREBOARD -->
+  <section class="screen screen--scroll" id="scoreboard" aria-labelledby="scoreboard-title">
+    <header class="bar">
+      <span class="bar__spacer" aria-hidden="true"></span>
+      <h1 class="bar__title" id="scoreboard-title" tabindex="-1">Scoreboard</h1>
+      <span class="bar__spacer" aria-hidden="true"></span>
+    </header>
+    <ol class="score-list" id="scoreboard-list"></ol>
+    <div class="screen__foot">
+      <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-scoreboard-back" data-action="close-scoreboard">
+        Back to the game
+      </button>
+    </div>
+  </section>
+
+
+  <!-- ================================================================= WIN -->
+  <section class="screen screen--win" id="win" data-outcome="win" aria-labelledby="win-title">
+    <canvas class="confetti" id="confetti" aria-hidden="true"></canvas>
+    <div class="win__body">
+      <p class="win__eyebrow" id="win-eyebrow">Winner</p>
+      <h1 class="win__name" id="win-title" tabindex="-1"><span id="win-player-name">Player 1</span></h1>
+      <p class="win__summary" id="win-summary">10 cards, 3 tokens left</p>
+      <ol class="mini-timeline mini-timeline--win" id="win-timeline"></ol>
+    </div>
+    <div class="win__actions">
+      <button type="button" class="btn btn--primary btn--block btn--xl" id="btn-play-again" data-action="play-again">Play again</button>
+      <button type="button" class="btn btn--quiet btn--block" id="btn-win-home" data-action="home">Home</button>
+    </div>
+  </section>
+
+
+  <!-- =============================================================== RULES -->
+  <section class="screen screen--scroll" id="rules" aria-labelledby="rules-title">
+    <header class="bar">
+      <button type="button" class="icon-btn" id="btn-rules-back" data-action="rules-back" aria-label="Back">
+        <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <h1 class="bar__title" id="rules-title" tabindex="-1">How to play</h1>
+      <span class="bar__spacer" aria-hidden="true"></span>
+    </header>
+
+    <div class="prose">
+      <p class="prose__lead">
+        Be the first to build a timeline of correctly ordered songs. You never see a year
+        until you have committed to a spot.
+      </p>
+
+      <h2>Setting up</h2>
+      <ul>
+        <li>Two to eight players. Enter everyone's name on the setup screen.</li>
+        <li>Everyone starts with <strong>one song card face up</strong> in their timeline, year showing, and <strong>2 tokens</strong>.</li>
+        <li>The rest of the songs become a shared face-down deck.</li>
+        <li>Choose a target of 5, 10 or 15 cards, a mode, and which decades and genres are in play.</li>
+      </ul>
+
+      <h2>A turn</h2>
+      <ol>
+        <li>The phone is passed to the active player. Everyone else looks away.</li>
+        <li>They draw the top card and play the 30-second preview. The year is hidden. Anyone can scan the QR code to listen on their own phone &mdash; that page never shows the year either.</li>
+        <li>They pick a gap in their own timeline: before the earliest card, after the latest, or between any two. Tap the gap, then tap <strong>Place here</strong>.</li>
+        <li>The card flips. Right spot &rarr; it joins their timeline. Wrong spot &rarr; it is discarded.</li>
+        <li>Play passes to the left.</li>
+      </ol>
+      <p class="prose__aside">
+        Ties are kind: if the song came out in the same year as a card you already hold, either
+        side of that card counts as correct.
+      </p>
+
+      <h2>Tokens</h2>
+      <p>You start with 2 and can never hold more than 5. There are three things to spend them on.</p>
+      <h3>Challenge &mdash; 1 token</h3>
+      <ul>
+        <li>Before the reveal, any player other than the active one may challenge.</li>
+        <li>You spend a token and nominate a gap in <strong>your own</strong> timeline.</li>
+        <li>At the reveal the active player is resolved first. If they were wrong and you were right, the card goes to you.</li>
+        <li>If several challengers were right, the card goes to the one closest to the active player's left.</li>
+        <li>A wrong challenge just costs the token. Challenging a correct placement is allowed &mdash; it also just costs the token.</li>
+        <li>One challenge per player per turn.</li>
+      </ul>
+      <h3>Name that song &mdash; earn 1 token</h3>
+      <ul>
+        <li>During your turn, tap <strong>I can name it</strong> if you can give the title <em>and</em> the artist.</li>
+        <li>At the reveal the group votes with the Title and Artist buttons.</li>
+        <li>Get both and you gain a token, whether or not the placement was right.</li>
+      </ul>
+      <h3>Buy a card &mdash; 3 tokens</h3>
+      <ul>
+        <li>Only at the start of your turn, before you have heard the song.</li>
+        <li>The top card is dropped into the correct spot for you. No guessing, no risk.</li>
+        <li>Your turn then ends.</li>
+      </ul>
+
+      <h2>Winning</h2>
+      <ul>
+        <li>First player to reach the target number of cards wins immediately.</li>
+        <li>If the deck runs out first, the longest timeline wins.</li>
+        <li>Still tied? Most tokens wins. Still tied after that, the win is shared.</li>
+      </ul>
+
+      <h2>The four modes</h2>
+      <dl class="modes">
+        <dt>Classic</dt>
+        <dd>Placement only. The friendliest version and the right one for a mixed-age room.</dd>
+        <dt>Advanced</dt>
+        <dd>The placement only counts if you also name the title and the artist. The group confirms both at the reveal.</dd>
+        <dt>Expert</dt>
+        <dd>Advanced, plus you must call the exact release year with the year stepper before you place. Exact match or nothing.</dd>
+        <dd class="modes__note">Tokens still work exactly the same in every mode.</dd>
+        <dt>Co-op</dt>
+        <dd>One shared timeline and one shared token pool. Everyone still takes turns placing, but you are all on the same side. Reach the target together and you win; hit the mistake limit (3 by default) and the game is over for everybody.</dd>
+      </dl>
+
+      <h2>House notes</h2>
+      <ul>
+        <li>Song previews need internet. Everything else works offline.</li>
+        <li>The pass-the-phone screen exists so nobody sees the previous reveal. You can switch it off in the menu.</li>
+        <li>If a preview will not load, skip the card. No penalty.</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+
+<!-- ========================================================== MENU SHEET -->
+<div class="sheet-layer" id="menu-sheet" data-open="false">
+  <div class="sheet__scrim" data-action="close-menu" aria-hidden="true"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="menu-sheet-title">
+    <div class="sheet__grip" aria-hidden="true"></div>
+    <h2 class="sheet__title" id="menu-sheet-title">Menu</h2>
+
+    <ul class="menu-list">
+      <li><button type="button" class="menu-item" id="btn-menu-scoreboard" data-action="show-scoreboard">Scoreboard</button></li>
+      <li><button type="button" class="menu-item" id="btn-menu-rules" data-action="show-rules">How to play</button></li>
+    </ul>
+
+    <h3 class="sheet__sub">Settings</h3>
+    <ul class="switch-list">
+      <li>
+        <label class="switch" for="opt-skip-pass">
+          <input type="checkbox" id="opt-skip-pass">
+          <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+          <span class="switch__text">Skip pass-the-phone<span class="switch__hint">For single-device speed runs</span></span>
+        </label>
+      </li>
+      <li>
+        <label class="switch" for="opt-sound">
+          <input type="checkbox" id="opt-sound" checked>
+          <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+          <span class="switch__text">Sound<span class="switch__hint">Song previews and effects</span></span>
+        </label>
+      </li>
+      <li>
+        <label class="switch" for="opt-reduced-motion">
+          <input type="checkbox" id="opt-reduced-motion">
+          <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+          <span class="switch__text">Reduce motion<span class="switch__hint">Calms the background and the card flip</span></span>
+        </label>
+      </li>
+    </ul>
+
+    <div class="field">
+      <label class="field__label" for="opt-playback-source">Playback source</label>
+      <div class="select">
+        <select id="opt-playback-source">
+          <option value="preview" selected>In-app preview (30 seconds)</option>
+          <option value="spotify">Spotify</option>
+          <option value="apple">Apple Music</option>
+          <option value="youtube">YouTube</option>
+        </select>
+        <svg viewBox="0 0 24 24" class="select__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+
+    <div class="sheet__foot">
+      <button type="button" class="btn btn--danger btn--block" id="btn-end-game" data-action="end-game">End game</button>
+      <button type="button" class="btn btn--quiet btn--block" id="btn-menu-home" data-action="home">Home</button>
+      <button type="button" class="btn btn--ghost btn--block" id="btn-menu-close" data-action="close-menu">Close</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ===================================================== CHALLENGE SHEET -->
+<div class="sheet-layer" id="challenge-sheet" data-open="false">
+  <div class="sheet__scrim" data-action="close-challenge" aria-hidden="true"></div>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="challenge-sheet-title">
+    <div class="sheet__grip" aria-hidden="true"></div>
+    <h2 class="sheet__title" id="challenge-sheet-title">Challenge</h2>
+    <p class="sheet__lead">
+      Spend 1 token to bet the card belongs in <strong>your</strong> timeline. You only win it if
+      the active player gets it wrong.
+    </p>
+
+    <h3 class="sheet__sub" id="challenge-players-label">Who is challenging?</h3>
+    <ol class="challenge-players" id="challenge-players" aria-labelledby="challenge-players-label"></ol>
+
+    <div class="challenge__step" id="challenge-step-gap" hidden>
+      <h3 class="sheet__sub">Where in <span id="challenge-player-name">their</span> timeline?</h3>
+      <ol class="strip strip--sheet" id="challenge-timeline" aria-label="Challenger timeline"></ol>
+    </div>
+
+    <div class="sheet__foot">
+      <button type="button" class="btn btn--primary btn--block" id="btn-challenge-confirm" data-action="confirm-challenge" disabled>
+        Lock in challenge
+      </button>
+      <button type="button" class="btn btn--quiet btn--block" id="btn-challenge-close" data-action="close-challenge">Close</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ============================================================ TEMPLATES -->
+<!-- Every dynamic row in the app comes from one of these. Clone, fill the
+     [data-field] nodes, set the noted attributes, append. -->
+
+<!-- #player-list row. Set: li[data-player-index], input id + name (unique),
+     label[for] to match, and the remove button's aria-label. -->
+<template id="tpl-player-row">
+  <li class="player-row" data-player-index="0">
+    <span class="player-row__num" aria-hidden="true">1</span>
+    <label class="sr-only" for="player-name-0" data-field="label">Player 1 name</label>
+    <input class="player-row__input" id="player-name-0" name="player-name-0" type="text"
+           value="Player 1" maxlength="16" autocomplete="off" autocapitalize="words"
+           spellcheck="false" enterkeyhint="done" data-role="player-name" placeholder="Name">
+    <button type="button" class="icon-btn icon-btn--sm" data-action="remove-player" aria-label="Remove player 1">
+      <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+    </button>
+  </li>
+</template>
+
+<!-- A placed card in a timeline strip. Set li[data-card-id]. -->
+<template id="tpl-timeline-card">
+  <li class="tl-card" data-card-id="">
+    <p class="tl-card__year" data-field="year">1975</p>
+    <p class="tl-card__title" data-field="title">Song title</p>
+    <p class="tl-card__artist" data-field="artist">Artist</p>
+  </li>
+</template>
+
+<!-- A tappable gap. Set button[data-gap-index] and the sr-only [data-field="label"]
+     to something like "Place before 1975". aria-pressed carries selection. -->
+<template id="tpl-timeline-gap">
+  <li class="tl-gap">
+    <button type="button" class="gap" data-action="select-gap" data-gap-index="0" aria-pressed="false">
+      <span class="gap__mark" aria-hidden="true">+</span>
+      <span class="sr-only" data-field="label">Place here</span>
+    </button>
+  </li>
+</template>
+
+<!-- Filter chip, if ui.js rebuilds #decade-chips / #genre-chips.
+     Set data-action + data-decade|data-genre + aria-pressed + label text. -->
+<template id="tpl-chip">
+  <button type="button" class="chip" data-action="toggle-genre" aria-pressed="true" data-field="label">Pop</button>
+</template>
+
+<!-- Reveal: one token change. Set li[data-delta] = "gain" | "loss". -->
+<template id="tpl-award-item">
+  <li class="award" data-delta="gain">
+    <span class="award__who" data-field="who">Player 1</span>
+    <span class="award__what" data-field="what">Named the song</span>
+    <span class="award__delta" data-field="delta">+1</span>
+  </li>
+</template>
+
+<!-- Reveal: one challenge result. Set li[data-result] = "correct" | "wrong". -->
+<template id="tpl-outcome-item">
+  <li class="outcome" data-result="wrong">
+    <span class="outcome__who" data-field="who">Player 2</span>
+    <span class="outcome__what" data-field="what">Guessed before 1981 &mdash; wrong, token spent</span>
+  </li>
+</template>
+
+<!-- Scoreboard row. Set li[data-player-id]; fill the [data-field="timeline"]
+     <ol> with #tpl-mini-card clones and [data-field="tokens"] with token pills. -->
+<template id="tpl-scoreboard-row">
+  <li class="score-row" data-player-id="">
+    <div class="score-row__head">
+      <p class="score-row__name" data-field="name">Player 1</p>
+      <ul class="tokens tokens--sm" data-field="tokens" aria-label="Tokens"></ul>
+      <p class="score-row__togo"><span data-field="togo">4</span> to go</p>
+    </div>
+    <ol class="mini-timeline" data-field="timeline"></ol>
+  </li>
+</template>
+
+<!-- One year chip inside a compact timeline. -->
+<template id="tpl-mini-card">
+  <li class="mini-card" data-card-id="">
+    <span class="mini-card__year" data-field="year">1975</span>
+    <span class="sr-only" data-field="label">Song title by Artist</span>
+  </li>
+</template>
+
+<!-- Challenge sheet: one selectable player. Set button[data-player-id]. -->
+<template id="tpl-challenge-option">
+  <li>
+    <button type="button" class="challenge-option" data-action="pick-challenger" data-player-id="" aria-pressed="false">
+      <span class="challenge-option__name" data-field="name">Player 2</span>
+      <span class="challenge-option__tokens" data-field="tokens">2 tokens</span>
+    </button>
+  </li>
+</template>
+
+<!-- One token pill, for the scoreboard rows. data-state = "full" | "empty". -->
+<template id="tpl-token-pill">
+  <li class="token-pill" data-state="full"></li>
+</template>
+
+
+<!-- ========================================================= LIVE REGIONS -->
+<p class="sr-only" id="live-status" role="status" aria-live="polite"></p>
+<p class="sr-only" id="live-alert" role="alert" aria-live="assertive"></p>
+
+</body>
+</html>
