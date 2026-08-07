@@ -196,25 +196,33 @@ const MAX_PLAYERS = 8;
 /**
  * One accent per seat, hand-picked rather than generated.
  *
- * Why hand-picked: a hashed hue lands on mud, on the token gold, or on the
+ * Why hand-picked: a hashed hue lands on mud, on the correct green or on the
  * verdict red often enough to matter, and "whose turn is it" is the one question
- * this app has to answer at a glance across a dim room. These eight are spread
- * around the wheel, every one of them clears 7:1 against the near-black
- * background, and none of them is the token gold (#ffc247), the correct green
- * (#3ce6a0) or the wrong red (#ff5a76) - those three keep meaning what they
- * mean. Neighbouring seats are deliberately far apart in hue, because the people
- * most likely to be compared are the ones sitting next to each other.
+ * this app has to answer at a glance across a room. These eight are spread
+ * around the wheel, none of them is the raspberry accent (#d6336c), the correct
+ * green (#2f9e44) or the wrong red (#e03131) - those three keep meaning what
+ * they mean - and neighbouring seats are deliberately far apart in hue, because
+ * the people most likely to be compared are the ones sitting next to each other.
+ *
+ * These are the "record-sleeve pop" crayon hues, chosen against the design's
+ * paper ground (#fff8e7); the previous set was picked for a near-black
+ * background and turned to pastel mush on paper.
+ *
+ * NOTE FOR ANYONE DRAWING TEXT ON THESE: there is no single label colour that
+ * works on all eight. White on the lime is 2.4:1 and unreadable; ink on the
+ * violet is 3.0:1. The UI picks per seat by measured contrast - see `seatInk`
+ * in ui.js - which puts every seat at 4.2:1 or better. Do not hardcode white.
  * @type {readonly string[]}
  */
 export const SEAT_COLORS = Object.freeze([
-  '#a97cff', // violet
-  '#45e0a8', // jade
-  '#ff6bb5', // pink
-  '#4fc3ff', // sky
-  '#ffb03a', // amber
-  '#c6ee5a', // lime
-  '#ff7a5c', // coral
-  '#8b9bff', // periwinkle
+  '#0c8599', // teal
+  '#f08c00', // amber
+  '#7048e8', // violet
+  '#1c7ed6', // blue
+  '#e8590c', // orange
+  '#74b816', // lime
+  '#a87b4f', // tan
+  '#15aabf', // cyan
 ]);
 
 /**
