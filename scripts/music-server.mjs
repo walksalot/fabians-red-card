@@ -1,10 +1,10 @@
 // Zero-dependency LAN server for the Music Timeline game (public/music/).
 //
 // Why this exists: the game is meant to be played by a family sitting around one
-// table with a phone each. Opening index.html from file:// only ever works on the
-// device it lives on, and `npm run dev` boots the whole league app (database,
-// session cookies) just to hand out four static files. This serves those files
-// and nothing else, over the wifi everyone is already on, in one command.
+// table with a phone each. Opening index.html from file:// does not work at all -
+// browsers refuse ES module imports off disk - and `npm run dev` boots the whole
+// league app (database, session cookies) just to hand out four static files. This
+// serves those files and nothing else, over the wifi everyone is already on.
 //
 //   node scripts/music-server.mjs [--port 4173]      (or PORT=4173, or -p 4173)
 //

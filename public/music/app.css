@@ -39,12 +39,17 @@
 
   /* Secondary ink. Six stops, all the same hue, because a party game read at
      arm's length needs a real hierarchy and tinting is cheaper than a second
-     colour. .45 meta / .5 labels / .55-.65 body / .85 reading text. */
-  --ink-45:       rgba(36, 28, 21, 0.45);
-  --ink-50:       rgba(36, 28, 21, 0.5);
-  --ink-55:       rgba(36, 28, 21, 0.55);
-  --ink-60:       rgba(36, 28, 21, 0.6);
-  --ink-65:       rgba(36, 28, 21, 0.65);
+     colour. The NAMES keep the design's original stops (meta / labels / body /
+     reading text); the VALUES are pushed up because every one of these tiers
+     is used on 10.5-15px text, where WCAG AA wants 4.5:1 - ink over the butter
+     paper only crosses that line at about alpha .62 (.45 composited to 2.8:1,
+     with "skip this card" and the audio status among the casualties). The
+     ladder stays a ladder, just starting where AA starts. */
+  --ink-45:       rgba(36, 28, 21, 0.63);
+  --ink-50:       rgba(36, 28, 21, 0.65);
+  --ink-55:       rgba(36, 28, 21, 0.67);
+  --ink-60:       rgba(36, 28, 21, 0.7);
+  --ink-65:       rgba(36, 28, 21, 0.73);
   --ink-85:       rgba(36, 28, 21, 0.85);
   --ink-line:     rgba(36, 28, 21, 0.16);
   --ink-line-2:   rgba(36, 28, 21, 0.35);
@@ -198,7 +203,14 @@ a:hover { color: var(--accent-link); }
   background: var(--paper);
   border-left: 1.5px solid var(--ink-line);
   border-right: 1.5px solid var(--ink-line);
+  /* clip, not hidden: hidden makes .app a scroll container, and since .app
+     never actually scrolls (the page does), every position:sticky inside it -
+     the Shuffle & start bar, the play screen's Place-here foot - silently
+     never pinned. clip clips the decorations the same way without becoming
+     anybody's scrollport. hidden stays first as the fallback for engines
+     without clip (they lose the pinning, not the layout). */
   overflow: hidden;
+  overflow: clip;
 }
 
 /* Paper grain. Inline SVG turbulence at 6% alpha - no request, no asset, and
@@ -608,6 +620,9 @@ body[data-screen='rules']      #rules { display: flex; }
   min-width: 0;
 }
 .field__input::placeholder { color: var(--ink-45); }
+/* The live reading of the Venmo field: the handle the winner screen will pay,
+   or the warning that there is none. */
+.field__hint[data-tone='bad'] { color: var(--bad-text); font-weight: 600; }
 
 .select { position: relative; }
 .select select {
@@ -844,7 +859,10 @@ button.avatar { cursor: pointer; }
   gap: 10px;
   overflow-x: auto;
   scrollbar-width: none;
-  padding: 2px var(--gutter) 4px;
+  /* 10px on top, not 2: overflow-x:auto makes overflow-y clip too, and the
+     crown pokes 8px above the leader's avatar (top:-8px) - anything less
+     slices it to an orange dash. */
+  padding: 10px var(--gutter) 4px;
 }
 .roster__seats::-webkit-scrollbar { width: 0; height: 0; }
 .roster__seat { flex: none; }
@@ -1018,7 +1036,9 @@ body[data-mode='coop'] .roster__team { display: flex; }
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--accent);
+  /* The text accent, not the raw accent: #d6336c on the paper is 4.36:1,
+     just under AA for 11px text; #c2255c clears it with room. */
+  color: var(--accent-text);
   animation: rise 0.4s ease 0.06s both;
 }
 .home__title {
@@ -1397,6 +1417,9 @@ body[data-mode='coop'] #field-mistake-limit { display: flex; }
   gap: var(--s-2);
 }
 .foldout > .sect + .sect { padding-top: var(--s-4); border-top: 1.5px dashed var(--ink-track); }
+
+/* The storage-blocked notice sits between the bar and the form, outside both. */
+.setup__storage-warn { margin: 0 var(--gutter) var(--s-2); }
 
 /* Sticky footer: Start is the one control that must never scroll away. */
 .setup__go {
@@ -2672,7 +2695,11 @@ body[data-mode='coop'] #btn-challenge { display: none; }
   color: var(--card);
   font-size: 12.5px;
   font-weight: 600;
-  white-space: nowrap;
+  /* Wraps: error sentences are longer than the design's "Two players minimum"
+     and a nowrap pill runs off a 320px screen. */
+  width: max-content;
+  max-width: min(92vw, 480px);
+  text-align: center;
   animation: popIn var(--t-mid) ease both;
 }
 
@@ -2725,6 +2752,9 @@ body[data-motion='reduce'] *::after {
   .home__title { font-size: 38px; }
   .motif__rule--long { width: 22px; }
   .motif__rule { width: 12px; }
+  /* Smaller and tucked into the corner: at 320px the sticker's resting spot
+     lands on the motif's "1999" pill. */
+  .rpm { width: 50px; height: 50px; top: 44px; right: 8px; }
   .flip__face { min-height: 208px; padding: var(--s-4) var(--s-3); }
   .qr__code { width: 160px; }
   .whostrip__name { font-size: 15px; }
