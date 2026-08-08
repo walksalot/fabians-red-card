@@ -49,7 +49,10 @@ function fakeDom() {
     querySelector: () => null,
     querySelectorAll: () => [],
     contains: () => false,
-    body: { dataset: {} as Record<string, string>, style: { setProperty() {} } },
+    body: {
+      dataset: {} as Record<string, string>,
+      style: { setProperty() {} },
+    },
   };
   const win = {
     location: {
@@ -78,7 +81,12 @@ function actionButton(action: string, dataset: Record<string, string> = {}) {
   return node;
 }
 
-type Draft = { name: string; photo: string | null; skipped: boolean; pending: boolean };
+type Draft = {
+  name: string;
+  photo: string | null;
+  skipped: boolean;
+  pending: boolean;
+};
 type Seam = {
   view: {
     stale: boolean;
@@ -99,7 +107,8 @@ let storage: StorageModule;
 let seam: Seam;
 
 const fire = (type: string, target: unknown) => {
-  for (const fn of listeners[type] ?? []) fn({ type, target, preventDefault() {} });
+  for (const fn of listeners[type] ?? [])
+    fn({ type, target, preventDefault() {} });
 };
 
 /** Two skipped-photo players and a $3 stake, then Shuffle & start. */
@@ -146,7 +155,10 @@ describe('the stake snapshot', () => {
     seam.view.setup.buyin.enabled = true;
     seam.view.setup.buyin.amount = 2000;
     seam.view.setup.buyin.handle = '@kid-who-fiddled';
-    const after = storage.get('buyin-active') as { amount: number; handle: string | null };
+    const after = storage.get('buyin-active') as {
+      amount: number;
+      handle: string | null;
+    };
     expect(after.amount).toBe(300);
     expect(after.handle).toBe('host');
   });
@@ -160,12 +172,23 @@ describe('the stake snapshot', () => {
     expect(stake.enabled).toBe(false);
   });
 
-  it('is cleared with its game by Play again', () => {
+  it('survives Play again until the next game actually starts', () => {
     startStakedGame();
     expect(storage.get('buyin-active')).not.toBeNull();
+    // Play again only navigates. The finished record - winner, recap, pot -
+    // must survive a reload during post-game setup (paying the pot in Venmo
+    // reloads the tab on most phones), so nothing is cleared at tap time.
     fire('click', actionButton('play-again'));
-    expect(storage.get('buyin-active')).toBeNull();
-    expect(storage.loadGame()).toBeNull();
+    expect(storage.get('buyin-active')).not.toBeNull();
+    expect(storage.loadGame()).not.toBeNull();
+
+    // Shuffle & start is the moment the old record is genuinely replaced.
+    for (const draft of seam.view.setup.players) draft.skipped = true;
+    fire('click', actionButton('start-game'));
+    const stake = storage.get('buyin-active') as { amount: number } | null;
+    expect(stake).not.toBeNull();
+    const game = storage.loadGame() as { phase: string };
+    expect(game.phase).not.toBe('game-over');
   });
 });
 
@@ -186,7 +209,10 @@ describe('the versioned save guard', () => {
     startStakedGame();
 
     // Another tab moved the game on: same save slot, higher counter.
-    const foreign = { ...(storage.loadGame() as Record<string, unknown>), __writes: 7 };
+    const foreign = {
+      ...(storage.loadGame() as Record<string, unknown>),
+      __writes: 7,
+    };
     storage.set('game', foreign);
 
     // This (now stale) tab tries to act. The write must be refused - the

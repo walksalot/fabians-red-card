@@ -30,7 +30,7 @@
 // Bump this on any deploy that must reach returning players immediately. It is a
 // belt to the stale-while-revalidate braces below: changing it changes this file,
 // which is the only thing that makes a browser reinstall the worker at all.
-const VERSION = 'v13-qa4';
+const VERSION = 'v14-qa4-record';
 const CACHE = `music-timeline-${VERSION}`;
 const CACHE_PREFIX = 'music-timeline-';
 
