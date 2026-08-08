@@ -116,7 +116,6 @@ export const DECK = [
   { id: "lesley-gore-its-my-party", title: "It's My Party", artist: "Lesley Gore", year: 1963, genre: "pop", decade: 1960 },
   { id: "martha-reeves-the-vandellas-heat-wave", title: "Heat Wave", artist: "Martha Reeves & The Vandellas", year: 1963, genre: "soul", decade: 1960 },
   { id: "peter-paul-mary-puff-the-magic-dragon", title: "Puff, the Magic Dragon", artist: "Peter, Paul & Mary", year: 1963, genre: "folk", decade: 1960 },
-  { id: "peter-paul-and-mary-puff-the-magic-dragon", title: "Puff, the Magic Dragon", artist: "Peter, Paul and Mary", year: 1963, genre: "folk", decade: 1960 },
   { id: "the-beach-boys-surfin-u-s-a", title: "Surfin' U.S.A.", artist: "The Beach Boys", year: 1963, genre: "rock", decade: 1960 },
   { id: "the-beatles-she-loves-you", title: "She Loves You", artist: "The Beatles", year: 1963, genre: "rock", decade: 1960 },
   { id: "the-beatles-twist-and-shout", title: "Twist and Shout", artist: "The Beatles", year: 1963, genre: "rock", decade: 1960 },

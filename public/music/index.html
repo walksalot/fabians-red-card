@@ -1089,7 +1089,10 @@
       <!-- Why Next is dead during a gated vote. Ships hidden. -->
       <p class="setup__reason" id="btn-next-reason" hidden>Vote Title and Artist first</p>
       <button type="button" class="btn btn--primary" id="btn-next-player" data-action="next-turn">
-        Next player
+        <span id="btn-next-label">Next player</span>
+        <!-- Reduced motion drops the animated countdown fill; this static tag
+             is its non-animated stand-in, shown only while [data-autonext]. -->
+        <span class="btn__autotag" aria-hidden="true">auto</span>
       </button>
     </div>
   </section>

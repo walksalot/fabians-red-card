@@ -1929,11 +1929,16 @@ function verdictPending(outcome) {
 /**
  * The self-advancing reveal. Live playtesting's verdict on the old flow was
  * "slow and disjointed": every turn demanded a Next-player tap even when the
- * table had already moved on. With fast flow on, the reveal lingers
- * AUTONEXT_MS and then taps Next player itself - the button shows the time
- * draining so nobody is surprised - and ANY other interaction on the screen
- * cancels the timer, because a tap means the table is still using the reveal
- * (arguing, voting, reading the strip).
+ * table had already moved on. With fast flow on, a reveal that arrives with
+ * nothing left to decide lingers AUTONEXT_MS and then taps Next player itself
+ * - the button shows the time draining and says so to assistive tech. The
+ * countdown arms in exactly one place: on entering the reveal with no vote
+ * pending (showReveal). After that, ANY pointerdown or keydown on the screen
+ * cancels it for the rest of the turn - card face, verdict, strip, a vote
+ * chip, blank paper, a Tab press - because interaction means the table is
+ * still using the reveal. It never re-arms, not even when a vote resolves:
+ * the tap that resolved it was the table engaged. The one carve-out is Next
+ * player itself, whose tap IS the advance the timer was about to perform.
  */
 let autoNextTimer = null;
 
@@ -1953,7 +1958,16 @@ function armAutoNext() {
   )
     return;
   const button = el('btn-next-player');
-  if (button) button.dataset.autonext = 'true';
+  if (button) {
+    button.dataset.autonext = 'true';
+    // The drain animation carries no text and is removed entirely under
+    // reduced motion, so the countdown also names itself on the button...
+    button.setAttribute('aria-label', 'Next player — advancing automatically');
+  }
+  // ...and announces itself once on the polite live region.
+  announce(
+    `Next player in ${AUTONEXT_MS / 1000} seconds — tap anywhere to stay.`,
+  );
   autoNextTimer = window.setTimeout(() => {
     autoNextTimer = null;
     if (view.screen === 'reveal') nextTurn();
@@ -1966,7 +1980,31 @@ function cancelAutoNext() {
     autoNextTimer = null;
   }
   const button = el('btn-next-player');
-  if (button) delete button.dataset.autonext;
+  if (button) {
+    delete button.dataset.autonext;
+    // Back to the visible text as the accessible name.
+    button.removeAttribute('aria-label');
+  }
+}
+
+/**
+ * The cancel side of the fast-flow promise, at screen level: while the
+ * countdown is armed, ANY pointer contact with the reveal stops it. Wired to
+ * the #reveal section itself (see init), so no other screen pays for the
+ * check. Next player is the one exception - cancelling on its pointerdown
+ * would also let a tap-burst tap the guard drops (see revealTapGuardUntil)
+ * kill the timed advance that rescues exactly that dropped tap.
+ */
+function onRevealPointerDown(event) {
+  if (autoNextTimer === null) return;
+  const target = event.target;
+  if (
+    target &&
+    typeof target.closest === 'function' &&
+    target.closest('#btn-next-player')
+  )
+    return;
+  cancelAutoNext();
 }
 
 function showReveal() {
@@ -2944,6 +2982,11 @@ function renderPlay() {
         const node = clone('tpl-challenge-lock');
         if (!node) return null;
         fill(node, { label: `${nameOf(challenge.playerId)} challenged` });
+        // The template's contract: each pill wears the CHALLENGER's own seat
+        // colour. Without an inline --seat the pill inherits the ACTIVE
+        // player's colour from the body theming, which is the wrong identity.
+        const challenger = playerOf(challenge.playerId);
+        applySeat(node, challenger && challenger.color);
         return node;
       })
       .filter(Boolean);
@@ -3214,7 +3257,9 @@ function renderReveal() {
 
   const pending = pendingResult(state);
   const next = el('btn-next-player');
-  if (next) next.textContent = pending ? 'See the result' : 'Next player';
+  // The label span, not textContent: the button also carries the static
+  // reduced-motion "auto" tag, which a bare textContent write would destroy.
+  text('btn-next-label', pending ? 'See the result' : 'Next player');
   // While the gated vote is open, Next would silently discard a correctly
   // placed card (unvoted = unconfirmed). Hold it until the group votes - any
   // combination of the two chips settles the turn and unlocks it.
@@ -4116,13 +4161,10 @@ function confirmToggle(which) {
     else sfx.lose();
     if (outcome.tokenAwards.some((award) => award.delta > 0)) sfx.token();
   }
-  // (Re)arm whenever this tap leaves the verdict settled - not only on the
-  // pending->settled transition the sound cue keys on. A vote tap is the vote
-  // progressing, not the table lingering, but the global click handler cannot
-  // tell those apart and already cancelled the countdown for this very tap:
-  // without this line, voting title THEN artist killed fast flow for the turn.
-  // armAutoNext itself declines while anything is genuinely unresolved.
-  if (outcome && !verdictPending(outcome)) armAutoNext();
+  // Deliberately NO armAutoNext here. A vote chip tap is an interaction like
+  // any other - the table is engaged - so it cancels the countdown (the
+  // screen-level pointerdown handler already did) and must not re-arm it.
+  // The countdown only ever arms on entering the reveal with no pending vote.
 }
 
 function nextTurn() {
@@ -4424,8 +4466,9 @@ function onClick(event) {
   // shapes toggleAudio(). unlock() is cheap and idempotent after the first tap.
   sfx.unlock();
   (ACTION_CUES[node.dataset.action] || sfx.tap)();
-  // Any interaction on the reveal other than Next player itself means the
-  // table is still using the screen - stop the countdown and let them.
+  // Backstop for the reveal countdown: real taps and keys already cancelled
+  // it in onRevealPointerDown / onKeydown, but a synthetic .click() arrives
+  // with neither, and it is still an interaction.
   if (autoNextTimer !== null && node.dataset.action !== 'next-turn')
     cancelAutoNext();
   handler(node);
@@ -4616,6 +4659,11 @@ function trapSheetFocus(event, sheet) {
 }
 
 function onKeydown(event) {
+  // Keyboard interaction is interaction: ANY key while the reveal countdown
+  // is armed cancels it, exactly like a pointerdown - Tab included, because a
+  // keyboard user surveying the screen is the table engaged. The key itself
+  // still does its normal job below.
+  if (autoNextTimer !== null) cancelAutoNext();
   // A stale tab is read-only until it reloads. Its overlay claims aria-modal,
   // so Tab is trapped inside it (Reload is the only stop - the sheets' trap
   // does the arithmetic) and Escape is swallowed; Enter/Space on Reload -
@@ -4688,6 +4736,10 @@ function init() {
   document.addEventListener('change', onInput);
   document.addEventListener('keydown', onKeydown);
   window.addEventListener('resize', onResize);
+  // The reveal screen only: any tap on it cancels the fast-flow countdown.
+  const revealScreen = el('reveal');
+  if (revealScreen)
+    revealScreen.addEventListener('pointerdown', onRevealPointerDown);
 
   // Two tabs on one game must not be a silent time machine. The storage event
   // only fires in the OTHER tab, so this is exactly the cross-tab signal: a

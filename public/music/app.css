@@ -2407,14 +2407,21 @@ body[data-mode='coop'] #btn-challenge { display: none; }
 }
 .win__name {
   font-family: var(--font-display);
-  /* The floor scales with the viewport (a 16-char name at 34px is wider than
-     a 320px phone) and overflow-wrap catches whatever a single unbroken name
-     still cannot fit - clipped off both screen edges is never acceptable. */
-  font-size: clamp(24px, 9.5vw, 42px);
+  /* Scales with the viewport, and overflow-wrap catches whatever a single
+     unbroken name still cannot fit - clipped off both screen edges is never
+     acceptable. The slope is tuned so the WORST case, a 16-char maxlength
+     name of wide Paytone glyphs, fits on ONE line at the 320px floor (the
+     old 9.5vw left it 3px too wide there and shed a lone orphan "e" onto its
+     own centred line) while 375px and up stay within half a pixel of the old
+     curve and the 42px cap is reached at the same width. balance stays for
+     multi-word names; it cannot fix the orphan itself because Chromium does
+     not rebalance overflow-wrap's emergency mid-word breaks. */
+  font-size: clamp(24px, 10.4vw - 3.9px, 42px);
   font-weight: 400;
   line-height: 1.1;
   max-width: 100%;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 .win__summary {
   margin-top: var(--s-3);
@@ -2949,6 +2956,26 @@ body[data-motion='reduce'] #btn-next-player[data-autonext]::before { display: no
 @media (prefers-reduced-motion: reduce) {
   #btn-next-player[data-autonext]::before { display: none; }
 }
+/* ...but a JS timer with no indication is a silent context change. The static
+   "auto" tag in the button is the non-animated stand-in for the drain: shown
+   only while the advance is armed AND the fill is suppressed, and cleared the
+   moment any tap or key cancels the countdown. Soft ink over the button's own
+   raspberry, same as the fill - no new colour. */
+.btn__autotag {
+  display: none;
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: rgba(36, 28, 21, 0.22);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+body[data-motion='reduce'] #btn-next-player[data-autonext] .btn__autotag { display: inline-block; }
+@media (prefers-reduced-motion: reduce) {
+  #btn-next-player[data-autonext] .btn__autotag { display: inline-block; }
+}
 
 /* The pass screen's buy-instead escape hatch: quiet, under the hero tap. */
 .pass__buy {
@@ -3000,6 +3027,14 @@ body[data-motion='reduce'] #btn-next-player[data-autonext]::before { display: no
   .roster--reveal .roster__face { padding-bottom: 15px; }
   .roster--reveal .roster__face .avatar { --avatar-size: 56px; }
   .roster--reveal .roster__seat[data-rank='active'] .avatar { --avatar-size: 64px; }
+  /* Eight seats at 56px (64 active) plus gaps outgrow the 520px column, and
+     the rail hides its scrollbar - so the 8th avatar rendered half-clipped
+     with no affordance. A full table sizes its faces down until every seat
+     fits: 7x46 + 54 active + 7x8 gaps + 48 gutter = 480px, inside the ~517px
+     column. Engines without :has() keep the scrolling rail as before. */
+  .roster--reveal .roster__seats:has(> :nth-child(8)) { gap: 8px; }
+  .roster--reveal .roster__seats:has(> :nth-child(8)) .roster__face .avatar { --avatar-size: 46px; }
+  .roster--reveal .roster__seats:has(> :nth-child(8)) .roster__seat[data-rank='active'] .avatar { --avatar-size: 54px; }
   .roster--reveal .roster__count {
     right: -2px;
     top: -2px;
