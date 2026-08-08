@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Music Timeline — QA Round 2 Scorecard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Fragment+Mono&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-display:'Bricolage Grotesque','Georgia',serif;
+    --font-mono:'Fragment Mono','SF Mono',Consolas,monospace;
+    --font-sans:'Bricolage Grotesque',system-ui,sans-serif;
+
+    --bg:#faf7f5; --surface:#fffdfc; --surface2:#f4efeb; --surface-elevated:#fffefd;
+    --border:rgba(60,40,30,.10); --border-bright:rgba(60,40,30,.20);
+    --text:#231c17; --text-dim:#7a6a5f;
+
+    --s1:#b91c1c; --s1-dim:rgba(185,28,28,.10);
+    --s2:#c2410c; --s2-dim:rgba(194,65,12,.10);
+    --s3:#a16207; --s3-dim:rgba(161,98,7,.10);
+    --s4:#78716c; --s4-dim:rgba(120,113,108,.10);
+    --ok:#4d7c0f; --ok-dim:rgba(77,124,15,.10);
+    --accent:#c2410c;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#17120f; --surface:#201915; --surface2:#2a211c; --surface-elevated:#261e19;
+      --border:rgba(255,235,220,.09); --border-bright:rgba(255,235,220,.18);
+      --text:#f2e7de; --text-dim:#b3a094;
+      --s1:#f87171; --s1-dim:rgba(248,113,113,.14);
+      --s2:#fb923c; --s2-dim:rgba(251,146,60,.14);
+      --s3:#fbbf24; --s3-dim:rgba(251,191,36,.14);
+      --s4:#a8a29e; --s4-dim:rgba(168,162,158,.14);
+      --ok:#a3e635; --ok-dim:rgba(163,230,53,.14);
+      --accent:#fb923c;
+    }
+    /* Dark-mode severity swatches are light, so segment labels must go dark
+       or "S3 · 60" sits white-on-amber and fails contrast. Needs the extra
+       specificity: the base .seg span rule is defined later in this sheet. */
+    .bar .seg span{color:#1a120d;text-shadow:none}
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--bg);
+    background-image:
+      radial-gradient(ellipse at 12% 0%, var(--s1-dim) 0%, transparent 46%),
+      radial-gradient(ellipse at 88% 8%, var(--s3-dim) 0%, transparent 42%);
+    color:var(--text); font-family:var(--font-sans); padding:40px 24px; min-height:100vh;
+    overflow-wrap:break-word; -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  .grid>*,.flex>*{min-width:0}
+
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes fadeScale{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
+  .an{animation:fadeUp .4s ease-out both;animation-delay:calc(var(--i,0)*.05s)}
+  .kpi{animation:fadeScale .38s ease-out both;animation-delay:calc(var(--i,0)*.06s)}
+  @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;transition-duration:.01ms!important}}
+
+  /* header */
+  .eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  h1{font-family:var(--font-display);font-size:clamp(30px,5vw,46px);font-weight:800;letter-spacing:-1.2px;line-height:1.03;margin-bottom:10px}
+  .sub{color:var(--text-dim);font-size:15px;line-height:1.6;max-width:70ch;margin-bottom:6px}
+  .meta{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:30px;line-height:1.9}
+  .meta a{color:var(--accent)}
+
+  h2{font-family:var(--font-display);font-size:20px;font-weight:600;letter-spacing:-.3px;margin:38px 0 14px;display:flex;align-items:center;gap:10px}
+  h2::before{content:'';width:10px;height:10px;border-radius:3px;background:var(--accent);flex:none}
+
+  /* KPI */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:14px;margin-bottom:8px}
+  .card{background:var(--surface-elevated);border:1px solid var(--border);border-radius:12px;padding:18px}
+  .card--hero{box-shadow:0 4px 22px rgba(80,40,20,.09),0 1px 3px rgba(80,40,20,.05)}
+  .kv{font-family:var(--font-display);font-size:38px;font-weight:800;line-height:1;letter-spacing:-1.5px;font-variant-numeric:tabular-nums}
+  .kl{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:1.3px;color:var(--text-dim);margin-top:8px}
+  .kn{font-size:12px;color:var(--text-dim);margin-top:6px;line-height:1.45}
+
+  /* severity bar */
+  .bar{display:flex;height:46px;border-radius:10px;overflow:hidden;border:1px solid var(--border);margin:6px 0 10px}
+  .seg{display:flex;align-items:center;justify-content:center;min-width:0}
+  .seg span{font-family:var(--font-mono);font-size:11px;font-weight:600;color:#fff;white-space:nowrap;padding:0 6px;text-shadow:0 1px 2px rgba(0,0,0,.28);overflow:hidden;text-overflow:clip}
+  .seg--S1{background:var(--s1)} .seg--S2{background:var(--s2)}
+  .seg--S3{background:var(--s3)} .seg--S4{background:var(--s4)}
+  .barnote{font-family:var(--font-mono);font-size:11px;color:var(--text-dim)}
+
+  /* legend */
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:14px 0 6px}
+  .li{display:flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)}
+  .sw{width:11px;height:11px;border-radius:3px;flex:none}
+
+  /* comparison */
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .cmp>*{min-width:0}
+  .cmp .card{position:relative}
+  .rlabel{font-family:var(--font-mono);font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px}
+  .stat{display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px}
+  .stat:last-child{border-bottom:none}
+  .stat b{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:15px}
+  .unk{color:var(--text-dim);font-style:italic;font-size:12px;line-height:1.5;margin-top:10px}
+
+  /* S1 spotlight */
+  .spot{border:1px solid var(--s1);border-left:5px solid var(--s1);border-radius:12px;background:var(--s1-dim);padding:22px 24px}
+  .spot h3{font-family:var(--font-display);font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:10px;line-height:1.25}
+  .spot p{font-size:14px;line-height:1.65;margin-bottom:10px}
+  .spot .quote{font-family:var(--font-mono);font-size:12.5px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:11px 14px;margin:12px 0;line-height:1.6}
+
+  /* table */
+  .twrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;line-height:1.55}
+  thead{position:sticky;top:0;z-index:2}
+  th{background:var(--surface2);font-family:var(--font-mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-dim);text-align:left;padding:13px 14px;border-bottom:2px solid var(--border-bright);white-space:nowrap}
+  td{padding:13px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr{animation:fadeUp .35s ease-out both;animation-delay:calc(var(--i,0)*.025s);transition:background .15s ease}
+  tbody tr:hover{background:var(--surface2)}
+  .row--S1 td:first-child{box-shadow:inset 4px 0 0 var(--s1)}
+  .row--S2 td:first-child{box-shadow:inset 4px 0 0 var(--s2)}
+  .row--S3 td:first-child{box-shadow:inset 4px 0 0 var(--s3)}
+  .row--S4 td:first-child{box-shadow:inset 4px 0 0 var(--s4)}
+  .c-sev{width:1%;white-space:nowrap}
+  .c-title{min-width:260px;max-width:600px}
+  .c-title .t{font-weight:600;line-height:1.4}
+  .c-area{width:1%;white-space:nowrap}
+  .c-pts{width:1%;white-space:nowrap}
+  .num{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--text-dim)}
+  code{font-family:var(--font-mono);font-size:11px;background:var(--s2-dim);color:var(--accent);padding:1.5px 6px;border-radius:4px}
+
+  .pill{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:6px;white-space:nowrap;letter-spacing:.4px}
+  .pill::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+  .pill--S1{background:var(--s1-dim);color:var(--s1)}
+  .pill--S2{background:var(--s2-dim);color:var(--s2)}
+  .pill--S3{background:var(--s3-dim);color:var(--s3)}
+  .pill--S4{background:var(--s4-dim);color:var(--s4)}
+  .pill--ok{background:var(--ok-dim);color:var(--ok)}
+
+  details.detail{margin-top:7px}
+  details.detail summary{font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px}
+  details.detail summary::-webkit-details-marker{display:none}
+  details.detail summary::before{content:'▸';transition:transform .15s ease;display:inline-block}
+  details.detail[open] summary::before{transform:rotate(90deg)}
+  .detail__body{margin-top:9px;padding:12px 14px;background:var(--surface2);border-radius:8px;font-size:12.5px;line-height:1.6;color:var(--text-dim)}
+  .detail__body b{color:var(--text);font-weight:600;display:inline-block;min-width:64px}
+  .detail__body p{margin-bottom:7px}
+  .repro{list-style-position:inside;padding-left:0;margin-top:8px;font-family:var(--font-mono);font-size:11.5px;line-height:1.75}
+  .repro li{margin-bottom:2px}
+
+  details.coll{border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--surface);margin-bottom:12px}
+  details.coll summary{padding:14px 18px;font-family:var(--font-mono);font-size:12px;font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;gap:9px}
+  details.coll summary::-webkit-details-marker{display:none}
+  details.coll summary::before{content:'▸';color:var(--text-dim);transition:transform .15s ease}
+  details.coll[open] summary::before{transform:rotate(90deg)}
+  .coll__body{padding:16px 18px;border-top:1px solid var(--border);font-size:13px;line-height:1.65;color:var(--text-dim)}
+  .coll__body li{margin-bottom:9px;padding-left:14px;position:relative;list-style:none}
+  .coll__body li::before{content:'›';position:absolute;left:0;color:var(--accent);font-weight:700}
+
+  .callout{padding:16px 20px;border-radius:10px;border-left:4px solid var(--s3);background:var(--s3-dim);margin:16px 0;font-size:13.5px;line-height:1.65}
+  .callout b{color:var(--text)}
+
+  footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--border);font-family:var(--font-mono);font-size:11px;color:var(--text-dim);line-height:1.9}
+  footer a{color:var(--accent)}
+
+  @media (max-width:768px){
+    body{padding:20px 14px}
+    /* Narrow segments clip their own labels on a phone; the legend below
+       carries the same numbers, so drop the in-bar text entirely. */
+    .seg span{display:none}
+    .bar{height:34px}
+    .cmp{grid-template-columns:1fr}
+    th,td{padding:10px 11px}
+    .kv{font-size:32px}
+    .c-title{min-width:200px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow an" style="--i:0">Adversarial browser QA · Round 2</div>
+  <h1 class="an" style="--i:1">Music Timeline scorecard</h1>
+  <p class="sub an" style="--i:2">13 parallel testers drove the live site in real Google Chrome like a family would — tapping through the visible UI, no unit tests. Every candidate defect was then re-attacked by an independent skeptic whose job was to disprove it. Only survivors are counted below.</p>
+  <div class="callout an" style="--i:2;border-left-color:var(--ok);background:var(--ok-dim)">
+    <b>Scope, and current status.</b> Round 2 ran on <b>two independent fleets</b>: this Mac Studio (real Chrome, genuine AAC decoder) and a container fleet against the same live site. This page is the <b>studio fleet's 35 confirmed findings</b>. Merged with the other fleet, round 2 totals <b>40 unique confirmed defects — 1 Critical, 5 Major</b>, the same Critical and Majors shown here, with six findings reproduced independently by both fleets.<br><br>
+    <b>Every one of the 40 is already fixed and deployed</b> (commit <code>9baf0f2</code>). So read this as the record of what round 2 caught, not as a list of things still broken.
+  </div>
+  <div class="meta an" style="--i:3">
+    target &nbsp;<a href="https://music-timeline-walksalots-projects.vercel.app/index.html">music-timeline-walksalots-projects.vercel.app</a><br>
+    browser &nbsp;Google Chrome 151.0.7922.76 &nbsp;·&nbsp; AAC decode <b>"probably"</b> &nbsp;·&nbsp; previews genuinely played<br>
+    run &nbsp;57 agents · 0 errors · 100 min · 1,006 screenshots
+  </div>
+
+  <div class="kpis">
+    <div class="card card--hero kpi" style="--i:0">
+      <div class="kv" style="color:var(--accent)">122</div>
+      <div class="kl">Weighted score</div>
+      <div class="kn">S1×13 · S2×8 · S3×3 · S4×1</div>
+    </div>
+    <div class="card kpi" style="--i:1">
+      <div class="kv">35</div>
+      <div class="kl">Confirmed</div>
+      <div class="kn">of 37 clusters</div>
+    </div>
+    <div class="card kpi" style="--i:2">
+      <div class="kv" style="color:var(--s1)">1</div>
+      <div class="kl">Critical</div>
+      <div class="kn">real money bug</div>
+    </div>
+    <div class="card kpi" style="--i:3">
+      <div class="kv" style="color:var(--s2)">5</div>
+      <div class="kl">Major</div>
+      <div class="kn">feature broken</div>
+    </div>
+    <div class="card kpi" style="--i:4">
+      <div class="kv" style="color:var(--text-dim)">29</div>
+      <div class="kl">Minor + Nit</div>
+      <div class="kn">polish &amp; copy</div>
+    </div>
+  </div>
+
+  <h2>Where the 122 points come from</h2>
+  <div class="bar an" style="--i:4">
+    <div class="seg seg--S3" style="flex:6" title="2 × S3 = 6 pts"><span>S3 · 6</span></div><div class="seg seg--S4" style="flex:3" title="3 × S4 = 3 pts"><span>S4 · 3</span></div>
+  </div>
+  <div class="barnote an" style="--i:5">S1 0×13 = <b>13</b> &nbsp;·&nbsp; S2 0×8 = <b>40</b> &nbsp;·&nbsp; S3 2×3 = <b>60</b> &nbsp;·&nbsp; S4 3×1 = <b>9</b><br>Width = share of weighted score, not count. The single Critical outweighs all nine Nits combined.</div>
+
+  <div class="legend an" style="--i:5">
+    <div class="li"><span class="sw" style="background:var(--s1)"></span> S1 Critical · 13 pts — crash, data loss, wrong money, wrong rule outcome</div>
+    <div class="li"><span class="sw" style="background:var(--s2)"></span> S2 Major · 8 pts — feature broken, game survives</div>
+    <div class="li"><span class="sw" style="background:var(--s3)"></span> S3 Minor · 3 pts — visual, misleading copy, minor a11y</div>
+    <div class="li"><span class="sw" style="background:var(--s4)"></span> S4 Nit · 1 pt — polish</div>
+  </div>
+
+  <h2>Round 1 vs Round 2</h2>
+  <div class="cmp">
+    <div class="card an" style="--i:6">
+      <div class="rlabel">Round 1 · ran elsewhere</div>
+      <div class="stat"><span>Confirmed defects</span><b>25</b></div>
+      <div class="stat"><span>Weighted score</span><b>93</b></div>
+      <div class="stat"><span>Status</span><b style="color:var(--ok)">all fixed &amp; deployed</b></div>
+      <div class="unk">Round 1's per-severity breakdown isn't in this repo — that round ran on another machine and only its totals were handed over. Not reconstructed here rather than guessed.</div>
+    </div>
+    <div class="card card--hero an" style="--i:7">
+      <div class="rlabel">Round 2 · this run</div>
+      <div class="stat"><span>Confirmed defects</span><b>35</b></div>
+      <div class="stat"><span>Weighted score</span><b style="color:var(--accent)">122</b></div>
+      <div class="stat"><span>Critical / Major</span><b><span style="color:var(--s1)">1</span> / <span style="color:var(--s2)">5</span></b></div>
+      <div class="stat"><span>Minor / Nit</span><b>20 / 9</b></div>
+      <div class="stat"><span>Refuted by skeptics</span><b>2</b></div>
+    </div>
+  </div>
+
+  <div class="callout an" style="--i:8">
+    <b>The score went up, but the app did not get worse.</b> Round 1's 25 fixes held — skeptics re-tested those areas and none regressed. The rise is reach: 29 of 35 findings are minor polish, and this round reached surfaces round 1 never touched (co-op wording, offline and storage-full behaviour, landscape, the listen-page QR, screen-reader labels). Round 1 found the big breaks; round 2 is finding the long tail.
+  </div>
+
+  <h2>The one Critical</h2>
+  <div class="spot an" style="--i:9">
+    <h3>The winner screen pays out a pot nobody agreed to</h3>
+    <p>The payout reads the <i>live setup draft</i> instead of a snapshot taken when the game started. So if someone opens “New game”, fiddles with the buy-in, and backs out without starting — then resumes the game already in progress — the win screen settles up using the abandoned draft.</p>
+    <div class="quote">Verified in reverse too: a real agreed <b>$2/head to @realaunt</b> became <b>“$12 · send it to @some-other-cousin”</b> — a scannable Venmo QR, for the wrong amount, to someone who was never in the game.</div>
+    <p>The skeptic attacked this on four axes and it survived all of them, including the strongest defence: the app's own saved stake said <code>enabled:false</code> at the moment the screen displayed $40. Root cause is named in shipped code — <code>payoutFor()</code> in <code>ui.js</code> reads <code>view.setup.buyin</code> rather than a per-game snapshot.</p>
+    <p style="margin-bottom:0"><b>Why it rates Critical:</b> the rubric calls wrong money math S1 outright, and this lands on the exact screen the room uses to settle up.</p>
+  </div>
+
+  <h2>All 5 confirmed findings</h2>
+  <div class="twrap an" style="--i:10">
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Sev</th><th>Finding</th><th>Area</th><th class="num">Pts</th></tr></thead>
+        <tbody>
+    <tr class="row row--S3" style="--i:0">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">First tap on a re-enabled guest chip is silently swallowed when it directly follows editing a player name field</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Ben is seated on the roster and his chip greys to 'already playing' (with the 'Ben added.' announcement)</p>
+            <p><b>Actual</b> Nothing happens: no row added, chip stays enabled, no announcement; a second tap on the same chip seats Ben normally. Mechanism per report: onInput's change branch calls paintPeople(), which replaceChildren()-rebuilds every chip on the blur caused by the tap's own mousedown, so the composed click retargets to #people-list and matches no [data-action].</p>
+            <ol class="repro"><li>Fresh page: New game, name two rows Ava and Ben, Skip photo on both, Shuffle &amp; start, tap the pass screen, then menu -&gt; Home (Ava and Ben are now 'Played before' people)</li><li>New game again - roster prefills Ava/Ben, both chips grey 'already playing'</li><li>Tap into row 2's name field and type 'Cara' over 'Ben', leaving the caret in the field (do not tap elsewhere first)</li><li>The Ben chip lights up as addable; tap it exactly once</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>roster</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:1">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">Streak reveal banner asserts '+1 token' while the cap-honest ledger on the same screen shows the streak paid 0</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> When the cap swallows the streak payout, the banner must not assert '+1 token' - drop the payout clause or say tokens were full, matching the cap-honest ledger row</p>
+            <p><b>Actual</b> Banner is a static hardcoded string (index.html:1065) shown whenever outcome.streakAwarded is true (ui.js:3259), so at the cap the same screen simultaneously claims +1 and +0 for the same streak</p>
+            <ol class="repro"><li>Open https://music-timeline-walksalots-projects.vercel.app/index.html?debug=1&amp;seed=777, New game, 2 players Ann/Ben, Skip photo on both, streak bonus ON, Shuffle &amp; start</li><li>Turn 1 (Ann): tap 'I can name it', place correct, confirm Title and Artist (Ann 2-&gt;3 tokens, run 1); Next player</li><li>Turn 2 (Ben): place anywhere wrong; Next player</li><li>Turn 3 (Ann): claim again, place correct, confirm both (Ann -&gt;4, run 2); Next player</li><li>Turn 4 (Ben): place wrong; Next player</li><li>Turn 5 (Ann): claim again, place correct (3rd kept card in a row), confirm Title and Artist - identify pays +1 bringing Ann to the 5-token cap and the streak completes in the same reveal</li><li>Read the reveal: yellow banner says 'Streak bonus - three in a row, +1 token' while the TOKENS ledger directly below says 'Ann  Streak bonus - tokens already full  0' and the pills stay at 5/5</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>tokens-bets</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S4" style="--i:2">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">Listen page streaming-links disclosure keeps 'Show streaming links / this reveals the song title' while open with links visible</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Open disclosure flips to 'Hide streaming links' (and drops the now-moot 'this reveals the song title' warning), matching the host play screen's identical toggle which does flip</p>
+            <p><b>Actual</b> Summary keeps 'Show streaming links / this reveals the song title' verbatim while open (#reveal-lead and #reveal-note never rewritten on toggle); only the chevron rotates. Confirmed open state {open:true, lead:'Show streaming links', nLinks:3}</p>
+            <ol class="repro"><li>Open https://music-timeline-walksalots-projects.vercel.app/listen.html#eyJ2IjoxLCJ0IjoiUHVyZSBJbWFnaW5hdGlvbiIsImEiOiJHZW5lIFdpbGRlciIsIm4iOjF9 (any valid card payload)</li><li>Tap the 'Show streaming links' disclosure at the bottom</li><li>Observe the summary while the three Search Spotify/Apple Music/YouTube links are visible below it</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>qr-listen</code></td>
+      <td class="c-pts num">1</td>
+    </tr>
+    <tr class="row row--S4" style="--i:3">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">Listen page stream-failure state keeps footnote 'Back to the game when the clip ends' though no clip will play</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Footnote matches the state via the existing per-state FOOTNOTES map, as listen.js already does for link mode and bad-payload notices</p>
+            <p><b>Actual</b> Footnote still reads 'Only the host's screen knows the year. Back to the game when the clip ends.' in the error state; stumble() never updates the footnote set by load() for player mode</p>
+            <ol class="repro"><li>Open https://music-timeline-walksalots-projects.vercel.app/listen.html# followed by base64url of {&quot;v&quot;:1,&quot;t&quot;:&quot;The Ballad of the Extraordinarily Long Song Title&quot;,&quot;a&quot;:&quot;Somebody &amp; The Incredibly Verbose Backing Band&quot;,&quot;n&quot;:12} (any card whose preview cannot resolve)</li><li>Wait for resolution to fail: status shows &quot;Couldn't stream this one. The links below will find it.&quot; and the links disclosure is surfaced</li><li>Read the footnote at the bottom of the page</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>qr-listen</code></td>
+      <td class="c-pts num">1</td>
+    </tr>
+    <tr class="row row--S4" style="--i:4">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">16-char two-word winner name wraps to an orphan second line at 320px, missing the round-4 one-line claim by 0.5px</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Per the round-4 fix note and the .win__name font clamp comment, a worst-case 16-char name holds one line at the 320px floor</p>
+            <p><b>Actual</b> 'Christopherina Q' renders as two centered lines with a lone 'Q' orphan. Measured: .win__body offers 254px, the name needs 254.5px at the clamped 29.38px size - misses by 0.5px and wraps at the space. Holds one line at 375px+. Nothing clipped or overlapped</p>
+            <ol class="repro"><li>Fresh page at https://music-timeline-walksalots-projects.vercel.app/index.html?debug=1&amp;seed=7, viewport 320x568</li><li>New game; 2 players; name player 1 exactly 'Christopherina Q' (16 chars, the input maxlength); Skip photo for all; Cards to win = 5; Shuffle &amp; start</li><li>Play until player 1 wins (place their cards on correct gaps)</li><li>Look at the winner heading on the win screen</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>responsive</code></td>
+      <td class="c-pts num">1</td>
+    </tr></tbody>
+        <tfoot></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <h2>What the skeptics killed</h2>
+  <details class="coll an" style="--i:11">
+    <summary>2 refuted or by-design</summary>
+    <div class="coll__body"><ul>
+      <li><span class="pill pill--ok">REFUTED</span> Double-tap on the pass screen's full-card 'Start the turn' target tap-throughs to the vinyl, drawing the card and starting the mystery song mid-handoff</li>
+    </ul></div>
+  </details>
+  <div class="callout an" style="--i:12">
+    <b>Read this number with suspicion:</b> 35 of 37 clusters survived, which is a high pass rate for a gate designed to kill findings. Two things explain most of it — the adjudicator dropped by-design reports <i>before</i> verification, and the 13 missions barely overlap, so there was little duplicate inflation to strip. It is not proof the gate was soft, but if round 3 also refutes only ~2 of ~37, the skeptic stance needs re-tuning.
+  </div>
+
+  <h2>Coverage</h2>
+  <details class="coll an" style="--i:13">
+    <summary>What each of the 13 testers actually covered</summary>
+    <div class="coll__body"><ul>
+      <li><code>first-run</code> First run &amp; home screen on the live site (7 fresh-context Playwright sessions, all via visible UI, pageerror/console-error hooks in every session — zero errors seen). Verified: (1) Fresh visitor home at 320x568, 360x740, 393x852, 768x1024, 1280x800 — zero horizontal overflow, no resume card, copy consistent ('1185 songs' matches deduped deck). (2) manifest.json 200 with sane fields (name, start_ur</li><li><code>roster</code> Roughly 16 minutes of live testing against https://music-timeline-walksalots-projects.vercel.app across 5 fresh-browser sessions (scripts a/b/b2/c/d/e under /home/user/fabians-red-card/scratch/qa/round-5/roster/), all through the visible UI at 393x852. Verified clean: player bounds 2-8 (remove disabled at 2 with &quot;At least two players&quot;, add disabled at 8 with &quot;Eight players is the maximum&quot;, both un</li><li><code>setup-options</code> Tested the live site (https://music-timeline-walksalots-projects.vercel.app) at 393x852 through 6 fresh browser sessions, all UI-driven; scripts and 20+ screenshots in /home/user/fabians-red-card/scratch/qa/round-5/setup-options/ (t1-setup.mjs, t2-followup.mjs, t3-venmo-game.mjs, t4-persist-zero.mjs, t5-potline-visible.mjs, t6-pot-scroll.mjs). Covered: (1) Mode rows — all four select, descriptions</li><li><code>classic-game</code> Played two complete classic games through the UI against the live Vercel site (393x852 mobile viewport, pageerror/console-error listeners on throughout — zero errors in both sessions). GAME 1 (seed 5101, 2 players to 5, all-honest, 7 turns): fresh-visitor home, setup (roster trim 8-&gt;2, naming, skip-photo, target stepper 10-&gt;5), pass screen naming, fast-flow draw, gap selection (selected gap widene</li><li><code>tokens-bets</code> All testing ran against the live Vercel site through the visible UI at 393x852, three Playwright suites under scratch/qa/round-5/tokens-bets/ (t1-challenge-nameit.mjs seed 101, t2-cap-buy-streak.mjs seed 777, t3-edges.mjs seed 555), roughly 15 minutes of runtime, zero pageerror/console-error events in every session. Verified working: challenge sheet offers only non-active players with &gt;=1 token (w</li><li><code>adv-expert</code> All testing against the LIVE site (music-timeline-walksalots-projects.vercel.app) at 393x852, via UI-only Playwright, ~16 min across 6 sessions; scripts and screenshots in /home/user/fabians-red-card/scratch/qa/round-5/adv-expert/. ADVANCED (seed 4101, 2 players, first-to-5, full game to win screen in 9 turns): right gap + both votes -&gt; kept, 'Correct. The card is yours.', timeline +1; right gap +</li><li><code>coop</code> Live site (https://music-timeline-walksalots-projects.vercel.app), Chromium 393x852, five fresh-visitor co-op sessions driven only through the UI (seeds 4242, 777, 999, 555), scripts and screenshots under scratch/qa/round-5/coop/. Verified end to end: (1) full 3-player co-op win at target 10 — shared timeline hits exactly 10/10, reveal offers 'See the result', win screen says 'Co-op win / Everybod</li><li><code>persistence</code> Live site (https://music-timeline-walksalots-projects.vercel.app, verified byte-identical to public/music by sha256 of ui.js), mobile viewport 393x852, four throwaway Playwright suites under /home/user/fabians-red-card/scratch/qa/round-5/persistence/ (phases.mjs, sabotage.mjs, challenge-vote.mjs, endgame.mjs; ~70 assertions, ~50 screenshots, all read). TESTED AND CLEAN: (1) Reload+resume at every </li><li><code>qr-listen</code> All testing against the live Vercel site through the visible UI (Playwright, 393x852 phone viewport; scripts and screenshots in scratch/qa/round-5/qr-listen/). Verified clean: (1) QR block hidden before the draw, shown after, renders a real SVG QR with role=img + aria-label, no horizontal overflow, and at max scroll the whole code is on screen and uncovered (5-point elementFromPoint check) — note </li><li><code>a11y</code> All testing on the live site (https://music-timeline-walksalots-projects.vercel.app) at 393x852 mobile viewport unless noted; scripts and screenshots in /home/user/fabians-red-card/scratch/qa/round-5/a11y/. Zero pageerrors and zero console errors across all 7 sessions. (1) Keyboard-only walk of every screen (seeds 5150/777/888/999): home, rules, setup, pass, play (gap select + place), reveal, menu</li><li><code>responsive</code> Tested the LIVE site through the visible UI only. Viewports: 320x568, 375x667, 393x852, 428x926, 820x1180, and 1366x1024 (iPad Pro landscape), plus 852x393 phone landscape. Screens screenshotted and eyeballed at every size (~85 screenshots under scratch/qa/round-5/responsive/shots/): home, How to play, full setup with 8 players + buy-in maxed ($50/head) + streak bonus + Deck &amp; playback foldout ope</li><li><code>perf-network</code> CDP (Network + Emulation domains) against the live site https://music-timeline-walksalots-projects.vercel.app at 393x852, scripts in /home/user/fabians-red-card/scratch/qa/round-5/perf-network/ (01-cold-warm-offline.mjs, 02-audio-fetch.mjs, 03-cpu-throttle.mjs, 04-sw-install-network.mjs, 05-offline-midgame.mjs; screenshots alongside). Real numbers: COLD first visit = 19 page requests, 428.7 KB tra</li><li><code>chaos</code> All testing against the LIVE Vercel site at 393x852, driven only through visible UI (Playwright clicks/taps; state reads via ?debug=1 for assertions only), 7 fresh sessions, every session watching pageerror + console errors: ZERO of either anywhere. Scripts + ~20 screenshots under scratch/qa/round-5/chaos/. TESTED CLEAN: (1) Double/triple-tap abuse — Shuffle &amp; start (fresh: one game created; over </li>
+    </ul></div>
+  </details>
+
+  <footer>
+    <b>Source of truth</b> — commit <code>05ba5f3</code> on branch <code>claude/phone-music-timeline-game-c96gtw</code> (walksalot/fabians-red-card)<br>
+    <b>Machine-readable</b> — <code>qa/results/round-2.json</code> · full write-up <code>qa/results/round-2.md</code> · 49 screenshots in <code>qa/results/round-2-evidence/</code><br>
+    <b>Generated</b> — 2026-08-08 from the round-2 workflow result · studio Mac (kris-studio)<br>
+    <b>Session</b> — <code>claude --resume e59d7bc7-5384-4f90-b941-9478bf447233</code><br>
+    <b>Status</b> — CURRENT. Supersedes nothing; round 3 will supersede this page.
+  </footer>
+
+</div>
+</body>
+</html>
