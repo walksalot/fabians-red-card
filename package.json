@@ -1,0 +1,15 @@
+{
+  "name": "music-timeline",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "music": "node scripts/music-server.mjs",
+    "test": "vitest run",
+    "check-design": "node scripts/check-design.mjs",
+    "audit-deck": "node scripts/audit-deck.mjs",
+    "resolve-previews": "node scripts/resolve-previews.mjs"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.8"
+  }
+}

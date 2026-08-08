@@ -1,3 +1,11 @@
+# Music Timeline (game-song)
+
+This repo's identity, commands, layout, live URL, and upstream re-sync rule live in
+`AGENTS.md` — read its header before touching game code. Key invariants: the game stays
+dependency-free (static ES modules, no framework, no build step); all rules live in the
+pure seeded reducer `public/music/engine.js`; `public/music/index.html`'s header comment
+is the DOM contract; hard-offset shadows only (enforced by `npm run check-design`).
+
 <!-- agent-project-blueprint:start -->
 ## Agent Project Blueprint
 

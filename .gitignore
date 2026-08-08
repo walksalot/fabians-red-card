@@ -4,3 +4,5 @@
 CLAUDE.local.md
 .env
 .env.local
+node_modules/
+coverage/
