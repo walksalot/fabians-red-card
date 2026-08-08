@@ -44,8 +44,9 @@ const dom = {
 /*
   The footnote promises "back to the game when the clip ends", which is only
   true where a clip actually plays on this page. Link mode hands over a
-  streaming link and the error notices play nothing, so each state gets the
-  sentence it can keep.
+  streaming link, the error notices play nothing, and a failed stream hands
+  over the links too - so each state gets the sentence it can keep, and a
+  retry that actually starts playing takes the clip promise back.
 */
 const FOOTNOTES = {
   player: "Only the host's screen knows the year. Back to the game when the clip ends.",
@@ -435,6 +436,10 @@ function stumble(retryable) {
       ? "Couldn't stream this one. Tap play to try again, or use the links below."
       : "Couldn't stream this one. The links below will find it.",
   );
+  // No clip is coming; the links are how this card gets heard now, so the
+  // footnote must not promise "when the clip ends" - it borrows link mode's
+  // sentence, the one this state can keep.
+  if (dom.footnote) dom.footnote.textContent = FOOTNOTES.link;
   dom.reveal.hidden = false;
   dom.reveal.dataset.surfaced = "";
   dom.reveal.scrollIntoView({
@@ -468,6 +473,8 @@ function onPlayTap() {
     paint(0);
   }
   setState("playing", "Playing a 30-second clip.");
+  // A retry from the error state is a clip again - take the promise back.
+  if (dom.footnote) dom.footnote.textContent = FOOTNOTES.player;
   startTicking();
   commandPlay(track.previewUrl, restart).catch(() => stumble(true));
 }
@@ -477,12 +484,29 @@ function onReplayTap() {
   wallBase = 0;
   paint(0);
   setState("playing", "Playing a 30-second clip.");
+  if (dom.footnote) dom.footnote.textContent = FOOTNOTES.player;
   startTicking();
   commandPlay(track.previewUrl, true).catch(() => stumble(true));
 }
 
 /** Links are minted here, on open, because their hrefs carry the title. */
 function onRevealToggle() {
+  // A toggle has to say which way it is pointing (the host screen's identical
+  // control already flips) - and once the links are showing, warning that
+  // opening "reveals the song title" is moot. Link mode keeps its own labels:
+  // there the disclosure IS the player and load() words it per service.
+  if (!sourceMode && card) {
+    if (dom.revealLead) {
+      dom.revealLead.textContent = dom.reveal.open
+        ? "Hide streaming links"
+        : "Show streaming links";
+    }
+    if (dom.revealNote) {
+      dom.revealNote.textContent = dom.reveal.open
+        ? ""
+        : "this reveals the song title";
+    }
+  }
   if (!dom.reveal.open || !card) {
     dom.links.replaceChildren();
     return;

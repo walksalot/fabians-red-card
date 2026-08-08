@@ -2410,13 +2410,17 @@ body[data-mode='coop'] #btn-challenge { display: none; }
   /* Scales with the viewport, and overflow-wrap catches whatever a single
      unbroken name still cannot fit - clipped off both screen edges is never
      acceptable. The slope is tuned so the WORST case, a 16-char maxlength
-     name of wide Paytone glyphs, fits on ONE line at the 320px floor (the
-     old 9.5vw left it 3px too wide there and shed a lone orphan "e" onto its
-     own centred line) while 375px and up stay within half a pixel of the old
-     curve and the 42px cap is reached at the same width. balance stays for
+     name of wide Paytone glyphs, fits on ONE line at the 320px floor. The
+     original 9.5vw shed a lone orphan "e" there; the round-4 retune
+     (10.4vw - 3.9px) fixed single words but a two-WORD 16-char name
+     ("Christopherina Q") still needed 254.5px against the 254px on offer -
+     a 0.5px miss that wrapped a lone "Q" onto its own centred line. This
+     curve lands ~28.8px at 320 (that name measures 249.5px, ~4.5px spare),
+     drifts under a third of a pixel below the round-4 curve at 375px+, and
+     reaches the 42px cap at the same ~441px width. balance stays for
      multi-word names; it cannot fix the orphan itself because Chromium does
      not rebalance overflow-wrap's emergency mid-word breaks. */
-  font-size: clamp(24px, 10.4vw - 3.9px, 42px);
+  font-size: clamp(24px, 10.88vw - 6.02px, 42px);
   font-weight: 400;
   line-height: 1.1;
   max-width: 100%;

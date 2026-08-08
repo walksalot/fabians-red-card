@@ -90,9 +90,11 @@
 
       <details class="reveal" id="reveal">
         <summary class="reveal-summary">
-          <!-- The two text slots are rewritten by listen.js when the host set a
-               streaming source: the disclosure then IS the player ("Play it on
-               Spotify"), opened for them, with only that service's link. -->
+          <!-- The two text slots are rewritten by listen.js: on every toggle in
+               preview mode ("Show" flips to "Hide", the title warning drops
+               while the links are showing), and once at load when the host set
+               a streaming source - the disclosure then IS the player ("Play it
+               on Spotify"), opened for them, with only that service's link. -->
           <span class="reveal-text">
             <span id="reveal-lead">Show streaming links</span>
             <em id="reveal-note">this reveals the song title</em>

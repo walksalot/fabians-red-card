@@ -906,84 +906,103 @@ function paintPeople() {
     view.setup.players.length >= MAX_PLAYERS &&
     !view.setup.players.some((p, i) => isUntouchedRow(p, i));
 
-  // The rebuild below replaces the node under keyboard focus; find it again
-  // afterwards, or arming a cross (which repaints) would strand focus on
-  // <body> between the two taps of the armed pattern.
+  // A removed chip strands keyboard focus on <body>; remember where it was so
+  // confirming a forget (which deletes the node under focus) can hand focus
+  // to the Edit button instead of dropping it.
   const focused = document.activeElement;
   const keep =
     focused && list.contains(focused) && focused.closest('.person')
-      ? {
-          name: focused.closest('.person').dataset.name,
-          forget: focused.classList.contains('person__forget'),
-        }
+      ? focused.closest('.person').dataset.name
       : null;
 
-  replaceChildren(
-    list,
-    people.map((person) => {
-      const node = clone('tpl-person');
-      if (!node) return null;
-      const item = node.closest('.person');
-      const add = node.querySelector('.person__add');
-      const forget = node.querySelector('.person__forget');
-      const already = seated.has(person.name.toLowerCase());
-      if (item) item.dataset.name = person.name;
-      if (add) {
-        add.dataset.name = person.name;
-        add.setAttribute(
-          'aria-label',
-          already
-            ? `${person.name} is already playing`
-            : `Add ${person.name} to this game`,
-        );
-        disable(
-          add,
-          already || full,
-          already
-            ? 'Already in this game'
-            : full
-              ? 'Eight players is the maximum'
-              : undefined,
-        );
-        // The reason rides on the chip, not in a title attribute a phone never
-        // shows - a dead-looking chip with no explanation reads as a bug.
-        const note = node.querySelector('[data-field="note"]');
-        if (note) {
-          note.textContent = already
-            ? 'already playing'
-            : full
-              ? 'table is full'
-              : '';
-          show(note, already || full);
-        }
-      }
-      if (forget) {
-        forget.dataset.name = person.name;
-        // Tabbable exactly while edit mode shows the crosses: this is the
-        // app's only route to deleting a stored name and its photos, and it
-        // has to be reachable by keyboard, not only by pointer.
-        forget.tabIndex = view.peopleEditing ? 0 : -1;
-        const armed = view.forgetArmed === person.name;
-        forget.dataset.armed = armed ? 'true' : 'false';
-        forget.setAttribute(
-          'aria-label',
-          armed
-            ? `Tap again to forget ${person.name}`
-            : `Forget ${person.name}`,
-        );
-      }
-      fill(node, { name: person.name });
-      paintAvatar(node.querySelector('.avatar'), person);
-      return node;
-    }),
-  );
+  // Update chips IN PLACE, keyed by folded name - never rebuild the list
+  // wholesale. This repaint runs on the name field's blur-fired 'change',
+  // which lands BETWEEN the mousedown and mouseup of a tap on a chip: a
+  // replaceChildren rebuild there removed the half-tapped button, so the
+  // composed click retargeted to this container and died. Keeping the node
+  // alive lets that first tap land. (Chips stay click-activated on purpose -
+  // pointerdown activation would break scroll intent on touch.)
+  const fold = (name) => String(name || '').toLowerCase();
+  const existing = new Map();
+  for (const child of list.children) {
+    if (child.dataset && child.dataset.name)
+      existing.set(fold(child.dataset.name), child);
+  }
+  const setText = (node, value) => {
+    if (node && node.textContent !== value) node.textContent = value;
+  };
 
-  if (keep) {
+  let cursor = list.firstElementChild;
+  for (const person of people) {
+    let item = existing.get(fold(person.name));
+    if (!item) {
+      item = clone('tpl-person');
+      if (!item) continue;
+    }
+    const add = item.querySelector('.person__add');
+    const forget = item.querySelector('.person__forget');
+    const already = seated.has(person.name.toLowerCase());
+    item.dataset.name = person.name;
+    if (add) {
+      add.dataset.name = person.name;
+      add.setAttribute(
+        'aria-label',
+        already
+          ? `${person.name} is already playing`
+          : `Add ${person.name} to this game`,
+      );
+      disable(
+        add,
+        already || full,
+        already
+          ? 'Already in this game'
+          : full
+            ? 'Eight players is the maximum'
+            : undefined,
+      );
+      // The reason rides on the chip, not in a title attribute a phone never
+      // shows - a dead-looking chip with no explanation reads as a bug.
+      const note = item.querySelector('[data-field="note"]');
+      if (note) {
+        setText(note, already ? 'already playing' : full ? 'table is full' : '');
+        show(note, already || full);
+      }
+    }
+    if (forget) {
+      forget.dataset.name = person.name;
+      // Tabbable exactly while edit mode shows the crosses: this is the
+      // app's only route to deleting a stored name and its photos, and it
+      // has to be reachable by keyboard, not only by pointer.
+      forget.tabIndex = view.peopleEditing ? 0 : -1;
+      const armed = view.forgetArmed === person.name;
+      forget.dataset.armed = armed ? 'true' : 'false';
+      forget.setAttribute(
+        'aria-label',
+        armed ? `Tap again to forget ${person.name}` : `Forget ${person.name}`,
+      );
+    }
+    setText(item.querySelector('[data-field="name"]'), person.name);
+    paintAvatar(item.querySelector('.avatar'), person);
+    // Keep DOM order in step with the stored order, moving nodes only when
+    // they are genuinely out of place.
+    if (item === cursor) cursor = cursor.nextElementSibling;
+    else list.insertBefore(item, cursor);
+  }
+  // Everything still at or past the cursor matched no person: forgotten.
+  while (cursor) {
+    const next = cursor.nextElementSibling;
+    cursor.remove();
+    cursor = next;
+  }
+
+  // Surviving chips keep their own focus; only a chip that vanished under
+  // focus (a confirmed forget) needs the hand-off.
+  if (keep && focused && !focused.isConnected) {
     const again = [...list.children].find(
-      (li) => li.dataset && li.dataset.name === keep.name,
+      (li) => li.dataset && fold(li.dataset.name) === fold(keep),
     );
     const target = again
-      ? again.querySelector(keep.forget ? '.person__forget' : '.person__add')
+      ? again.querySelector('.person__forget')
       : el('btn-people-edit');
     if (target && !target.disabled) target.focus();
   }
@@ -3256,7 +3275,20 @@ function renderReveal() {
 
   // The house rule only speaks when it pays. A note that says "1 of 3" every
   // turn is noise; a note that appears exactly when a token lands is a reward.
-  show(el('reveal-streak'), outcome.streakAwarded === true);
+  // The payout clause comes from the LEDGER's own award, never assumed: at the
+  // 5-token cap the streak pays 0, and a banner promising "+1 token" directly
+  // above a ledger row that honestly says 0 read as the app cheating.
+  const streakNote = el('reveal-streak');
+  if (streakNote) {
+    const streakAward = outcome.tokenAwards.find((a) => a.reason === 'streak');
+    streakNote.textContent =
+      streakAward && streakAward.delta > 0
+        ? 'Streak bonus — three in a row, +1 token'
+        : streakAward
+          ? 'Streak bonus — three in a row (tokens already full)'
+          : 'Streak bonus — three in a row';
+    show(streakNote, outcome.streakAwarded === true);
+  }
 
   const pending = pendingResult(state);
   const next = el('btn-next-player');

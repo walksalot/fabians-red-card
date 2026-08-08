@@ -1061,8 +1061,12 @@
          #tpl-mini-card and mark the new one [data-highlight="true"]. -->
     <ol class="mini-timeline mini-timeline--context" id="reveal-strip" hidden aria-label="Where the card landed"></ol>
 
-    <!-- House rule note, earned. Ships hidden. -->
-    <p class="streaknote" id="reveal-streak" hidden>Streak bonus &mdash; three in a row, +1 token</p>
+    <!-- House rule note, earned. Ships hidden. ui.js rewrites the text from
+         the reveal's actual streak award: ", +1 token" only when the ledger
+         really paid it, "(tokens already full)" when the 5-token cap swallowed
+         the payout. The shipped copy stays payout-free so a stale banner can
+         never promise a token the pills refuse to show. -->
+    <p class="streaknote" id="reveal-streak" hidden>Streak bonus &mdash; three in a row</p>
 
     <section class="card card--tight" id="confirm-panel" hidden aria-labelledby="confirm-heading">
       <h2 class="sect__eyebrow sect__eyebrow--accent" id="confirm-heading">Did <span id="confirm-player-name">Player 1</span> name it?</h2>
