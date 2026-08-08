@@ -65,6 +65,13 @@ Useful checks users feel but don't name:
 - Toggle switches are labels over hidden checkboxes — click the label like a
   human would: `page.locator('label:has(> #opt-buyin)')`.
 
+## Absolute security rule
+
+Never set `ignoreHTTPSErrors`, never pass `--ignore-certificate-errors`, and
+never disable or weaken TLS certificate verification in any form, in any
+script, even "temporarily to test something". If a TLS error blocks you,
+report it as an environment note instead of bypassing it.
+
 ## Fast paths (so you don't burn time on setup)
 
 - New game: home → **New game** → tap **Skip photo** on every row → **Shuffle & start**.

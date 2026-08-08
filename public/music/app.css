@@ -421,7 +421,11 @@ body[data-screen='rules']      #rules { display: flex; }
   color: var(--ink-45);
   white-space: nowrap;
 }
-.sect__match { font-weight: 600; color: var(--good-text); }
+/* Ink, not the verdict green: 12px/600 green on the paper is 4.29:1, short of
+   AA - and green is reserved for verdicts anyway. Zero matches goes red,
+   because a 0 above two red warnings must not look like success. */
+.sect__match { font-weight: 600; color: var(--ink-85); }
+.sect__match[data-tone='bad'] { color: var(--bad-text); }
 .sect__match strong { font-weight: 600; }
 .sect__hint {
   font-size: 12px;
@@ -498,7 +502,13 @@ body[data-screen='rules']      #rules { display: flex; }
   cursor: pointer;
   transition: transform var(--t-fast) ease;
 }
-.stepper__btn:active { transform: scale(0.9); }
+.stepper__btn:active:not(:disabled) { transform: scale(0.9); }
+/* Pinned at a bound, same treatment as the roster buttons on this screen. */
+.stepper__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  box-shadow: none;
+}
 .stepper__value {
   font-family: var(--font-display);
   font-size: 26px;
@@ -664,7 +674,10 @@ body[data-screen='rules']      #rules { display: flex; }
   padding: 0;
   border: var(--bd);
   border-radius: 50%;
-  background: var(--seat);
+  /* --seat-fill is the seat colour nudged (in ui.js) until the initial's ink
+     clears 4.5:1 - two of the eight crayons left white a shade short. A photo
+     covers it, so only the fallback circle is ever affected. */
+  background: var(--seat-fill, var(--seat));
   overflow: hidden;
 }
 button.avatar { cursor: pointer; }
@@ -1211,6 +1224,14 @@ body[data-mode='coop'] .roster__team { display: flex; }
   font-size: 11.5px;
   color: var(--ink-50);
 }
+/* The countdown to the name field's maxlength; ui.js shows it near the cap. */
+.player-row__count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-55);
+}
 .player-row[data-photo-state='photo'] .player-row__status { color: var(--good-text); }
 .player-row__skip[aria-pressed='true'] {
   border: var(--bd);
@@ -1301,6 +1322,20 @@ body[data-mode='coop'] .roster__team { display: flex; }
   cursor: pointer;
 }
 .person__add .avatar { --avatar-size: 24px; }
+/* A chip that cannot seat anybody must look it - it used to be pixel-identical
+   to a live one, with the reason hidden in a title attribute phones never
+   show. The note carries the reason instead. */
+.person__add:disabled {
+  opacity: 0.45;
+  cursor: default;
+  box-shadow: none;
+  border-style: dashed;
+}
+.person__note {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink-55);
+}
 .person__forget {
   display: none;
   position: absolute;
@@ -1382,27 +1417,30 @@ body[data-mode='coop'] #field-mistake-limit { display: flex; }
 }
 .foldout__summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--s-2);
+  gap: 2px var(--s-2);
   padding: 14px 16px;
   cursor: pointer;
   list-style: none;
 }
 .foldout__summary::-webkit-details-marker { display: none; }
 .foldout__title {
+  flex: 1;
   font-size: 14.5px;
   font-weight: 700;
 }
+/* The live state gets its own full-width line and wraps: it is the one thing
+   folding must never hide, and beside the title it was ellipsised before the
+   song count - the number the line exists for - ever fit, at every width. */
 .foldout__state {
-  flex: 1;
+  flex: 1 0 100%;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: 11px;
+  line-height: 1.45;
   color: var(--ink-45);
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: left;
 }
 .foldout__caret {
   flex: none;
@@ -1743,6 +1781,14 @@ body[data-mode='coop'] #pass-standings { display: none; }
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
+}
+/* Link playback: the hub names the service instead of counting down. */
+.disc__time[data-mode='link'] {
+  max-width: 90%;
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
 }
 
 .playstatus {
@@ -2092,7 +2138,10 @@ body[data-mode='coop'] #btn-challenge { display: none; }
 .verdict[data-verdict='correct'] {
   border-color: var(--good);
   background: var(--good-tint);
-  color: var(--good-text);
+  /* Ink, not --good-text: the green on its own tint is 3.81:1 at this size and
+     WCAG wants 4.5. The border and the dot keep the verdict green; the words
+     just have to be readable. (The red pairing passes as-is.) */
+  color: var(--ink-85);
   transform: rotate(-1.5deg);
 }
 .verdict[data-verdict='correct'] .verdict__dot { background: var(--good); }
@@ -2137,7 +2186,8 @@ body[data-mode='coop'] #btn-challenge { display: none; }
 .vote[aria-pressed='true'] {
   border: 1.5px solid var(--good);
   background: var(--good-tint);
-  color: var(--good-text);
+  /* Ink for the same AA reason as the correct verdict above. */
+  color: var(--ink-85);
 }
 
 .screen--reveal > .card { margin: 0 var(--gutter); }
@@ -2285,6 +2335,35 @@ body[data-mode='coop'] #btn-challenge { display: none; }
   color: var(--ink-45);
 }
 
+/* Co-op: one shared score-row ("The team") plus this compact who-is-playing
+   card - never a row per player, which was eight copies of one shared pile. */
+.coop-roster {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: 12px 16px;
+  border: var(--bd);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--sh-card);
+}
+.coop-roster__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+}
+.coop-player {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.coop-player .avatar { --avatar-size: 24px; }
+.coop-player__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.coop-player[data-rank='active'] .coop-player__name { color: var(--accent-text); }
+
 /* 6.7 Win ----------------------------------------------------------------- */
 .screen--win { position: relative; }
 .confetti {
@@ -2319,9 +2398,14 @@ body[data-mode='coop'] #btn-challenge { display: none; }
 }
 .win__name {
   font-family: var(--font-display);
-  font-size: clamp(34px, 11vw, 42px);
+  /* The floor scales with the viewport (a 16-char name at 34px is wider than
+     a 320px phone) and overflow-wrap catches whatever a single unbroken name
+     still cannot fit - clipped off both screen edges is never acceptable. */
+  font-size: clamp(24px, 9.5vw, 42px);
   font-weight: 400;
   line-height: 1.1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .win__summary {
   margin-top: var(--s-3);
@@ -2347,8 +2431,12 @@ body[data-mode='coop'] #btn-challenge { display: none; }
 }
 .recap__row {
   display: flex;
+  /* Wrap, so a long key ("Wilhelmina Woods's decade" at 320px) pushes the
+     value onto its own full-width line instead of squeezing it into a one-
+     word-per-line column. */
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: var(--s-3);
+  gap: var(--s-1) var(--s-3);
   padding: 12px 16px;
   border: var(--bd);
   border-radius: 13px;
@@ -2358,7 +2446,7 @@ body[data-mode='coop'] #btn-challenge { display: none; }
   text-align: left;
 }
 .recap__key { flex: none; color: var(--ink-50); }
-.recap__value { font-weight: 600; text-align: right; }
+.recap__value { flex: 1; min-width: 14ch; font-weight: 600; text-align: right; }
 
 .pot {
   display: flex;
@@ -2703,6 +2791,42 @@ body[data-mode='coop'] #btn-challenge { display: none; }
   animation: popIn var(--t-mid) ease both;
 }
 
+/* The stale-tab notice. Above everything (sheets are 90s, toast 95): once
+   another tab holds a newer save, every control under this scrim is a trap. */
+.stale {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--gutter);
+  background: rgba(36, 28, 21, 0.55);
+}
+.stale__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  max-width: 340px;
+  padding: var(--s-5);
+  border: var(--bd-2);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--sh-card);
+  text-align: center;
+}
+.stale__title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+.stale__body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-65);
+}
+
 /* --------------------------------------------------------------- 8 motion */
 @keyframes rise {
   from { opacity: 0; transform: translateY(10px); }
@@ -2747,6 +2871,27 @@ body[data-motion='reduce'] *::after {
 /* ------------------------------------------------------- narrow phones */
 /* 320px is the floor (iPhone SE 1). Everything below trims spend, never
    content - no control is dropped and nothing is allowed to overflow. */
+/* Short viewports - a phone held sideways. The sticky timeline drawer used to
+   bury the vinyl outright (it and the header covered the whole height, and
+   elementFromPoint on the hub hit the drawer). Here the drawer collapses to a
+   strip with its own scroll, the rail and the up-next line yield their rows
+   (the scoreboard stays one tap away on the menu), and the vinyl, countdown,
+   status, replay/skip links and the QR are on screen or a scroll below. */
+@media (max-height: 480px) {
+  body[data-screen='play'] .roster { display: none; }
+  .upnext { display: none; }
+  .screen--play .statusbar { padding-top: 8px; }
+  .whostrip { padding-top: 6px; }
+  .disc { margin-top: 0; }
+  .play__scroll { padding-top: 4px; }
+  .playfoot {
+    max-height: 38dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 10px;
+  }
+}
+
 @media (max-width: 360px) {
   :root { --gutter: 16px; }
   .home__title { font-size: 38px; }

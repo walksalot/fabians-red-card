@@ -90,9 +90,12 @@
 
       <details class="reveal" id="reveal">
         <summary class="reveal-summary">
+          <!-- The two text slots are rewritten by listen.js when the host set a
+               streaming source: the disclosure then IS the player ("Play it on
+               Spotify"), opened for them, with only that service's link. -->
           <span class="reveal-text">
-            Show streaming links
-            <em>this reveals the song title</em>
+            <span id="reveal-lead">Show streaming links</span>
+            <em id="reveal-note">this reveals the song title</em>
           </span>
           <span class="reveal-chevron" aria-hidden="true"></span>
         </summary>

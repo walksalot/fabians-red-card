@@ -150,7 +150,13 @@
       buyin-dec/buyin-inc           [#field-buyin-amount stepper]   * NEW *
       toggle-decade       [buttons in #decade-chips, data-decade="1980"]
       toggle-genre        [buttons in #genre-chips,  data-genre="pop"]
-      chips-all           [#btn-decades-all, #btn-genres-all, data-target]
+                          NOTE an empty selection means "everything" to the
+                          filter, so the chips must never show one: turning the
+                          LAST pressed chip of a group off re-presses the whole
+                          group instead.
+      chips-all           [#btn-decades-all, #btn-genres-all, data-target -
+                           always selects the whole group (never clears to
+                           empty, for the same reason)]
       start-game          [#btn-start-game - armed tap while an UNFINISHED
                            saved game exists: first tap relabels it "Tap again
                            to replace the saved game"; a second tap within ~4s
@@ -184,9 +190,15 @@
       commit-placement    [#btn-place]
       confirm-title       [#btn-confirm-title]        (aria-pressed toggle)
       confirm-artist      [#btn-confirm-artist]       (aria-pressed toggle)
-      next-turn           [#btn-next-player]
-      play-again          [#btn-play-again]
+      next-turn           [#btn-next-player - taps are ignored for ~700ms after
+                           the reveal renders: it sits at Place-here's exact
+                           coordinates and a double tap used to skip the reveal]
+      play-again          [#btn-play-again - the setup screen that replaces it
+                           gets the same ~700ms guard on its mode rows and on
+                           start-game, for the same double-tap reason]
       pay-venmo           [#btn-venmo]                (ships inside [hidden])  * NEW *
+      reload-page         [#btn-stale-reload - the stale overlay's only
+                           control; the ONE action ui.js accepts while stale]
 
   TOGGLE BUTTONS - state lives in aria-pressed="true|false", CSS styles from it
     #btn-play-song  #btn-claim-identify  #btn-confirm-title
@@ -211,6 +223,8 @@
     play        - #play-player-name #play-turn-number
                   #play-progress-current #play-progress-target
                   #btn-play-label #countdown-value #audio-status
+                  #countdown-unit ("s"; blanked in link modes, where
+                  #countdown-value carries the service name instead of a count)
                   #year-guess-value #challenge-count (badge, ships [hidden])
                   #btn-buy-card-reason (ships [hidden])
                   #play-next-name ; hide #play-next when nobody is next
@@ -221,6 +235,9 @@
                   #reveal-belongs #reveal-streak  * NEW *  (both ship [hidden])
     scoreboard  - #scoreboard-meta  * NEW *  (ships [hidden]; "6 cards left")
     win         - #win-eyebrow #win-player-name #win-summary
+                  #win-title-prefix (the heading's sr-only prefix - write it
+                  from the eyebrow, "Winner: " / "Game over: ", so a loss is
+                  never announced as a win)
     challenge   - #challenge-player-name
 
   CONTAINERS ui.js FILLS (all ship EMPTY - clone the matching <template>)
@@ -240,10 +257,16 @@
     #token-awards         <- #tpl-award-item
     #challenge-outcomes   <- #tpl-outcome-item
     #scoreboard-list      <- #tpl-scoreboard-row (its [data-field="timeline"]
-                             <ol> takes #tpl-mini-card children)
+                             <ol> takes #tpl-mini-card children). In co-op it
+                             takes ONE such row (the shared timeline/pool,
+                             named "The team") plus a #tpl-coop-roster of
+                             #tpl-coop-player chips - never a row per player,
+                             which was eight copies of the same shared state.
     #win-timeline         <- #tpl-mini-card
     #challenge-players    <- #tpl-challenge-option
-    #qr-code              <- innerHTML = qrSvg(...) from qr.js
+    #qr-code              <- innerHTML = qrSvg(...) from qr.js. The whole
+                             #qr-block stays hidden until a card is drawn -
+                             a scan caption over no code reads as broken.
     #streaming-links      <- <a> elements; ships [hidden]
     #challenge-locks   * NEW *  <- #tpl-challenge-lock, one pill per locked
                           challenge ("Mo challenged"); ships [hidden]
@@ -307,9 +330,19 @@
       #win-pot             winner-screen block, ships [hidden]
                            [data-field="pot"]    the total, e.g. "$8"
                            [data-field="venmo"]  the handle to pay
+                           [data-field="each"]   one buy-in, on the co-op line
+                           #win-pot-venmo        the pay-one-person line
+                           #win-pot-coop         the co-op line (ships [hidden];
+                                                 exactly one of the two shows -
+                                                 co-op never renders a payee,
+                                                 button or QR, win or lose)
                            #btn-venmo            data-action="pay-venmo"
                            #win-qr               inject a QR so other phones can
                                                  scan to pay
+      The win screen pays from the stake SNAPSHOT taken at Shuffle & start
+      (storage key 'buyin-active'), never from the live setup draft - editing a
+      setup that was never started must not touch a running game's pot. The
+      snapshot is replaced on every start and cleared with its game.
 
   STATE ATTRIBUTES CSS REACTS TO
     #verdict-banner[data-verdict] = 'correct' | 'wrong' | 'neutral'
@@ -329,6 +362,11 @@
     .outcome[data-result]         = 'correct' | 'wrong'
     .mini-card[data-highlight]    = 'true'   * NEW *  (the just-placed year in
                                     #reveal-strip)
+    .disc__time[data-mode]        = 'link'  (link playback modes: the hub shows
+                                    the service name, not a countdown)
+    #eligible-count[data-tone]    = 'ok' | 'bad'  ('bad' when 0 songs match -
+                                    a zero must not render in success green)
+    .coop-player[data-rank]       = 'active' | 'other'
     #countdown-ring style property --ring-progress = 1 -> 0 (fraction of the
     30s preview remaining). Set with
       ring.style.setProperty('--ring-progress', String(remaining / 30))
@@ -355,6 +393,8 @@
       #buyin-venmo-hint
       #buyin-block #win-pot #challenge-locks #reveal-strip #reveal-belongs
       #reveal-streak #scoreboard-meta #win-recap #toast          (all * NEW *)
+      #stale-overlay (shown when another tab holds a newer save - every input
+      except its Reload button is refused from then on)
     The per-row input[data-role="player-photo"] is NOT one of them: it is
     visually hidden by .player-row__file (not [hidden] - see the note on the
     template) and stays that way forever. The .avatar button is the accessible
@@ -392,6 +432,7 @@
   <!-- Named explicitly so the browser stops asking for /favicon.ico, which does
        not exist and 404s on every single load. -->
   <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
   <!-- Self-hosted Paytone One / Sora / IBM Plex Mono. Loaded BEFORE app.css so
        app.css can override the family tokens it declares. Never Google Fonts:
        the app promises nothing leaves this phone, and it has to work offline. -->
@@ -852,7 +893,10 @@
             </g>
           </svg>
           <span class="sr-only" id="btn-play-label">Play song</span>
-          <span class="disc__time" aria-hidden="true"><span id="countdown-value">30</span>s</span>
+          <!-- The unit is its own slot so link modes can blank it and put the
+               service name where the countdown was - those modes play nothing
+               here, so a ticking clock would be a lie. -->
+          <span class="disc__time" aria-hidden="true"><span id="countdown-value">30</span><span id="countdown-unit">s</span></span>
         </button>
       </div>
 
@@ -1047,9 +1091,10 @@
         <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
       </span>
       <p class="win__eyebrow" id="win-eyebrow">Winner</p>
-      <!-- "Winner" is only in the eyebrow above, which is not part of the heading -
-           so the accessible name needs its own copy. See the note on #play-title. -->
-      <h1 class="win__name" id="win-title" tabindex="-1"><span class="sr-only">Winner: </span><span id="win-player-name">Player 1</span></h1>
+      <!-- The eyebrow is not part of the heading, so the accessible name needs
+           its own copy - and ui.js rewrites it to match the outcome, because a
+           hardcoded "Winner:" over a co-op loss announced a victory nobody had. -->
+      <h1 class="win__name" id="win-title" tabindex="-1"><span class="sr-only" id="win-title-prefix">Winner: </span><span id="win-player-name">Player 1</span></h1>
       <p class="win__summary" id="win-summary">10 cards, 3 tokens left</p>
       <ol class="mini-timeline mini-timeline--win" id="win-timeline"></ol>
 
@@ -1060,7 +1105,12 @@
       <section class="pot" id="win-pot" hidden aria-labelledby="win-pot-title">
         <h2 class="sect__eyebrow sect__eyebrow--accent" id="win-pot-title">The pot</h2>
         <p class="pot__amount" data-field="pot">$8</p>
-        <p class="pot__venmo">Send it to <b data-field="venmo">&#64;yourname</b></p>
+        <!-- Exactly one of these two lines shows. Co-op has no payee: the pot
+             was everybody's however the game went, so that line names the
+             per-head amount and ui.js suppresses the button, the QR and the
+             scan caption with it. -->
+        <p class="pot__venmo" id="win-pot-venmo">Send it to <b data-field="venmo">&#64;yourname</b></p>
+        <p class="pot__venmo" id="win-pot-coop" hidden>Chipped in <b data-field="each">$2</b> each &mdash; settle it together.</p>
         <button type="button" class="btn btn--paper btn--sm" id="btn-venmo" data-action="pay-venmo">Open Venmo</button>
         <div class="pot__frame">
           <div class="pot__qr" id="win-qr" role="img" aria-label="QR code to pay the pot"></div>
@@ -1109,7 +1159,7 @@
         <li>Choose a target of 5, 10 or 15 cards, a mode, and which decades and genres are in play.</li>
       </ul>
 
-      <h2>Tokens &middot; start with 2, hold at most 5</h2>
+      <h2>Tokens &middot; start with 2, hold at most 5 &mdash; co-op's shared pool holds 6</h2>
       <ul class="tokenrules">
         <li><span class="tokenrules__delta tokenrules__delta--loss">&minus;1</span><span><b>Challenge</b> &mdash; bet the card fits your timeline. If the active player is wrong and you are right, it is yours.</span></li>
         <li><span class="tokenrules__delta tokenrules__delta--gain">+1</span><span><b>Name it</b> &mdash; call the title and artist before the reveal. The group votes.</span></li>
@@ -1147,9 +1197,10 @@
         <dd>One shared timeline and one shared token pool. Everyone still takes turns placing, but you are all on the same side. Reach the target together and you win; hit the mistake limit (3 by default) and the game is over for everybody.</dd>
       </dl>
       <p class="prose__aside">
-        Tokens are spent and earned the same way in every mode. The only difference is
-        whose they are: in co-op there is one pool, so a challenge or a bought card is
-        paid for by the whole table.
+        Co-op changes more than whose tokens they are: the table shares one pool that
+        holds up to 6 (solo modes cap at 5), a bought card or a confirmed name-it
+        spends and earns from that pool, and there are no challenges at all &mdash;
+        everyone is on the same side, so a miss burns a shared mistake instead.
       </p>
 
       <h2>House notes</h2>
@@ -1261,6 +1312,26 @@
 </div>
 
 
+<!-- ========================================================= STALE NOTICE -->
+<!-- Unhidden by ui.js when another tab has provably written a newer save (the
+     write counter inside the save says so). It covers the whole app and Reload
+     is the only live control - a stale tab that keeps taking taps writes
+     somebody else's turn out of existence. -->
+<div class="stale" id="stale-overlay" hidden role="alertdialog" aria-modal="true"
+     aria-labelledby="stale-title" aria-describedby="stale-body">
+  <div class="stale__card">
+    <h2 class="stale__title" id="stale-title">This game moved on in another tab</h2>
+    <p class="stale__body" id="stale-body">
+      Someone kept playing somewhere else, so this screen is behind. Reload to
+      catch up &mdash; nothing has been lost.
+    </p>
+    <button type="button" class="btn btn--primary" id="btn-stale-reload" data-action="reload-page">
+      Reload
+    </button>
+  </div>
+</div>
+
+
 <!-- ================================================================ TOAST -->
 <!-- The design's ink pill. Ships hidden; #live-status still does the
      announcing, so this is presentation only. -->
@@ -1296,6 +1367,9 @@
     <p class="player-row__foot">
       <span class="player-row__num" aria-hidden="true">1</span>
       <span class="player-row__status" data-field="status">Photo needed</span>
+      <!-- The input clips silently at maxlength; this counts the last few
+           characters down so nobody plays all night as "Grandma Josephin". -->
+      <span class="player-row__count" data-field="count" hidden>16/16</span>
       <button type="button" class="chip chip--sm player-row__skip" data-action="skip-photo" aria-pressed="false">
         Skip photo
       </button>
@@ -1325,6 +1399,9 @@
         <span class="avatar__initial" data-field="initial" aria-hidden="true">P</span>
       </span>
       <span class="person__name" data-field="name">Paula</span>
+      <!-- Why the chip is disabled ("already playing" / "table is full") - on
+           the chip itself, because a title attribute never shows on a phone. -->
+      <span class="person__note" data-field="note" hidden>already playing</span>
     </button>
     <button type="button" class="person__forget" data-action="forget-person" data-name="" tabindex="-1">
       <svg viewBox="0 0 24 24" class="icon" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>
@@ -1442,6 +1519,28 @@
       <span class="hist__strength" data-field="strength">warming up</span>
     </div>
     <ol class="mini-timeline" data-field="timeline"></ol>
+  </li>
+</template>
+
+<!-- Co-op scoreboard: the shared block is a #tpl-scoreboard-row named "The
+     team"; this is the compact who-is-playing list that replaces the other
+     seven identical copies of it. -->
+<template id="tpl-coop-roster">
+  <li class="coop-roster">
+    <p class="sect__eyebrow">Playing</p>
+    <ul class="coop-roster__list"></ul>
+  </li>
+</template>
+
+<!-- One player in that list. Set li[data-rank] 'active'|'other', the li's
+     --seat properties, the avatar, and [data-field="name"]. -->
+<template id="tpl-coop-player">
+  <li class="coop-player" data-rank="other">
+    <span class="avatar avatar--sm" data-photo="false">
+      <img class="avatar__img" data-field="photo" alt="">
+      <span class="avatar__initial" data-field="initial" aria-hidden="true">1</span>
+    </span>
+    <span class="coop-player__name" data-field="name">Player 1</span>
   </li>
 </template>
 
