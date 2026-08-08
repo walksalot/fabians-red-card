@@ -65,8 +65,11 @@ function fakeDom() {
     },
     addEventListener: collect,
     matchMedia: undefined,
-    setTimeout: globalThis.setTimeout.bind(globalThis),
-    clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    // Late-bound on purpose: a .bind() taken here would capture the REAL
+    // timers before a test installs vi.useFakeTimers(), and the debounce test
+    // below depends on fake timers reaching ui.js's window.setTimeout.
+    setTimeout: (...args: Parameters<typeof globalThis.setTimeout>) => globalThis.setTimeout(...args),
+    clearTimeout: (...args: Parameters<typeof globalThis.clearTimeout>) => globalThis.clearTimeout(...args),
   };
   return { doc, win, listeners };
 }
@@ -138,19 +141,29 @@ describe('renaming a player with a photo', () => {
     expect(storage.avatarsFor('Ana')).toContain(photo('ana'));
   });
 
-  it('persists the typed name to the roster draft without waiting for another photo/skip action', async () => {
-    const draft = seam.view.setup.players[0];
-    draft.name = 'Ana';
-    storage.savePlayers([{ name: 'Ana', photo: null, skipped: true }]);
+  it('persists the typed name to the roster draft without waiting for another photo/skip action', () => {
+    // Fake timers, not a wall-clock sleep: a real 650ms wait flakes on a
+    // loaded runner and silently stops testing anything if the debounce
+    // constant ever grows past it. Advancing the clock is exact either way.
+    vi.useFakeTimers();
+    try {
+      const draft = seam.view.setup.players[0];
+      draft.name = 'Ana';
+      storage.savePlayers([{ name: 'Ana', photo: null, skipped: true }]);
 
-    const input = nameInput(0);
-    input.value = 'Annie';
-    fire('input', input);
-    // The keystroke save is debounced (~500ms), so a reload shortly after
-    // typing restores what was on the screen.
-    await new Promise((resolve) => setTimeout(resolve, 650));
+      const input = nameInput(0);
+      input.value = 'Annie';
+      fire('input', input);
+      // Just under the debounce: nothing must be saved yet (proves the wait
+      // below is testing the debounce, not an immediate write).
+      vi.advanceTimersByTime(400);
+      expect((storage.loadPlayers() as Array<{ name: string }>)[0].name).toBe('Ana');
+      vi.advanceTimersByTime(300);
 
-    const saved = storage.loadPlayers() as Array<{ name: string }>;
-    expect(saved[0].name).toBe('Annie');
+      const saved = storage.loadPlayers() as Array<{ name: string }>;
+      expect(saved[0].name).toBe('Annie');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
