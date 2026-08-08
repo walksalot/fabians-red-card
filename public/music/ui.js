@@ -842,11 +842,14 @@ async function acceptPhoto(draft, file) {
  */
 function isUntouchedRow(draft) {
   const name = (draft.name || '').trim();
-  return (
-    !draft.photo &&
-    !draft.skipped &&
-    (name === '' || /^player\s*\d+$/i.test(name))
-  );
+  // A leftover skipped flag does not make a seat taken: rows restored from a
+  // previous game arrive with skipped=true, and clearing such a row's name
+  // used to leave a ghost seat no guest chip could fill - at eight rows the
+  // freed seat even read as "table is full". Once the name is gone the seat is
+  // free; only a photo still protects it, because a photo means somebody is
+  // actively mid-setup on that row and overwriting it would destroy their work.
+  if (name === '') return !draft.photo;
+  return !draft.photo && !draft.skipped && /^player\s*\d+$/i.test(name);
 }
 
 /**
@@ -4375,11 +4378,13 @@ const HANDLERS = {
   'confirm-artist': () => confirmToggle('artist'),
   'next-turn': () => nextTurn(),
   'play-again': () => {
+    // Nothing is cleared here. The finished game - winner, recap, pot QR - has
+    // to survive a reload during post-game setup (settling the pot in Venmo
+    // reloads the tab on most phones), so the record lives until Shuffle &
+    // start genuinely replaces it: startGame snapshots the new stake and
+    // writes with persist(true). Clearing at tap time was round 3's
+    // play-again-erases-finished-game-record.
     state = null;
-    clearGame();
-    // The pot went with the game it belonged to.
-    removeStored(ACTIVE_BUYIN_KEY);
-    saveCounter = 0;
     // The setup screen appears under the finger that just tapped Play again,
     // with the Classic mode row at those exact coordinates - a double tap was
     // silently resetting the mode the table had chosen.
@@ -4410,6 +4415,17 @@ function onClick(event) {
   const target = event.target;
   if (!target || typeof target.closest !== 'function') return;
   const node = target.closest('[data-action]');
+  // Any interaction other than Next player itself means the table is still
+  // using the reveal - stop the countdown and let them. This must run BEFORE
+  // the no-action early return: the most natural "wait, let me look" gestures
+  // are taps on the revealed card and the verdict banner, which carry no
+  // data-action at all and used to sail past the cancel entirely.
+  if (
+    autoNextTimer !== null &&
+    (!node || node.dataset.action !== 'next-turn')
+  ) {
+    cancelAutoNext();
+  }
   if (!node) return;
   if (node.disabled || node.getAttribute('aria-disabled') === 'true') return;
   // A stale tab accepts exactly one input: the Reload button on its notice.
@@ -4424,10 +4440,6 @@ function onClick(event) {
   // shapes toggleAudio(). unlock() is cheap and idempotent after the first tap.
   sfx.unlock();
   (ACTION_CUES[node.dataset.action] || sfx.tap)();
-  // Any interaction on the reveal other than Next player itself means the
-  // table is still using the screen - stop the countdown and let them.
-  if (autoNextTimer !== null && node.dataset.action !== 'next-turn')
-    cancelAutoNext();
   handler(node);
 }
 
