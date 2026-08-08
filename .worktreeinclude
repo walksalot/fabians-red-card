@@ -1,0 +1,8 @@
+# Gitignored files to copy into local tool-managed worktrees.
+# Keep this list explicit. Do not include secrets unless local worktrees need
+# them and you accept that agents may read or mention those files in transcripts.
+#
+# Common examples:
+# .env
+# .env.local
+# CLAUDE.local.md
