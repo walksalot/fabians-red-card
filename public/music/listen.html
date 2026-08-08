@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover so the aurora bleeds into the notch/home-indicator
+         areas while the safe-area insets in listen.css keep content clear. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#08070c" />
+    <meta name="color-scheme" content="dark" />
+    <!-- The title is deliberately generic. It shows up in tab strips, share
+         sheets and screen-recording overlays, so it must never carry the song. -->
+    <title>Listen &mdash; Timeline</title>
+    <!-- The URL hash holds the (base64url) song, so keep it out of referrers,
+         history previews and any indexer that wanders in. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="stylesheet" href="./listen.css" />
+  </head>
+  <body>
+    <!--
+      listen.html - the page a player lands on after scanning the card QR on the
+      host's phone. It is the most spoiler-sensitive screen in the game: it plays
+      a 30-second clip and shows nothing but the card number. The title, the
+      artist and (above all) the year never reach this DOM unless the player
+      explicitly opens the streaming-links disclosure.
+    -->
+    <div class="aurora" aria-hidden="true"></div>
+
+    <main class="shell">
+      <header class="masthead">
+        <p class="wordmark">Timeline</p>
+        <h1 class="card-no" id="card-no">Card</h1>
+      </header>
+
+      <!-- The player. Hidden until a valid card payload is decoded. -->
+      <section class="player" id="player" hidden>
+        <div class="dial">
+          <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+            <defs>
+              <linearGradient id="ring-grad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#a78bfa" />
+                <stop offset="0.55" stop-color="#8b5cf6" />
+                <stop offset="1" stop-color="#ff2d9b" />
+              </linearGradient>
+            </defs>
+            <circle class="ring-track" cx="60" cy="60" r="53" />
+            <circle class="ring-progress" id="ring-progress" cx="60" cy="60" r="53" />
+          </svg>
+          <button class="play" id="play" type="button" aria-label="Play the clip">
+            <svg class="glyph glyph-play" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 5.2v13.6L19 12z" />
+            </svg>
+            <svg class="glyph glyph-pause" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7.5 5h3.2v14H7.5zM13.3 5h3.2v14h-3.2z" />
+            </svg>
+            <span class="glyph glyph-wait" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <p class="times">
+          <span class="time" id="elapsed">0:00</span>
+          <span class="time-label">elapsed</span>
+          <span class="time-dot" aria-hidden="true"></span>
+          <span class="time" id="remaining">0:30</span>
+          <span class="time-label">left</span>
+        </p>
+
+        <p class="status" id="status" role="status" aria-live="polite">
+          Getting the clip ready&hellip;
+        </p>
+
+        <div class="controls">
+          <button class="ghost" id="replay" type="button" disabled>
+            Replay from the start
+          </button>
+        </div>
+      </section>
+
+      <!-- Explains a missing/expired/garbled hash instead of showing a blank page. -->
+      <section class="notice" id="notice" hidden>
+        <h2 class="notice-title" id="notice-title">Nothing to play yet</h2>
+        <p class="notice-body" id="notice-body">
+          Scan a card from the game to listen.
+        </p>
+      </section>
+
+      <details class="reveal" id="reveal">
+        <summary class="reveal-summary">
+          <!-- The two text slots are rewritten by listen.js when the host set a
+               streaming source: the disclosure then IS the player ("Play it on
+               Spotify"), opened for them, with only that service's link. -->
+          <span class="reveal-text">
+            <span id="reveal-lead">Show streaming links</span>
+            <em id="reveal-note">this reveals the song title</em>
+          </span>
+          <span class="reveal-chevron" aria-hidden="true"></span>
+        </summary>
+        <!-- Links are built by listen.js only when this opens: their hrefs
+             contain the title, so they must not exist in the DOM before then. -->
+        <div class="links" id="links"></div>
+      </details>
+
+      <p class="footnote">
+        Only the host's screen knows the year. Back to the game when the clip ends.
+      </p>
+    </main>
+
+    <script type="module" src="./listen.js"></script>
+  </body>
+</html>
