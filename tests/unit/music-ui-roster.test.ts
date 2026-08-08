@@ -53,7 +53,10 @@ function fakeDom() {
     querySelector: () => null,
     querySelectorAll: () => [],
     contains: () => false,
-    body: { dataset: {} as Record<string, string>, style: { setProperty() {} } },
+    body: {
+      dataset: {} as Record<string, string>,
+      style: { setProperty() {} },
+    },
   };
   const win = {
     location: {
@@ -68,8 +71,10 @@ function fakeDom() {
     // Late-bound on purpose: a .bind() taken here would capture the REAL
     // timers before a test installs vi.useFakeTimers(), and the debounce test
     // below depends on fake timers reaching ui.js's window.setTimeout.
-    setTimeout: (...args: Parameters<typeof globalThis.setTimeout>) => globalThis.setTimeout(...args),
-    clearTimeout: (...args: Parameters<typeof globalThis.clearTimeout>) => globalThis.clearTimeout(...args),
+    setTimeout: (...args: Parameters<typeof globalThis.setTimeout>) =>
+      globalThis.setTimeout(...args),
+    clearTimeout: (...args: Parameters<typeof globalThis.clearTimeout>) =>
+      globalThis.clearTimeout(...args),
   };
   return { doc, win, listeners };
 }
@@ -83,7 +88,8 @@ function nameInput(playerIndex: number) {
   return {
     dataset: { role: 'player-name' },
     value: '',
-    closest: (selector: string) => (selector === '[data-player-index]' ? row : null),
+    closest: (selector: string) =>
+      selector === '[data-player-index]' ? row : null,
   };
 }
 
@@ -92,11 +98,32 @@ let listeners: Record<string, Listener[]>;
 type StorageModule = typeof import('../../public/music/storage.js');
 let storage: StorageModule;
 // The debug seam ui.js publishes as window.__timeline when ?debug=1 is set.
-let seam: { view: { setup: { players: Array<{ name: string; photo: string | null }> } } };
+let seam: {
+  view: { setup: { players: Array<{ name: string; photo: string | null }> } };
+};
 
 const fire = (type: string, target: unknown) => {
-  for (const fn of listeners[type] ?? []) fn({ type, target });
+  // preventDefault: the delegated click handler calls it unconditionally once
+  // it finds a handler; input/change handlers never do.
+  for (const fn of listeners[type] ?? [])
+    fn({ type, target, preventDefault() {} });
 };
+
+/** The "+ Add player" button, as the delegated click handler sees it. */
+function addPlayerButton() {
+  const node: {
+    dataset: Record<string, string>;
+    disabled: boolean;
+    getAttribute: () => null;
+    closest: (selector: string) => typeof node | null;
+  } = {
+    dataset: { action: 'add-player' },
+    disabled: false,
+    getAttribute: () => null,
+    closest: (selector: string) => (selector === '[data-action]' ? node : null),
+  };
+  return node;
+}
 
 beforeEach(async () => {
   vi.resetModules();
@@ -157,7 +184,9 @@ describe('renaming a player with a photo', () => {
       // Just under the debounce: nothing must be saved yet (proves the wait
       // below is testing the debounce, not an immediate write).
       vi.advanceTimersByTime(400);
-      expect((storage.loadPlayers() as Array<{ name: string }>)[0].name).toBe('Ana');
+      expect((storage.loadPlayers() as Array<{ name: string }>)[0].name).toBe(
+        'Ana',
+      );
       vi.advanceTimersByTime(300);
 
       const saved = storage.loadPlayers() as Array<{ name: string }>;
@@ -165,5 +194,26 @@ describe('renaming a player with a photo', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('adding a player row', () => {
+  it('persists the added seat immediately, like every sibling setup control', () => {
+    // The round-5 repro: tap "+ Add player" once, touch nothing else, reload.
+    // The handler used to push the draft and render() without ever queueing a
+    // save - the ONE setup edit a reload silently reverted. No wait duration
+    // helps (nothing was queued), so this is deliberately not a debounce test:
+    // the write must exist synchronously after the tap.
+    expect(storage.loadPlayers()).toBeNull();
+    expect(seam.view.setup.players).toHaveLength(4);
+
+    fire('click', addPlayerButton());
+
+    expect(seam.view.setup.players).toHaveLength(5);
+    // The reload-shaped read: loadSavedPlayers() restores from exactly this.
+    const saved = storage.loadPlayers() as Array<{ name: string }> | null;
+    expect(saved).not.toBeNull();
+    expect(saved).toHaveLength(5);
+    expect(saved?.[4].name).toBe('Player 5');
   });
 });

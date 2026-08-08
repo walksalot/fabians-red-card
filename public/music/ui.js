@@ -1752,6 +1752,12 @@ function renderSetup() {
     allGenres ? 'all genres' : plural(genres.length, 'genre', 'genres'),
     `${eligible.length} songs`,
   ];
+  // The playback select lives in this same foldout, and a non-default source
+  // IS something switched on: without a trace here a table persisted on
+  // Spotify reads identical to the preview default until the first card
+  // plays silence.
+  if (settings.playbackSource !== 'preview')
+    parts.push(`${SOURCE_LABELS[settings.playbackSource]} links`);
   text('setup-more-state', parts.join(' · '));
 
   // In co-op there is one timeline, so the group needs far fewer cards than
@@ -2333,12 +2339,26 @@ async function toggleAudio(quiet = false) {
   // its silence without touching src.
   if (p.playing && p.src && !/^data:/.test(p.src)) {
     p.pause();
+    // Say so. The status line kept reading "Playing the preview." over a
+    // frozen countdown and a button already relabelled "Play song" - the one
+    // line on the screen stating a falsehood. Written here, on the deliberate
+    // pause only, so the failure and fallback copies are never overwritten.
+    view.audio.status = 'Paused — tap play to continue.';
+    render();
     return;
   }
   if (view.audio.resolved && view.audio.resolved.previewUrl) {
     const started = await p.play(view.audio.resolved.previewUrl);
     if (!started && !quiet) failAudio('That preview would not play here.');
-    else if (started) warmNextCard();
+    else if (started) {
+      // The resume must speak too, or the paused copy above outlives the
+      // pause - and, as on the paths below, a retry that works clears the
+      // failure so the links (title included) do not linger over a song.
+      view.audio.failed = false;
+      view.audio.status = 'Playing the preview.';
+      render();
+      warmNextCard();
+    }
     return;
   }
 
@@ -2431,6 +2451,13 @@ function replayAudio() {
     p.play(view.audio.resolved.previewUrl)
       .then((started) => {
         if (!started) failAudio('That preview would not play here.');
+        else {
+          // A replay taken while paused (or after the 30s ran out) is playing
+          // again - the status has to follow, same as the resume path.
+          view.audio.failed = false;
+          view.audio.status = 'Playing the preview.';
+          render();
+        }
       })
       .catch(() => failAudio('That preview would not play here.'));
   } else {
@@ -3188,6 +3215,7 @@ const REVEAL_SUB = {
 };
 
 function renderReveal() {
+  text('reveal-turn-number', state.turn);
   paintRoster(el('reveal-roster-seats'), el('reveal-roster-team'));
   const outcome = state.outcome;
   if (!outcome) return;
@@ -3861,9 +3889,13 @@ function closeSheets() {
 }
 
 function renderSheets() {
-  const menuBtn = el('btn-menu');
-  if (menuBtn)
-    menuBtn.setAttribute('aria-expanded', view.menuOpen ? 'true' : 'false');
+  // Play, reveal and pass each carry an open-menu button; every one mirrors
+  // the sheet, or the two currently hidden would hold a stale 'false'.
+  for (const id of ['btn-menu', 'btn-menu-reveal', 'btn-menu-pass']) {
+    const menuBtn = el(id);
+    if (menuBtn)
+      menuBtn.setAttribute('aria-expanded', view.menuOpen ? 'true' : 'false');
+  }
   const challengeBtn = el('btn-challenge');
   if (challengeBtn)
     challengeBtn.setAttribute(
@@ -4276,6 +4308,10 @@ const HANDLERS = {
     view.setup.players.push(
       playerDraft(view.setup.players.length, freePlaceholderName()),
     );
+    // Persist immediately, exactly as remove-player does below: the added seat
+    // is a roster edit like any other, and without this it was the ONE setup
+    // control a mid-setup reload silently reverted - no save was ever queued.
+    rememberRoster();
     render();
   },
   'remove-player': (node) => {
@@ -4612,7 +4648,9 @@ function onInput(event) {
           : 'Sound is off. Turn it on in the menu.';
       }
     }
-    if (view.screen === 'play') render();
+    // Setup renders too: the foldout's summary line carries a non-default
+    // source, and without a repaint it goes stale the moment this changes.
+    if (view.screen === 'play' || view.screen === 'setup') render();
     return;
   }
   if (node.id === 'opt-streak-bonus') {

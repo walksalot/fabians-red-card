@@ -118,7 +118,9 @@
     CSS handles visibility/inertness; do NOT toggle [hidden] on sheets.
     Both sheets contain a .sheet__scrim carrying data-action="close-menu" /
     data-action="close-challenge".
-    Keep #btn-menu[aria-expanded] in sync with the menu sheet.
+    Keep every open-menu button's [aria-expanded] in sync with the menu
+    sheet - play, reveal and pass each carry one (#btn-menu,
+    #btn-menu-reveal, #btn-menu-pass).
 
   EVENT DELEGATION
     Every actionable control carries data-action. Delegate one click listener
@@ -168,7 +170,9 @@
                            on the same screen starts (finished saves are
                            replaced without the ceremony)]
       pass-continue       [#btn-pass-continue]
-      open-menu           [#btn-menu]
+      open-menu           [#btn-menu, #btn-menu-reveal, #btn-menu-pass - the
+                           play statusbar, the reveal statusbar, and the pass
+                           statusbar each carry one]
       close-menu          [#btn-menu-close, menu scrim]
       show-scoreboard     [#btn-menu-scoreboard, every rail chip]
       close-scoreboard    [#btn-scoreboard-back]
@@ -795,7 +799,11 @@
   <section class="screen screen--pass" id="pass" aria-labelledby="pass-title">
     <p class="statusbar">
       <span class="statusbar__left">turn <span id="pass-turn-number">1</span></span>
-      <span class="statusbar__right" id="pass-progress">1 / 10 cards</span>
+      <span id="pass-progress">1 / 10 cards</span>
+      <!-- Menu here too: a table stopping at the hand-off must not have to
+           start the next player's turn to reach End game. -->
+      <button type="button" class="linkbtn statusbar__right" id="btn-menu-pass" data-action="open-menu"
+              aria-haspopup="dialog" aria-expanded="false" aria-controls="menu-sheet">menu</button>
     </p>
 
     <div class="pass__hero">
@@ -1011,6 +1019,15 @@
 
   <!-- ============================================================== REVEAL -->
   <section class="screen screen--scroll screen--reveal" id="reveal" aria-labelledby="reveal-title">
+    <!-- The play screen's slim statusbar, repeated here: the reveal is where
+         disputes happen, so rules and End game must be reachable without
+         advancing into the next player's turn. -->
+    <p class="statusbar">
+      <span class="statusbar__left">turn <span id="reveal-turn-number">1</span></span>
+      <button type="button" class="linkbtn statusbar__right" id="btn-menu-reveal" data-action="open-menu"
+              aria-haspopup="dialog" aria-expanded="false" aria-controls="menu-sheet">menu</button>
+    </p>
+
     <div class="roster roster--reveal" id="reveal-roster">
       <p class="roster__team" id="reveal-roster-team">
         <span class="roster__team-pill">team <span data-field="cards">1</span>/<span data-field="target">10</span></span>
