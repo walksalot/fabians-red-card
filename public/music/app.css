@@ -1535,7 +1535,17 @@ body[data-mode='coop'] #field-mistake-limit { display: flex; }
 .pass__name {
   display: block;
   font-family: var(--font-display);
-  font-size: clamp(32px, 10vw, 40px);
+  /* Same lesson the win screen learned twice (rounds 4 and 5): a huge display
+     name with no width clamp lets an unbroken 16-char name clip off BOTH
+     screen edges - measured 492px wide at 320w, dragging the hint line
+     off-screen with it. max-width contains it, overflow-wrap breaks what a
+     single word cannot fit (two big lines beat edge-clipping on the hero),
+     and the vw slice under the old 10vw curve shrinks realistic long names
+     enough that most stay on one line. */
+  font-size: clamp(26px, min(14.18vw - 18.78px, 10vw), 40px);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
   font-weight: 400;
   line-height: 1.1;
 }

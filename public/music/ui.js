@@ -964,7 +964,10 @@ function paintPeople() {
       // shows - a dead-looking chip with no explanation reads as a bug.
       const note = item.querySelector('[data-field="note"]');
       if (note) {
-        setText(note, already ? 'already playing' : full ? 'table is full' : '');
+        setText(
+          note,
+          already ? 'already playing' : full ? 'table is full' : '',
+        );
         show(note, already || full);
       }
     }
@@ -1796,8 +1799,24 @@ function startGame() {
   // The engine hands out the seat colour; the photo rides along so every screen
   // can read a player's face straight off game state instead of a side map that
   // a reload would lose.
-  const roster = view.setup.players.map((draft, i) => ({
-    name: (draft.name || '').trim() || `Player ${i + 1}`,
+  //
+  // The blank-name fallback dedupes the same way freePlaceholderName does for
+  // Add player: index-based "Player i+1" minted a second "Player 2" whenever a
+  // row had been removed and another blanked, and the pass screen then read
+  // "PASS THE PHONE TO Player 2 - then Player 2" for the whole game.
+  const takenNames = new Set(
+    view.setup.players
+      .map((draft) => (draft.name || '').trim().toLowerCase())
+      .filter((name) => name),
+  );
+  const fallbackName = () => {
+    let n = 1;
+    while (takenNames.has(`player ${n}`)) n += 1;
+    takenNames.add(`player ${n}`);
+    return `Player ${n}`;
+  };
+  const roster = view.setup.players.map((draft) => ({
+    name: (draft.name || '').trim() || fallbackName(),
     photo: draft.photo,
   }));
   // Starting a game is the moment a line-up is real, so this is where the guest
