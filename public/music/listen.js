@@ -35,6 +35,8 @@ const dom = {
   noticeTitle: document.getElementById("notice-title"),
   noticeBody: document.getElementById("notice-body"),
   reveal: document.getElementById("reveal"),
+  revealLead: document.getElementById("reveal-lead"),
+  revealNote: document.getElementById("reveal-note"),
   links: document.getElementById("links"),
 };
 
@@ -93,7 +95,15 @@ function readCardFromHash(hash) {
   const n = Number(payload.n);
   const turn = Number.isInteger(n) && n > 0 && n < 10000 ? n : null;
 
-  return { ok: true, card: { id: cardId(title, artist), title, artist }, turn };
+  // The host's playback source rides in `s` when it is a streaming service:
+  // this page then hands over a link instead of playing the preview. Anything
+  // unrecognised falls back to the preview player, never to an error.
+  const source =
+    payload.s === "spotify" || payload.s === "apple" || payload.s === "youtube"
+      ? payload.s
+      : null;
+
+  return { ok: true, card: { id: cardId(title, artist), title, artist }, turn, source };
 }
 
 /**
@@ -177,7 +187,12 @@ function linksFor(card) {
     }
   }
   const normalized = normalizeLinks(raw);
-  return normalized.length ? normalized : fallbackLinks(card);
+  const all = normalized.length ? normalized : fallbackLinks(card);
+  // In link mode the host chose ONE service; offering the other two would just
+  // be two more ways to see the title.
+  if (!sourceMode) return all;
+  const chosen = all.filter((link) => link.label === sourceMode.label);
+  return chosen.length ? chosen : all;
 }
 
 /* --------------------------------------------------------------- player --- */
@@ -296,6 +311,8 @@ function commandPause() {
 let state = "loading";
 let card = null;
 let track = null;
+/** The SERVICES entry for a link-mode card, or null for the preview player. */
+let sourceMode = null;
 let wantsPlay = false;
 let frame = 0;
 let wallStart = 0;
@@ -502,15 +519,18 @@ function showNotice(reason) {
 
 async function load() {
   // Fully reset: a re-scan in the same tab must not inherit the last card's
-  // audio, timer or revealed links.
+  // audio, timer, revealed links or link mode.
   stopTicking();
   commandPause();
   track = null;
+  sourceMode = null;
   wantsPlay = false;
   wallBase = 0;
   dom.reveal.open = false;
   delete dom.reveal.dataset.surfaced;
   dom.links.replaceChildren();
+  if (dom.revealLead) dom.revealLead.textContent = "Show streaming links";
+  if (dom.revealNote) dom.revealNote.textContent = "this reveals the song title";
   paint(0);
 
   const parsed = readCardFromHash(window.location.hash);
@@ -524,6 +544,25 @@ async function load() {
   const mine = card;
   dom.cardNo.textContent = parsed.turn ? `Card #${parsed.turn}` : "Card";
   dom.notice.hidden = true;
+
+  // Link mode: the table plays songs on a streaming service, so this phone's
+  // whole job is to open it. No preview, no countdown - the disclosure becomes
+  // the player, already open, holding that one service's search link. The
+  // title still only appears once the link is followed.
+  sourceMode = parsed.source ? serviceFor(parsed.source) : null;
+  if (sourceMode) {
+    dom.player.hidden = true;
+    dom.reveal.hidden = false;
+    if (dom.revealLead) dom.revealLead.textContent = `Play it on ${sourceMode.label}`;
+    if (dom.revealNote) {
+      dom.revealNote.textContent = "the host picked this service - opening it shows the title";
+    }
+    setState("blank");
+    dom.reveal.open = true;
+    onRevealToggle();
+    return;
+  }
+
   dom.player.hidden = false;
   dom.reveal.hidden = false;
   setState("loading", "Getting the clip ready...");

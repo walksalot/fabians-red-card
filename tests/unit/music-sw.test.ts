@@ -88,6 +88,17 @@ describe('service worker precache', () => {
     expect(missing, `add these fonts to the SHELL array in sw.js: ${missing.join(', ')}`).toEqual([]);
   });
 
+  it('precaches every icon the manifest declares', () => {
+    // The manifest's icons are part of the installed-app experience: a PWA
+    // opened offline still asks for them. Each one must exist and be precached.
+    const manifest = JSON.parse(read('manifest.json'));
+    for (const icon of manifest.icons as { src: string }[]) {
+      const name = icon.src.replace(/^\.\//, '');
+      expect(shell.has(name), `${name} (a manifest icon) is missing from the SHELL`).toBe(true);
+      expect(() => readFileSync(join(MUSIC, name)), `${name} does not exist on disk`).not.toThrow();
+    }
+  });
+
   it('does not precache a file that no longer exists', () => {
     // The mirror failure: a renamed file left behind in the SHELL makes
     // addAll() reject, which fails the whole install and leaves the player with
@@ -103,5 +114,36 @@ describe('service worker precache', () => {
         }
       });
     expect(gone, `these SHELL entries do not exist: ${gone.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('web app manifest', () => {
+  const manifest = JSON.parse(read('manifest.json'));
+
+  it('ships a real 180x180 PNG apple-touch-icon', () => {
+    // iOS home screens need an opaque raster icon - the SVG alone reads as 0x0
+    // there and Safari falls back to a page screenshot. The dimensions live in
+    // the PNG's IHDR chunk: width and height as big-endian u32 at bytes 16/20.
+    const png = readFileSync(join(MUSIC, 'apple-touch-icon.png'));
+    expect(png.subarray(1, 4).toString('ascii'), 'not a PNG file').toBe('PNG');
+    expect(png.readUInt32BE(16), 'width').toBe(180);
+    expect(png.readUInt32BE(20), 'height').toBe(180);
+    const entry = (manifest.icons as { src: string; sizes: string }[])
+      .find((icon) => icon.src === './apple-touch-icon.png');
+    expect(entry?.sizes, 'manifest must declare the touch icon at its real size').toBe('180x180');
+  });
+
+  it('agrees with the page about the theme colour', () => {
+    // This drifted once: the manifest kept the pre-redesign near-black
+    // theme/background while index.html moved to cream, which paints a black
+    // standalone-PWA splash in front of a cream app. The page's meta
+    // theme-color is the single source of truth; the manifest must track it.
+    const meta = /<meta\s+name="theme-color"\s+content="([^"]+)"/.exec(read('index.html'));
+    expect(meta, 'index.html no longer declares a meta theme-color').not.toBeNull();
+    expect(manifest.theme_color).toBe((meta as RegExpExecArray)[1]);
+    // The splash background has no in-page equivalent; pin it to the design's
+    // ground colour (the page body behind the app column) so a repaint of the
+    // app is a conscious two-file change, not a silent mismatch.
+    expect(manifest.background_color).toBe('#ece3cd');
   });
 });
