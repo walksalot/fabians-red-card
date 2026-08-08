@@ -37,6 +37,19 @@ Workflow({
 The workflow returns `{ round, raw, clusterCount, confirmed, rejected, score,
 bySev, coverage }`. Persist it to `qa/results/round-<N>.json`.
 
+Then ALWAYS regenerate the visual scorecard — Kris reads these, and a stale one
+is worse than none (standing instruction, 2026-08-08):
+
+```bash
+node qa/make-scorecard.mjs <N>      # writes qa/results/round-<N>-scorecard.html
+```
+
+It reads only `qa/results/round-<N>.json` (plus `round-<N>-evidence/` if present),
+so it can never drift from the data. Re-run it any time that JSON changes, and
+state on the page which fleet(s) the numbers cover and whether the findings are
+already fixed — a scorecard that reads as "still broken" after the fixes shipped
+is the failure mode to avoid.
+
 `BRIEF-REMOTE.md` is written for a machine with direct internet access.
 (Inside the original sandboxed session, a `scratch/qa/BRIEF-LIVE.md` variant
 exists with agent-proxy launch flags instead.)
