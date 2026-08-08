@@ -19,6 +19,19 @@ const ROOT = A.repoRoot || '/home/user/fabians-red-card'
 const BRIEF = A.brief || `${ROOT}/qa/BRIEF-REMOTE.md`
 const PRIOR = A.priorNote || 'This is the first round; there are no earlier rounds.'
 
+// Browser-driving agents are heavy: each spawns Chromium plus a dozen helper
+// processes, and a full 13-wide fan-out took an 18-core Mac to load-average
+// ~220 with fork failures (2026-08-08). WAVE caps how many run at once;
+// pass a higher args.wave only on an idle many-core machine.
+const WAVE = Math.max(1, Number(A.wave) || 4)
+async function inWaves(items, toThunk) {
+  const out = []
+  for (let i = 0; i < items.length; i += WAVE) {
+    out.push(...(await parallel(items.slice(i, i + WAVE).map(toThunk))))
+  }
+  return out
+}
+
 // If the brief path above is wrong for this machine, agents must not guess at
 // the rubric: the prompt tells them to locate qa/BRIEF-REMOTE.md from the repo
 // root, and the rubric essentials ride inline in the adjudicator prompt.
@@ -151,9 +164,9 @@ THE FINDING:
 ${JSON.stringify(c, null, 1)}`
 
 phase('Test')
-const reports = await parallel(MISSIONS.map((m) => () =>
+const reports = await inWaves(MISSIONS, (m) => () =>
   agent(testerPrompt(m), { label: `test:${m.key}`, phase: 'Test', schema: FINDINGS_SCHEMA })
-))
+)
 const paired = reports.map((r, i) => ({ r, m: MISSIONS[i] })).filter((x) => x.r)
 const all = paired.flatMap(({ r, m }) => r.findings.map((f) => ({ ...f, area: m.key })))
 const coverage = paired.map(({ r, m }) => ({ area: m.key, coverage: r.coverage }))
@@ -166,20 +179,20 @@ const clusters = (adj && adj.clusters) || []
 log(`${all.length} raw -> ${clusters.length} clusters after dedupe/discard`)
 
 phase('Verify')
-const verified = await parallel(clusters.map((c) => () =>
+const verified = await inWaves(clusters, (c) => () =>
   agent(skepticPrompt(c, 1), { label: `verify:${c.id}`, phase: 'Verify', schema: VERDICT_SCHEMA })
     .then((v) => ({ ...c, v1: v }))
-))
+)
 const first = verified.filter(Boolean)
 
 // Second, independent skeptic for anything still standing at S1/S2 - a
 // Critical/Major needs two people to have reproduced it before we spend a fix on it.
 const high = first.filter((c) => c.v1 && c.v1.verdict === 'CONFIRMED' && (c.v1.severity === 'S1' || c.v1.severity === 'S2'))
 log(`${high.length} S1/S2 candidates go to a second skeptic`)
-const second = await parallel(high.map((c) => () =>
+const second = await inWaves(high, (c) => () =>
   agent(skepticPrompt({ ...c, severity: c.v1.severity }, 2), { label: `verify2:${c.id}`, phase: 'Verify', schema: VERDICT_SCHEMA })
     .then((v) => ({ id: c.id, v2: v }))
-))
+)
 const secondById = new Map(second.filter(Boolean).map((x) => [x.id, x.v2]))
 
 const SEVERITY_ORDER = { S1: 1, S2: 2, S3: 3, S4: 4 }
