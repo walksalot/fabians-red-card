@@ -2956,3 +2956,71 @@ body[data-motion='reduce'] #btn-next-player[data-autonext]::before { display: no
   cursor: pointer;
 }
 .pass__buy:active { background: var(--accent-tint); }
+
+/* --------------------------------------------- 9 desktop and tall glass */
+/* (live-playtest feedback: on a desktop browser the moment screens scatter -
+   a thumbnail roster in the top-left corner, four hundred empty pixels, the
+   card, more empty pixels, Next pinned to the floor.)
+   The column keeps its phone width, but on big glass the moment screens
+   (pass / reveal / play) stop stretching to fill the viewport: each stack
+   gathers into one composed group, the reveal roster grows into real faces
+   spread across the column, and the artwork earns its place. Both gates sit
+   far above any handset - a phone in landscape clears 700 of width but never
+   700 of height - so phones cannot match this block. */
+@media (min-width: 700px) and (min-height: 700px) {
+
+  /* REVEAL - one composed card, centred as a block. The auto margins move to
+     the first and last children so the free height splits above and below the
+     whole group instead of being wedged between its pieces; when the reveal
+     DOES overflow (challenges, awards, votes), autos collapse to zero and the
+     screen scrolls from the top exactly as before. */
+  .screen--reveal { gap: var(--s-4); }
+  .roster--reveal { margin-top: auto; margin-bottom: 0; padding-top: 0; }
+  .screen--reveal .screen__foot {
+    margin-top: 0;
+    margin-bottom: auto;
+    padding-top: var(--s-2);
+    padding-bottom: var(--s-4);
+  }
+
+  /* The roster: real faces, spread evenly across the column. Auto inline
+     margins share the leftover width between every seat and collapse to the
+     plain gap if eight seats ever overflow - the rail still scrolls. */
+  .roster--reveal .roster__seats { padding-top: 12px; }
+  .roster--reveal .roster__seat { margin-inline: auto; }
+  .roster--reveal .roster__face { padding-bottom: 15px; }
+  .roster--reveal .roster__face .avatar { --avatar-size: 56px; }
+  .roster--reveal .roster__seat[data-rank='active'] .avatar { --avatar-size: 64px; }
+  .roster--reveal .roster__count {
+    right: -2px;
+    top: -2px;
+    min-width: 20px;
+    padding: 0 4px;
+    border-radius: 10px;
+    font-size: 11px;
+    line-height: 18px;
+  }
+  .roster--reveal .roster__crown { left: -4px; top: -10px; width: 18px; height: 18px; }
+  .roster--reveal .roster__flag { font-size: 10px; }
+  .roster--reveal .roster__team { justify-content: center; }
+
+  /* The artwork stops being a thumbnail. */
+  .reveal__art { width: 160px; height: 160px; margin-bottom: var(--s-3); }
+  .reveal__art-empty { font-size: 56px; }
+  .reveal__who .avatar--md { --avatar-size: 40px; }
+
+  /* PASS - hero and standings travel together instead of splitting the
+     leftover height between them. Same first/last auto-margin centring. */
+  .pass__hero {
+    flex: 0 0 auto;
+    margin-top: auto;
+    padding-top: var(--s-6);
+    padding-bottom: var(--s-5);
+  }
+  .screen--pass .standings { margin-bottom: auto; padding-bottom: var(--s-5); }
+
+  /* PLAY - the column flows from the top, so the timeline drawer follows the
+     QR block instead of being pushed a screenful below the vinyl. The drawer
+     is still sticky for the viewports where the column genuinely overflows. */
+  .play__scroll { flex: 0 0 auto; }
+}
