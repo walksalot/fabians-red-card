@@ -58,6 +58,7 @@ import {
   pendingResult,
   seatColor,
   recap,
+  decadeStrengthFor,
 } from './engine.js';
 import { DECK, DECADES, GENRES, filterDeck } from './deck.js';
 import {
@@ -108,12 +109,25 @@ const PREVIEW_SECONDS = 30;
 const TARGET_CHOICES = [5, 10, 15];
 
 /**
- * Roughly how long a game runs, per target, so somebody choosing the length can
- * see what they are choosing. Measured against the design prototype's own
- * numbers rather than guessed - a family picking "15" deserves to know that is
- * over an hour before they start, not after.
+ * Roughly how long a game runs, so somebody choosing the length can see what
+ * they are choosing. Per card of target, per seat, because player count is the
+ * dominant variable a fixed per-target number ignored: first-to-10 is an hour
+ * shorter with 2 players than with 8, and a family planning dinner around the
+ * hint deserves the real shape. ~0.9 min covers a listen-place-reveal cycle;
+ * the spread absorbs misses and table talk rather than promising one number.
  */
-const SESSION_MINUTES = { 5: 20, 10: 45, 15: 70 };
+const MINUTES_PER_TARGET_SEAT = 0.9;
+const SESSION_SPREAD = 1.4;
+
+/** "≈ 35–50 min", rounded to fives - honest about being an estimate. */
+function sessionEstimate(target, seats) {
+  const round5 = (minutes) => Math.max(5, Math.round(minutes / 5) * 5);
+  const low = round5(target * seats * MINUTES_PER_TARGET_SEAT);
+  const high = round5(
+    target * seats * MINUTES_PER_TARGET_SEAT * SESSION_SPREAD,
+  );
+  return high > low ? `≈ ${low}–${high} min` : `≈ ${low} min`;
+}
 
 /**
  * Buy-in steps in whole dollars. $2 is the default because that is what this was
@@ -281,6 +295,8 @@ const view = {
    */
   endGameArmed: false,
   startArmed: false,
+  /** The guest-list cross that has been tapped once; only a second tap deletes. */
+  forgetArmed: null,
   /**
    * True once another tab has written a newer save than this tab holds. Every
    * input except the Reload button is refused from then on - a stale tab that
@@ -318,6 +334,32 @@ function disable(node, off, reason) {
   node.disabled = !!off;
   if (reason) node.title = reason;
   else node.removeAttribute('title');
+}
+
+/**
+ * disable() for a stepper button. Disabling the control under keyboard focus
+ * drops focus on <body> (ring gone, screen reader re-announces the document),
+ * so focus is handed to the enabled sibling in the same group - or, with both
+ * ends dead, the group's <output> - before the button goes dark.
+ */
+function disableStepper(node, off) {
+  if (!node) return;
+  if (off && !node.disabled && node === document.activeElement) {
+    const group = node.closest('[role="group"]');
+    const sibling = group
+      ? [...group.querySelectorAll('button')].find(
+          (b) => b !== node && !b.disabled,
+        )
+      : null;
+    const rescue = sibling || (group && group.querySelector('output'));
+    if (rescue) {
+      // Outputs only accept focus once they carry a tabindex; -1 keeps them
+      // out of the Tab order while still catching this hand-off.
+      if (!sibling) rescue.tabIndex = -1;
+      rescue.focus();
+    }
+  }
+  disable(node, off);
 }
 
 /** Clone a <template>'s single root element. Templates are the only row markup. */
@@ -442,7 +484,9 @@ function seatFill(hex) {
     `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
   const contrast = () => {
     const seat = luminance(toHex());
-    return dark ? (seat + 0.05) / (luminance('#241c15') + 0.05) : 1.05 / (seat + 0.05);
+    return dark
+      ? (seat + 0.05) / (luminance('#241c15') + 0.05)
+      : 1.05 / (seat + 0.05);
   };
   for (let i = 0; i < 12 && contrast() < 4.5; i += 1) {
     if (dark) {
@@ -474,7 +518,9 @@ function applySeat(node, color) {
  * back whole instead of as half a surrogate pair.
  */
 function initialFor(name) {
-  const trimmed = String(name === null || name === undefined ? '' : name).trim();
+  const trimmed = String(
+    name === null || name === undefined ? '' : name,
+  ).trim();
   if (!trimmed) return '?';
   return [...trimmed][0].toLocaleUpperCase();
 }
@@ -485,7 +531,9 @@ function initialFor(name) {
  * one place a hand-written value would turn into a request.
  */
 function safePhoto(value) {
-  return typeof value === 'string' && /^data:image\//.test(value) ? value : null;
+  return typeof value === 'string' && /^data:image\//.test(value)
+    ? value
+    : null;
 }
 
 /**
@@ -609,7 +657,8 @@ async function squareThumbnail(file) {
     // Drop the backing store now rather than waiting for the next GC.
     canvas.width = 0;
     canvas.height = 0;
-    if (!/^data:image\/jpeg/.test(url)) throw new Error('canvas would not encode');
+    if (!/^data:image\/jpeg/.test(url))
+      throw new Error('canvas would not encode');
     return url;
   } finally {
     if (source && typeof source.close === 'function') source.close();
@@ -702,9 +751,13 @@ function loadSetupDraft() {
   const saved = getStored(SETUP_DRAFT_KEY, null);
   if (!saved || typeof saved !== 'object') return;
   if (TARGET_CHOICES.includes(saved.target)) view.setup.target = saved.target;
-  if (['classic', 'advanced', 'expert', 'coop'].includes(saved.mode)) view.setup.mode = saved.mode;
+  if (['classic', 'advanced', 'expert', 'coop'].includes(saved.mode))
+    view.setup.mode = saved.mode;
   if (Number.isInteger(saved.mistakeLimit)) {
-    view.setup.mistakeLimit = Math.min(MAX_MISTAKES, Math.max(MIN_MISTAKES, saved.mistakeLimit));
+    view.setup.mistakeLimit = Math.min(
+      MAX_MISTAKES,
+      Math.max(MIN_MISTAKES, saved.mistakeLimit),
+    );
   }
   // Empty selections are never restored: empty means "everything" to the
   // filter, and the chips would all sit unpressed over a full deck.
@@ -753,7 +806,9 @@ async function acceptPhoto(draft, file) {
   if (!view.setup.players.includes(draft)) return;
   draft.pending = false;
   if (!photo) {
-    alertUser('That photo could not be read. Try another one, or tap Skip photo.');
+    alertUser(
+      'That photo could not be read. Try another one, or tap Skip photo.',
+    );
     render();
     return;
   }
@@ -777,7 +832,11 @@ async function acceptPhoto(draft, file) {
  */
 function isUntouchedRow(draft) {
   const name = (draft.name || '').trim();
-  return !draft.photo && !draft.skipped && (name === '' || /^player\s*\d+$/i.test(name));
+  return (
+    !draft.photo &&
+    !draft.skipped &&
+    (name === '' || /^player\s*\d+$/i.test(name))
+  );
 }
 
 /**
@@ -786,7 +845,9 @@ function isUntouchedRow(draft) {
  * counting rows alone mints a second "Player 4").
  */
 function freePlaceholderName() {
-  const taken = new Set(view.setup.players.map((p) => (p.name || '').trim().toLowerCase()));
+  const taken = new Set(
+    view.setup.players.map((p) => (p.name || '').trim().toLowerCase()),
+  );
   let n = 1;
   while (taken.has(`player ${n}`)) n += 1;
   return `Player ${n}`;
@@ -824,17 +885,32 @@ function paintPeople() {
   }
 
   const seated = new Set(
-    view.setup.players.map((p) => (p.name || '').trim().toLowerCase()).filter(Boolean),
+    view.setup.players
+      .map((p) => (p.name || '').trim().toLowerCase())
+      .filter(Boolean),
   );
-  const full = view.setup.players.length >= MAX_PLAYERS
-    && !view.setup.players.some((p, i) => isUntouchedRow(p, i));
+  const full =
+    view.setup.players.length >= MAX_PLAYERS &&
+    !view.setup.players.some((p, i) => isUntouchedRow(p, i));
+
+  // The rebuild below replaces the node under keyboard focus; find it again
+  // afterwards, or arming a cross (which repaints) would strand focus on
+  // <body> between the two taps of the armed pattern.
+  const focused = document.activeElement;
+  const keep =
+    focused && list.contains(focused) && focused.closest('.person')
+      ? {
+          name: focused.closest('.person').dataset.name,
+          forget: focused.classList.contains('person__forget'),
+        }
+      : null;
 
   replaceChildren(
     list,
     people.map((person) => {
       const node = clone('tpl-person');
       if (!node) return null;
-      const item = node.querySelector('.person');
+      const item = node.closest('.person');
       const add = node.querySelector('.person__add');
       const forget = node.querySelector('.person__forget');
       const already = seated.has(person.name.toLowerCase());
@@ -843,35 +919,68 @@ function paintPeople() {
         add.dataset.name = person.name;
         add.setAttribute(
           'aria-label',
-          already ? `${person.name} is already playing` : `Add ${person.name} to this game`,
+          already
+            ? `${person.name} is already playing`
+            : `Add ${person.name} to this game`,
         );
         disable(
           add,
           already || full,
-          already ? 'Already in this game' : full ? 'Eight players is the maximum' : undefined,
+          already
+            ? 'Already in this game'
+            : full
+              ? 'Eight players is the maximum'
+              : undefined,
         );
         // The reason rides on the chip, not in a title attribute a phone never
         // shows - a dead-looking chip with no explanation reads as a bug.
         const note = node.querySelector('[data-field="note"]');
         if (note) {
-          note.textContent = already ? 'already playing' : full ? 'table is full' : '';
+          note.textContent = already
+            ? 'already playing'
+            : full
+              ? 'table is full'
+              : '';
           show(note, already || full);
         }
       }
       if (forget) {
         forget.dataset.name = person.name;
-        forget.setAttribute('aria-label', `Forget ${person.name}`);
+        // Tabbable exactly while edit mode shows the crosses: this is the
+        // app's only route to deleting a stored name and its photos, and it
+        // has to be reachable by keyboard, not only by pointer.
+        forget.tabIndex = view.peopleEditing ? 0 : -1;
+        const armed = view.forgetArmed === person.name;
+        forget.dataset.armed = armed ? 'true' : 'false';
+        forget.setAttribute(
+          'aria-label',
+          armed
+            ? `Tap again to forget ${person.name}`
+            : `Forget ${person.name}`,
+        );
       }
       fill(node, { name: person.name });
       paintAvatar(node.querySelector('.avatar'), person);
       return node;
     }),
   );
+
+  if (keep) {
+    const again = [...list.children].find(
+      (li) => li.dataset && li.dataset.name === keep.name,
+    );
+    const target = again
+      ? again.querySelector(keep.forget ? '.person__forget' : '.person__add')
+      : el('btn-people-edit');
+    if (target && !target.disabled) target.focus();
+  }
 }
 
 /** Seat somebody from the guest list, reusing an empty row before adding one. */
 function addPersonToGame(name) {
-  const person = loadPeople().find((p) => p.name.toLowerCase() === String(name).toLowerCase());
+  const person = loadPeople().find(
+    (p) => p.name.toLowerCase() === String(name).toLowerCase(),
+  );
   if (!person) return;
   const already = view.setup.players.some(
     (p) => (p.name || '').trim().toLowerCase() === person.name.toLowerCase(),
@@ -946,7 +1055,10 @@ function paintSavedAvatars(row, draft, index) {
       if (button) {
         button.dataset.photoIndex = String(i);
         button.dataset.playerIndex = String(index);
-        button.setAttribute('aria-label', `Use this saved photo for ${name || 'this player'}`);
+        button.setAttribute(
+          'aria-label',
+          `Use this saved photo for ${name || 'this player'}`,
+        );
       }
       return node;
     }),
@@ -1023,21 +1135,29 @@ function loadSavedSettings() {
       skipPass: !!saved.skipPass,
       sound: saved.sound !== false,
       playbackSource:
-        typeof saved.playbackSource === 'string' && SOURCE_LABELS[saved.playbackSource]
+        typeof saved.playbackSource === 'string' &&
+        SOURCE_LABELS[saved.playbackSource]
           ? saved.playbackSource
           : 'preview',
       reducedMotion: !!saved.reducedMotion,
     };
   }
   // A phone that asks for less motion gets it without having to find the switch.
-  if (!saved && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (
+    !saved &&
+    window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ) {
     settings.reducedMotion = true;
   }
 }
 
 function motionIsReduced() {
   if (settings.reducedMotion) return true;
-  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  return !!(
+    window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
 }
 
 /* ========================================================================== */
@@ -1095,7 +1215,9 @@ function persist(replacing) {
     // a toast per turn would drown the game it is warning about.
     if (!saveWarned) {
       saveWarned = true;
-      alertUser("Couldn't save — storage is full. The game still works, but a reload loses it.");
+      alertUser(
+        "Couldn't save — storage is full. The game still works, but a reload loses it.",
+      );
     }
   } else {
     saveWarned = false;
@@ -1127,13 +1249,19 @@ function enterStaleState() {
 
 function showScreen(name) {
   const leavingPlay = view.screen === 'play' && name !== 'play';
+  const leavingSetup = view.screen === 'setup' && name !== 'setup';
   view.screen = name;
   document.body.dataset.screen = name;
   if (leavingPlay) stopAudio();
-  // A screen change stands down both armed-tap guards - the second tap has to
+  // Guest-list edit mode is a stance taken on the setup screen, not device
+  // state: closing setup and coming back must not resurrect armed crosses
+  // over every saved face.
+  if (leavingSetup) view.peopleEditing = false;
+  // A screen change stands down the armed-tap guards - the second tap has to
   // land on the same screen the first one armed.
   disarmEndGame();
   disarmStartGame();
+  disarmForget();
   render();
   focusHeading(name);
 }
@@ -1170,7 +1298,22 @@ function savedGame() {
   const raw = loadGame();
   if (!raw) return null;
   try {
-    return deserialize(raw);
+    const saved = deserialize(raw);
+    // deserialize vouches for the envelope, not the contents: a hand-edited
+    // save can pass its checks with hollow players and no turn, and it then
+    // resumes as a zombie game ("Turn undefined" on the resume card, a vinyl
+    // that can only apologise). Treat it exactly like corrupt JSON.
+    const hollow =
+      !Number.isInteger(saved.turn) ||
+      saved.players.some(
+        (p) =>
+          !p ||
+          typeof p.name !== 'string' ||
+          !p.name ||
+          !Array.isArray(p.timeline),
+      );
+    if (hollow) throw new TypeError('savedGame: hollow save');
+    return saved;
   } catch {
     clearGame();
     // The stake snapshot belongs to that save; it goes with it.
@@ -1183,7 +1326,10 @@ function renderHome() {
   // The deck figures ship baked into the markup so the line is honest with no
   // JS at all; this keeps them honest after the deck grows.
   const years = DECK.reduce(
-    (span, card) => [Math.min(span[0], card.year), Math.max(span[1], card.year)],
+    (span, card) => [
+      Math.min(span[0], card.year),
+      Math.max(span[1], card.year),
+    ],
     [Infinity, -Infinity],
   );
   if (Number.isFinite(years[0])) {
@@ -1306,7 +1452,9 @@ function paintRowLabels(row, draft, index) {
   if (avatar) {
     avatar.setAttribute(
       'aria-label',
-      draft.photo ? `Replace the photo for ${person}` : `Add a photo for ${person}`,
+      draft.photo
+        ? `Replace the photo for ${person}`
+        : `Add a photo for ${person}`,
     );
   }
   const skip = row.querySelector('[data-action="skip-photo"]');
@@ -1364,28 +1512,45 @@ function renderPlayerRows() {
     const row = list.children[index];
     if (!row) return;
     const input = row.querySelector('[data-role="player-name"]');
-    if (input && input.value !== draft.name && document.activeElement !== input) {
+    if (
+      input &&
+      input.value !== draft.name &&
+      document.activeElement !== input
+    ) {
       input.value = draft.name;
     }
 
     // Seat colours come from the same palette the engine will hand out, so the
     // face somebody sets up in row 3 is the face - and the colour - they play
     // with. Nothing is re-rolled at Shuffle & start.
-    const who = { name: draft.name, photo: draft.photo, color: seatColor(index) };
+    const who = {
+      name: draft.name,
+      photo: draft.photo,
+      color: seatColor(index),
+    };
     applySeat(row, who.color);
     const avatar = row.querySelector('.player-row__avatar');
     paintAvatar(avatar, who);
 
-    const stateName = draft.photo ? 'photo' : draft.skipped ? 'skipped' : 'none';
+    const stateName = draft.photo
+      ? 'photo'
+      : draft.skipped
+        ? 'skipped'
+        : 'none';
     row.dataset.photoState = stateName;
     const label = row.querySelector('[data-field="status"]');
-    if (label) label.textContent = draft.pending ? PHOTO_STATUS.pending : PHOTO_STATUS[stateName];
+    if (label)
+      label.textContent = draft.pending
+        ? PHOTO_STATUS.pending
+        : PHOTO_STATUS[stateName];
 
     paintSavedAvatars(row, draft, index);
 
     const skip = row.querySelector('[data-action="skip-photo"]');
     pressed(skip, stateName === 'skipped');
-    if (skip) skip.textContent = stateName === 'skipped' ? 'Photo skipped' : 'Skip photo';
+    if (skip)
+      skip.textContent =
+        stateName === 'skipped' ? 'Photo skipped' : 'Skip photo';
     paintRowLabels(row, draft, index);
     paintNameCount(row, draft);
     disable(
@@ -1395,12 +1560,22 @@ function renderPlayerRows() {
     );
   });
 
-  text('player-count-note', `${drafts.length} player${drafts.length === 1 ? '' : 's'}`);
-  disable(el('btn-add-player'), drafts.length >= MAX_PLAYERS, 'Eight players is the maximum');
+  text(
+    'player-count-note',
+    `${drafts.length} player${drafts.length === 1 ? '' : 's'}`,
+  );
+  disable(
+    el('btn-add-player'),
+    drafts.length >= MAX_PLAYERS,
+    'Eight players is the maximum',
+  );
 }
 
 function eligibleDeck() {
-  return filterDeck(DECK, { decades: view.setup.decades, genres: view.setup.genres });
+  return filterDeck(DECK, {
+    decades: view.setup.decades,
+    genres: view.setup.genres,
+  });
 }
 
 /**
@@ -1447,7 +1622,10 @@ function paintBuyin() {
     else field.removeAttribute('aria-invalid');
   }
 
-  const pot = potFor({ amount: buyin.amount, playerCount: view.setup.players.length });
+  const pot = potFor({
+    amount: buyin.amount,
+    playerCount: view.setup.players.length,
+  });
   // potFor returns null rather than a wrong number; there is nothing honest to
   // put in the line in that case, so it says nothing.
   text('buyin-pot', pot ? pot.label : '');
@@ -1463,17 +1641,39 @@ function renderSetup() {
 
   // Steppers pin at their bounds the way the roster buttons already do -
   // a live-looking "+" that silently does nothing reads as a broken button.
-  const stepper = (action) => document.querySelector(`[data-action="${action}"]`);
-  disable(stepper('target-dec'), view.setup.target <= TARGET_CHOICES[0]);
-  disable(stepper('target-inc'), view.setup.target >= TARGET_CHOICES[TARGET_CHOICES.length - 1]);
-  disable(stepper('mistakes-dec'), view.setup.mistakeLimit <= MIN_MISTAKES);
-  disable(stepper('mistakes-inc'), view.setup.mistakeLimit >= MAX_MISTAKES);
-  disable(stepper('buyin-dec'), view.setup.buyin.amount <= BUYIN_MIN_CENTS);
-  disable(stepper('buyin-inc'), view.setup.buyin.amount >= BUYIN_MAX_CENTS);
+  const stepper = (action) =>
+    document.querySelector(`[data-action="${action}"]`);
+  disableStepper(stepper('target-dec'), view.setup.target <= TARGET_CHOICES[0]);
+  disableStepper(
+    stepper('target-inc'),
+    view.setup.target >= TARGET_CHOICES[TARGET_CHOICES.length - 1],
+  );
+  disableStepper(
+    stepper('mistakes-dec'),
+    view.setup.mistakeLimit <= MIN_MISTAKES,
+  );
+  disableStepper(
+    stepper('mistakes-inc'),
+    view.setup.mistakeLimit >= MAX_MISTAKES,
+  );
+  disableStepper(
+    stepper('buyin-dec'),
+    view.setup.buyin.amount <= BUYIN_MIN_CENTS,
+  );
+  disableStepper(
+    stepper('buyin-inc'),
+    view.setup.buyin.amount >= BUYIN_MAX_CENTS,
+  );
 
-  // How long this will take, next to the number that decides it.
-  const minutes = SESSION_MINUTES[view.setup.target];
-  text('target-cards-hint', minutes ? `≈ ${minutes} min` : '');
+  // How long this will take, next to the number that decides it. Seats scale
+  // it linearly - except co-op, where the table fills ONE timeline together.
+  text(
+    'target-cards-hint',
+    sessionEstimate(
+      view.setup.target,
+      view.setup.mode === 'coop' ? 1 : view.setup.players.length,
+    ),
+  );
 
   const streak = el('opt-streak-bonus');
   if (streak) streak.checked = view.setup.streakBonus;
@@ -1485,10 +1685,14 @@ function renderSetup() {
 
   // [data-decade] / [data-genre] so the leading All-chip - a plain button, not
   // a toggle - never grows an aria-pressed it does not mean.
-  for (const chip of document.querySelectorAll('#decade-chips .chip[data-decade]')) {
+  for (const chip of document.querySelectorAll(
+    '#decade-chips .chip[data-decade]',
+  )) {
     pressed(chip, view.setup.decades.includes(Number(chip.dataset.decade)));
   }
-  for (const chip of document.querySelectorAll('#genre-chips .chip[data-genre]')) {
+  for (const chip of document.querySelectorAll(
+    '#genre-chips .chip[data-genre]',
+  )) {
     pressed(chip, view.setup.genres.includes(chip.dataset.genre));
   }
 
@@ -1519,7 +1723,8 @@ function renderSetup() {
   // four people racing to ten each.
   const seats = view.setup.mode === 'coop' ? 1 : view.setup.players.length;
   const comfortable = seats * view.setup.target + DECK_SLACK;
-  const dealable = view.setup.mode === 'coop' ? 2 : view.setup.players.length + 1;
+  const dealable =
+    view.setup.mode === 'coop' ? 2 : view.setup.players.length + 1;
   show(el('deck-warning'), eligible.length < comfortable);
 
   // Two ways to be blocked, one line to say which. The photo one names the
@@ -1527,12 +1732,13 @@ function renderSetup() {
   // not want to take must never be the reason a family cannot play.
   const outstanding = photosOutstanding();
   let blocked = null;
-  if (eligible.length < dealable) blocked = 'Not enough songs match these filters';
+  if (eligible.length < dealable)
+    blocked = 'Not enough songs match these filters';
   else if (outstanding > 0) {
     blocked =
       outstanding === 1
-        ? 'One player still needs a photo - or tap Skip photo for them'
-        : `${outstanding} players still need a photo - or tap Skip photo for them`;
+        ? 'One player still needs a photo — or tap Skip photo for them'
+        : `${outstanding} players still need a photo — or tap Skip photo for them`;
   }
   const reason = el('setup-photo-reason');
   if (reason) {
@@ -1567,18 +1773,24 @@ function startGame() {
   }
   const dealable = view.setup.mode === 'coop' ? 2 : roster.length + 1;
   if (eligible.length < dealable) {
-    alertUser('Not enough songs match these filters. Turn some decades or genres back on.');
+    alertUser(
+      'Not enough songs match these filters. Turn some decades or genres back on.',
+    );
     return;
   }
   if (!rosterReady()) {
-    alertUser('Everyone needs a photo, or a tap on Skip photo, before the game can start.');
+    alertUser(
+      'Everyone needs a photo, or a tap on Skip photo, before the game can start.',
+    );
     return;
   }
 
   rememberRoster();
   const params = new URLSearchParams(window.location.search);
   const forced = Number.parseInt(params.get('seed') || '', 10);
-  const seed = Number.isInteger(forced) ? forced : (Date.now() ^ Math.floor(Math.random() * 1e9)) | 0;
+  const seed = Number.isInteger(forced)
+    ? forced
+    : (Date.now() ^ Math.floor(Math.random() * 1e9)) | 0;
 
   try {
     state = createGame({
@@ -1591,7 +1803,9 @@ function startGame() {
       seed,
     });
   } catch (error) {
-    alertUser(error && error.message ? error.message : 'That game could not be set up.');
+    alertUser(
+      error && error.message ? error.message : 'That game could not be set up.',
+    );
     return;
   }
   // The stake is remembered per device, not per game: the same reunion plays
@@ -1625,7 +1839,8 @@ function beginTurn() {
     if (settings.skipPass) return enterPlay();
     return showScreen('pass');
   }
-  if (state.phase === 'revealed' || state.phase === 'turn-end') return showReveal();
+  if (state.phase === 'revealed' || state.phase === 'turn-end')
+    return showReveal();
   return showScreen('play');
 }
 
@@ -1680,7 +1895,9 @@ function verdictPending(outcome) {
   if (!state || !gated()) return false;
   if (!outcome || outcome.kind !== 'placement') return false;
   if (state.phase !== 'revealed') return false;
-  return state.confirmations.title === null || state.confirmations.artist === null;
+  return (
+    state.confirmations.title === null || state.confirmations.artist === null
+  );
 }
 
 function showReveal() {
@@ -1721,11 +1938,18 @@ function runFlip() {
 function showWin() {
   showScreen('win');
   const result = state && state.result;
-  const lost = !result || result.coopWon === false || result.winnerIds.length === 0;
-  if (!lost && !motionIsReduced()) {
+  const lost =
+    !result || result.coopWon === false || result.winnerIds.length === 0;
+  // An early end with the table level is nobody's win: raining confetti on it
+  // celebrated whichever tied player the layout happened to put first.
+  const levelEnd =
+    !!result && result.reason === 'ended' && result.winnerIds.length > 1;
+  if (!lost && !levelEnd && !motionIsReduced()) {
     const canvas = el('confetti');
     if (view.confettiStop) view.confettiStop();
-    view.confettiStop = canvas ? burst(canvas, { count: 160, duration: 4000 }) : null;
+    view.confettiStop = canvas
+      ? burst(canvas, { count: 160, duration: 4000 })
+      : null;
   }
 }
 
@@ -1745,7 +1969,10 @@ let endGameArmTimer = null;
 
 function paintEndGameArm() {
   const button = el('btn-end-game');
-  if (button) button.textContent = view.endGameArmed ? 'Tap again to end the game' : 'End game';
+  if (button)
+    button.textContent = view.endGameArmed
+      ? 'Tap again to end the game'
+      : 'End game';
 }
 
 function disarmEndGame() {
@@ -1761,7 +1988,9 @@ function disarmEndGame() {
 function armEndGame() {
   view.endGameArmed = true;
   paintEndGameArm();
-  announce('Tap End game again to end it for everyone. The game cannot be resumed.');
+  announce(
+    'Tap End game again to end it for everyone. The game cannot be resumed.',
+  );
   if (endGameArmTimer !== null) clearTimeout(endGameArmTimer);
   endGameArmTimer = window.setTimeout(() => {
     endGameArmTimer = null;
@@ -1779,7 +2008,9 @@ let startArmTimer = null;
 function paintStartArm() {
   const button = el('btn-start-game');
   if (button) {
-    button.textContent = view.startArmed ? 'Tap again to replace the saved game' : 'Shuffle & start';
+    button.textContent = view.startArmed
+      ? 'Tap again to replace the saved game'
+      : 'Shuffle & start';
   }
 }
 
@@ -1796,11 +2027,41 @@ function disarmStartGame() {
 function armStartGame() {
   view.startArmed = true;
   paintStartArm();
-  announce('Starting replaces the saved game. Tap Shuffle & start again to go ahead.');
+  announce(
+    'Starting replaces the saved game. Tap Shuffle & start again to go ahead.',
+  );
   if (startArmTimer !== null) clearTimeout(startArmTimer);
   startArmTimer = window.setTimeout(() => {
     startArmTimer = null;
     disarmStartGame();
+  }, 4000);
+}
+
+/**
+ * And on the guest list's forget crosses: one tap deletes a person AND their
+ * saved photos with no undo to offer, so the first tap only arms that
+ * person's cross and says what a second one will do.
+ */
+let forgetArmTimer = null;
+
+function disarmForget() {
+  if (forgetArmTimer !== null) {
+    clearTimeout(forgetArmTimer);
+    forgetArmTimer = null;
+  }
+  if (view.forgetArmed === null) return;
+  view.forgetArmed = null;
+  paintPeople();
+}
+
+function armForget(name) {
+  view.forgetArmed = name;
+  paintPeople();
+  announce(`Tap the cross again to forget ${name}. Their saved photos go too.`);
+  if (forgetArmTimer !== null) clearTimeout(forgetArmTimer);
+  forgetArmTimer = window.setTimeout(() => {
+    forgetArmTimer = null;
+    disarmForget();
   }, 4000);
 }
 
@@ -1857,11 +2118,12 @@ function resetCardAudio() {
     linksShown: false,
     /** The offline stand-in clock; see startDemoTimer(). */
     demo: null,
-    status: !state || !state.card
-      ? 'Tap play to draw the mystery song.'
-      : settings.sound
-        ? 'Tap play when everyone is listening.'
-        : 'Sound is off. Turn it on in the menu.',
+    status:
+      !state || !state.card
+        ? 'Tap play to draw the mystery song.'
+        : settings.sound
+          ? 'Tap play when everyone is listening.'
+          : 'Sound is off. Turn it on in the menu.',
   };
 }
 
@@ -1896,7 +2158,8 @@ function startDemoTimer() {
     }
     if ((performance.now() - demo.startedAt) / 1000 >= PREVIEW_SECONDS) {
       stopDemoTimer();
-      view.audio.status = "Time's up — place your best guess, or skip this card.";
+      view.audio.status =
+        "Time's up — place your best guess, or skip this card.";
       render();
       return;
     }
@@ -1929,7 +2192,12 @@ async function toggleAudio() {
     return;
   }
 
-  if (p.playing) {
+  // "Playing" in this tick can be the ~10ms unlock buffer, not the song: on
+  // the first-ever tap with the card already drawn (a gap tap or a claim drew
+  // it), nothing has stopped that buffer yet, and pausing IT swallowed the
+  // tap. A real preview is exactly a src set through play() - unlock() loads
+  // its silence without touching src.
+  if (p.playing && p.src && !/^data:/.test(p.src)) {
     p.pause();
     return;
   }
@@ -2067,7 +2335,11 @@ function paintAudio() {
       PREVIEW_SECONDS - (performance.now() - demo.startedAt) / 1000,
     );
     text('countdown-value', Math.ceil(remaining));
-    if (ring) ring.style.setProperty('--ring-progress', String(remaining / PREVIEW_SECONDS));
+    if (ring)
+      ring.style.setProperty(
+        '--ring-progress',
+        String(remaining / PREVIEW_SECONDS),
+      );
     pressed(button, false);
     text('btn-play-label', 'Play song');
     return;
@@ -2075,18 +2347,23 @@ function paintAudio() {
 
   const p = audioPlayer;
   const playing = !!(p && p.playing);
-  // The unlock buffer is the one data: URI ever loaded, and its 10ms duration
-  // must never reach the arithmetic - the ring is 30s until a real clip says
-  // otherwise.
-  const real = p && p.duration > 0 && !/^data:/.test(p.src || '');
+  // The unlock buffer's 10ms duration must never reach the arithmetic - the
+  // ring is 30s until a real clip says otherwise. unlock() loads its silence
+  // without touching src, so while it runs `src` is still empty: a real clip
+  // is a non-empty, non-data: src (this is what kept the badge off "1s").
+  const real = !!(p && p.duration > 0 && p.src && !/^data:/.test(p.src));
   const duration = real ? p.duration : PREVIEW_SECONDS;
   const elapsed = real ? Math.min(p.currentTime, duration) : 0;
   const remaining = Math.max(0, duration - elapsed);
 
   text('countdown-value', Math.ceil(remaining));
-  if (ring) ring.style.setProperty('--ring-progress', String(remaining / duration));
+  if (ring)
+    ring.style.setProperty('--ring-progress', String(remaining / duration));
   pressed(button, playing);
-  text('btn-play-label', playing ? 'Pause' : view.audio.resolving ? 'Loading' : 'Play song');
+  text(
+    'btn-play-label',
+    playing ? 'Pause' : view.audio.resolving ? 'Loading' : 'Play song',
+  );
 }
 
 /* ========================================================================== */
@@ -2097,7 +2374,10 @@ function base64url(value) {
   const bytes = new TextEncoder().encode(value);
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
 
 /**
@@ -2115,7 +2395,10 @@ function listenUrl(card, turnNumber) {
     t: typeof card.title === 'string' ? card.title : '',
     a: typeof card.artist === 'string' ? card.artist : '',
     n: turnNumber,
-    s: settings.playbackSource !== 'preview' ? settings.playbackSource : undefined,
+    s:
+      settings.playbackSource !== 'preview'
+        ? settings.playbackSource
+        : undefined,
   };
   const dir = window.location.pathname.replace(/[^/]*$/, '');
   return `${window.location.origin}${dir}listen.html#${base64url(JSON.stringify(payload))}`;
@@ -2123,7 +2406,12 @@ function listenUrl(card, turnNumber) {
 
 function isLoopback() {
   const host = window.location.hostname;
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '[::1]'
+  );
 }
 
 function paintQr() {
@@ -2151,7 +2439,11 @@ function paintQr() {
   const target = listenUrl(card, state.turn);
 
   try {
-    box.innerHTML = qrSvg(target, { margin: 3, dark: '#0b0616', light: '#ffffff' });
+    box.innerHTML = qrSvg(target, {
+      margin: 3,
+      dark: '#0b0616',
+      light: '#ffffff',
+    });
     const svg = box.querySelector('svg');
     show(frame, !!svg);
     if (svg) {
@@ -2187,7 +2479,8 @@ function gapLabel(gap) {
 
 /** The same idea in as few characters as possible - the hint line is narrow. */
 function gapShort(gap) {
-  if (gap.left && gap.right) return `between ${gap.left.year} and ${gap.right.year}`;
+  if (gap.left && gap.right)
+    return `between ${gap.left.year} and ${gap.right.year}`;
   if (gap.right) return `before ${gap.right.year}`;
   if (gap.left) return `after ${gap.left.year}`;
   return 'as the first card';
@@ -2246,10 +2539,16 @@ function paintStrip(strip, gaps, timeline, selectedIndex) {
 function scrollIntoStrip(strip, node) {
   if (typeof strip.scrollTo !== 'function') return;
   const left = node.offsetLeft - strip.clientWidth / 2 + node.offsetWidth / 2;
-  const target = Math.max(0, Math.min(left, strip.scrollWidth - strip.clientWidth));
+  const target = Math.max(
+    0,
+    Math.min(left, strip.scrollWidth - strip.clientWidth),
+  );
   if (Math.abs(strip.scrollLeft - target) < 4) return;
   try {
-    strip.scrollTo({ left: target, behavior: motionIsReduced() ? 'auto' : 'smooth' });
+    strip.scrollTo({
+      left: target,
+      behavior: motionIsReduced() ? 'auto' : 'smooth',
+    });
   } catch {
     strip.scrollLeft = target;
   }
@@ -2277,7 +2576,8 @@ function rankOf(row) {
  */
 function seatLabel(row, mode) {
   const parts = [row.name];
-  if (mode !== 'coop') parts.push(`${row.cards} card${row.cards === 1 ? '' : 's'}`);
+  if (mode !== 'coop')
+    parts.push(`${row.cards} card${row.cards === 1 ? '' : 's'}`);
   if (row.isActive) parts.push('playing now');
   else if (row.isNext) parts.push('up next');
   if (row.isLeader) parts.push('leading');
@@ -2316,7 +2616,10 @@ function paintRoster(seats, team) {
 
   const key = rows.map((row) => row.playerId).join('|');
   if (seats.dataset.rosterKey !== key) {
-    replaceChildren(seats, rows.map(() => clone('tpl-roster-chip')));
+    replaceChildren(
+      seats,
+      rows.map(() => clone('tpl-roster-chip')),
+    );
     seats.dataset.rosterKey = key;
   }
 
@@ -2378,14 +2681,18 @@ function scrollSeatIntoView(seats, chip, nextChip) {
   if (inView(chip) && (!nextChip || inView(nextChip))) return;
   // Snap positions are start-aligned, offset by the scroll padding - which is
   // the container's own inline padding, so the first chip's is exactly 0.
-  const pad = Number.parseFloat(window.getComputedStyle(seats).paddingLeft) || 0;
+  const pad =
+    Number.parseFloat(window.getComputedStyle(seats).paddingLeft) || 0;
   const target = Math.max(
     0,
     Math.min(chip.offsetLeft - pad, seats.scrollWidth - seats.clientWidth),
   );
   if (Math.abs(left - target) < 2) return;
   try {
-    seats.scrollTo({ left: target, behavior: motionIsReduced() ? 'auto' : 'smooth' });
+    seats.scrollTo({
+      left: target,
+      behavior: motionIsReduced() ? 'auto' : 'smooth',
+    });
   } catch {
     seats.scrollLeft = target;
   }
@@ -2403,7 +2710,10 @@ function renderStandings() {
         node.dataset.rank = rankOf(row);
         node.dataset.leader = row.isLeader ? 'true' : 'false';
         applySeat(node, row.color);
-        node.style.setProperty('--fill', meterWidth(row.cards, state.targetCards));
+        node.style.setProperty(
+          '--fill',
+          meterWidth(row.cards, state.targetCards),
+        );
         paintAvatar(node.querySelector('.standing__avatar'), row);
         fill(node, {
           name: row.name,
@@ -2411,7 +2721,10 @@ function renderStandings() {
           target: state.targetCards,
           flag: row.isActive ? 'Playing now' : row.isNext ? 'Up next' : '',
         });
-        buildTokenPills(node.querySelector('[data-field="tokens"]'), row.tokens);
+        buildTokenPills(
+          node.querySelector('[data-field="tokens"]'),
+          row.tokens,
+        );
         return node;
       }),
     );
@@ -2429,7 +2742,10 @@ function renderStandings() {
       limit: state.mistakeLimit,
     });
     coop.style.setProperty('--fill', meterWidth(cards, state.targetCards));
-    buildTokenPills(coop.querySelector('[data-field="tokens"]'), state.sharedTokens);
+    buildTokenPills(
+      coop.querySelector('[data-field="tokens"]'),
+      state.sharedTokens,
+    );
   }
 }
 
@@ -2479,10 +2795,17 @@ function renderPlay() {
   const heading = el('timeline-heading');
   // "Shared", not "The shared": at 320px the longer version wraps the header
   // onto a second line and pushes the mystery card's Play button off screen.
-  if (heading) heading.textContent = state.mode === 'coop' ? 'Shared timeline' : 'Your timeline';
+  if (heading)
+    heading.textContent =
+      state.mode === 'coop' ? 'Shared timeline' : 'Your timeline';
 
   const timeline = timelineFor(state, active.id);
-  paintStrip(el('timeline-strip'), gapsFor(state, active.id), timeline, state.selectedGap);
+  paintStrip(
+    el('timeline-strip'),
+    gapsFor(state, active.id),
+    timeline,
+    state.selectedGap,
+  );
   const hint = el('timeline-hint');
   if (hint) {
     const gaps = gapsFor(state, active.id);
@@ -2507,13 +2830,27 @@ function renderPlay() {
     // The engine words the reason for one owner; in co-op the pool belongs to
     // the table, and "you have 2" reads as a personal pile that does not exist.
     const worded =
-      buyReason && state.mode === 'coop' ? buyReason.replace('you have', 'the table has') : buyReason;
+      buyReason && state.mode === 'coop'
+        ? buyReason.replace('you have', 'the table has')
+        : buyReason;
     reasonNode.textContent = worded || `Costs ${BUY_COST} tokens`;
     show(reasonNode, buyReason !== null);
   }
 
   pressed(el('btn-claim-identify'), state.claimIdentify);
-  text('year-guess-value', state.yearGuess === null ? DEFAULT_YEAR_GUESS : state.yearGuess);
+  const yearGuess =
+    state.yearGuess === null ? DEFAULT_YEAR_GUESS : state.yearGuess;
+  text('year-guess-value', yearGuess);
+  // The year call pins at 1900/2026 the way the setup steppers pin - a live
+  // "+" that silently no-ops at the clamp reads as a broken button.
+  disableStepper(
+    document.querySelector('[data-action="year-dec"]'),
+    yearGuess <= YEAR_MIN,
+  );
+  disableStepper(
+    document.querySelector('[data-action="year-inc"]'),
+    yearGuess >= YEAR_MAX,
+  );
 
   const count = state.challenges.length;
   const badge = el('challenge-count');
@@ -2553,12 +2890,15 @@ function renderPlay() {
   disable(
     el('btn-place'),
     state.selectedGap === null || state.placementCommitted,
-    state.placementCommitted ? 'Already placed this card' : 'Tap a gap in your timeline first',
+    state.placementCommitted
+      ? 'Already placed this card'
+      : 'Tap a gap in your timeline first',
   );
 
   // Audio + QR
   const status = el('audio-status');
-  if (status && status.textContent !== view.audio.status) status.textContent = view.audio.status;
+  if (status && status.textContent !== view.audio.status)
+    status.textContent = view.audio.status;
   disable(el('btn-play-song'), view.audio.resolving);
   disable(el('btn-replay'), !view.audio.resolved);
   show(el('audio-fallback'), view.audio.failed);
@@ -2591,7 +2931,9 @@ function paintStreamingLinks() {
         ]
       : [
           [
-            settings.playbackSource === 'apple' ? 'appleMusic' : settings.playbackSource,
+            settings.playbackSource === 'apple'
+              ? 'appleMusic'
+              : settings.playbackSource,
             SOURCE_LABELS[settings.playbackSource],
           ],
         ];
@@ -2648,17 +2990,25 @@ function nameOf(playerId) {
 
 function verdictFor(outcome) {
   if (outcome.kind === 'buy') {
-    return { verdict: 'correct', message: `Bought and slotted in. That cost ${BUY_COST} tokens.` };
+    return {
+      verdict: 'correct',
+      message: `Bought and slotted in. That cost ${BUY_COST} tokens.`,
+    };
   }
   if (outcome.kind === 'skip') {
     return { verdict: 'neutral', message: 'Card skipped. No penalty.' };
   }
-  if (outcome.accepted) return { verdict: 'correct', message: 'Correct. The card is yours.' };
+  if (outcome.accepted)
+    return { verdict: 'correct', message: 'Correct. The card is yours.' };
   if (outcome.placementCorrect && !outcome.requirementsMet) {
     // Expert fails the same placement two very different ways, and the year is
     // the one the reveal never shows - "you had to name it too" is simply untrue
     // for somebody who named it and missed 1994 by a year.
-    if (outcome.titleOk === true && outcome.artistOk === true && outcome.yearGuessCorrect === false) {
+    if (
+      outcome.titleOk === true &&
+      outcome.artistOk === true &&
+      outcome.yearGuessCorrect === false
+    ) {
       return {
         verdict: 'wrong',
         message:
@@ -2667,10 +3017,16 @@ function verdictFor(outcome) {
             : `Right spot and you named it - but it was not ${outcome.yearGuess}.`,
       };
     }
-    return { verdict: 'wrong', message: 'Right spot, but you had to name it too.' };
+    return {
+      verdict: 'wrong',
+      message: 'Right spot, but you had to name it too.',
+    };
   }
   if (outcome.stolenBy) {
-    return { verdict: 'wrong', message: `Not quite - ${nameOf(outcome.stolenBy)} stole it.` };
+    return {
+      verdict: 'wrong',
+      message: `Not quite - ${nameOf(outcome.stolenBy)} stole it.`,
+    };
   }
   return { verdict: 'wrong', message: 'Not quite. The card is discarded.' };
 }
@@ -2724,7 +3080,10 @@ function renderReveal() {
   // markup's own neutral state rather than calling the turn lost in past
   // tense - the tint (a :has() on data-verdict) follows it automatically.
   const { verdict, message } = verdictPending(outcome)
-    ? { verdict: 'neutral', message: 'Waiting for the group — vote Title and Artist to settle it.' }
+    ? {
+        verdict: 'neutral',
+        message: 'Waiting for the group — vote Title and Artist to settle it.',
+      }
     : verdictFor(outcome);
   const banner = el('verdict-banner');
   if (banner) {
@@ -2735,7 +3094,9 @@ function renderReveal() {
   // Confirmations: advanced/expert gate the placement on them, and any mode
   // needs them when the player claimed they could name it.
   const showConfirm =
-    outcome.kind === 'placement' && state.phase === 'revealed' && (gated() || state.claimIdentify);
+    outcome.kind === 'placement' &&
+    state.phase === 'revealed' &&
+    (gated() || state.claimIdentify);
   show(el('confirm-panel'), showConfirm);
   text('confirm-player-name', nameOf(outcome.playerId));
   pressed(el('btn-confirm-title'), voted('title'));
@@ -2769,6 +3130,12 @@ function renderReveal() {
   const pending = pendingResult(state);
   const next = el('btn-next-player');
   if (next) next.textContent = pending ? 'See the result' : 'Next player';
+  // While the gated vote is open, Next would silently discard a correctly
+  // placed card (unvoted = unconfirmed). Hold it until the group votes - any
+  // combination of the two chips settles the turn and unlocks it.
+  const voteOpen = verdictPending(outcome);
+  disable(next, voteOpen);
+  show(el('btn-next-reason'), voteOpen);
 }
 
 function renderAwards(outcome) {
@@ -2785,10 +3152,12 @@ function renderAwards(outcome) {
     // Three states, not two: a claim confirmed at the token cap moves the pool
     // by zero, and painting that in verdict red announces a loss that did not
     // happen. Nothing was gained and nothing was taken.
-    node.dataset.delta = award.delta > 0 ? 'gain' : award.delta < 0 ? 'loss' : 'none';
+    node.dataset.delta =
+      award.delta > 0 ? 'gain' : award.delta < 0 ? 'loss' : 'none';
     let what = 'Bought a card';
     if (award.reason === 'identify') {
-      what = award.delta === 0 ? 'Named it - tokens already full' : 'Named the song';
+      what =
+        award.delta === 0 ? 'Named it - tokens already full' : 'Named the song';
     } else if (award.reason === 'streak') {
       // Same cap-honesty as the identify row: a streak earned at the token cap
       // pays nothing, and calling that a purchase started table arguments.
@@ -2811,7 +3180,10 @@ function renderAwards(outcome) {
       node.dataset.delta = 'loss';
       fill(node, {
         who: state.mode === 'coop' ? 'Shared pool' : nameOf(outcome.playerId),
-        what: outcome.identifyConfirmed === false ? 'Did not name it' : 'Claim not confirmed yet',
+        what:
+          outcome.identifyConfirmed === false
+            ? 'Did not name it'
+            : 'Claim not confirmed yet',
         delta: '0',
       });
       rows.push(node);
@@ -2907,7 +3279,8 @@ function renderOutcomes(outcome) {
     let what;
     if (challenge.won) what = 'Right spot - the card goes to them';
     else if (!challenge.resolved) what = 'The placement stood, token spent';
-    else if (challenge.correct) what = 'Right spot, but someone claimed it first';
+    else if (challenge.correct)
+      what = 'Right spot, but someone claimed it first';
     else what = 'Wrong spot, token spent';
     fill(node, { who: nameOf(challenge.playerId), what });
     return node;
@@ -2946,8 +3319,14 @@ function coopScoreboardRows() {
     team.dataset.playerId = 'team';
     team.dataset.active = 'false';
     paintAvatar(team.querySelector('.score-row__avatar'), { name: 'The team' });
-    fill(team, { name: 'The team', togo: Math.max(0, state.targetCards - cards) });
-    buildTokenPills(team.querySelector('[data-field="tokens"]'), state.sharedTokens);
+    fill(team, {
+      name: 'The team',
+      togo: Math.max(0, state.targetCards - cards),
+    });
+    buildTokenPills(
+      team.querySelector('[data-field="tokens"]'),
+      state.sharedTokens,
+    );
     const strip = team.querySelector('[data-field="timeline"]');
     if (strip) replaceChildren(strip, state.sharedTimeline.map(miniCard));
     rows.push(team);
@@ -2978,6 +3357,8 @@ function coopScoreboardRows() {
 function renderScoreboard() {
   const list = el('scoreboard-list');
   if (!list) return;
+  // One shared pile is not a race, so co-op gets no "Standings" header.
+  text('scoreboard-title', state.mode === 'coop' ? 'The team' : 'Standings');
   const rows =
     state.mode === 'coop'
       ? coopScoreboardRows()
@@ -2991,7 +3372,10 @@ function renderScoreboard() {
           applySeat(node, row.color);
           paintAvatar(node.querySelector('.score-row__avatar'), row);
           fill(node, { name: row.name, togo: row.cardsToGo });
-          buildTokenPills(node.querySelector('[data-field="tokens"]'), row.tokens);
+          buildTokenPills(
+            node.querySelector('[data-field="tokens"]'),
+            row.tokens,
+          );
           const strip = node.querySelector('[data-field="timeline"]');
           if (strip) replaceChildren(strip, row.timeline.map(miniCard));
           return node;
@@ -3030,16 +3414,23 @@ function renderWin() {
   const box = el('win');
   const coopLoss = result && result.coopWon === false;
   const noWinner = !result || won.length === 0;
-  if (box) box.dataset.outcome = coopLoss || noWinner ? 'loss' : 'win';
+  // A level early end is neither: 'win' would dress a tie in one player's
+  // victory styling and 'loss' would paint it as a defeat nobody suffered.
+  const levelEnd = !!result && result.reason === 'ended' && won.length > 1;
+  if (box)
+    box.dataset.outcome =
+      coopLoss || noWinner ? 'loss' : levelEnd ? 'level' : 'win';
 
   let eyebrow = 'Winner';
   let title = 'Nobody';
   let summary = '';
 
-  // The winner's face, big, and the whole screen in their colour. Co-op has no
-  // single winner and a loss has none at all, so the circle simply goes.
+  // The winner's face, big, and the whole screen in their colour. Co-op has
+  // no single winner, a loss has none at all, and a level early end or joint
+  // win must not paint the screen in whichever tied player sits first - so
+  // the circle only appears for exactly one champion.
   const face = el('win-avatar');
-  const champion = state.mode === 'coop' || won.length === 0 ? null : won[0];
+  const champion = state.mode === 'coop' || won.length !== 1 ? null : won[0];
   show(face, !!champion);
   if (champion) {
     paintAvatar(face, champion);
@@ -3082,8 +3473,23 @@ function renderWin() {
     }
     title = joinNames(won.map((p) => p.name));
     const lead = won[0];
-    summary = `${plural(lead.timeline.length, 'card')}, ${plural(lead.tokens, 'token')} left.`;
-    replaceChildren(el('win-timeline'), lead.timeline.map(miniCard));
+    // Tied players hold the same cards by definition (tokens can differ on a
+    // joint target win), and no single timeline is shown for the same reason
+    // no single face is.
+    summary =
+      won.length > 1
+        ? `${plural(lead.timeline.length, 'card')} each.`
+        : `${plural(lead.timeline.length, 'card')}, ${plural(lead.tokens, 'token')} left.`;
+    // A deck-dry finish is a designed ending (most cards wins), but a plain
+    // "Winner" made it indistinguishable from reaching the target - say why,
+    // the way the co-op branch already does.
+    if (result.reason === 'deck-exhausted') {
+      summary = `The deck ran dry — most cards wins. ${summary}`;
+    }
+    replaceChildren(
+      el('win-timeline'),
+      won.length === 1 ? lead.timeline.map(miniCard) : [],
+    );
   } else {
     eyebrow = 'Game over';
     title = 'No winner';
@@ -3128,7 +3534,10 @@ function renderRecap() {
     // left the game by a route neither covers comes back null. Name what we can.
     const { card, misses } = summary.hardestSong;
     const title = card && card.title ? card.title : 'One song';
-    push('Hardest song', `${title} - missed ${misses === 1 ? 'once' : `${misses} times`}`);
+    push(
+      'Hardest song',
+      `${title} - missed ${misses === 1 ? 'once' : `${misses} times`}`,
+    );
   }
   // One decade row, not one per player. The engine reports every player's best
   // decade, and printing all of them turns the recap into a table nobody reads -
@@ -3158,8 +3567,16 @@ function renderRecap() {
   // Dead level on both count and share: nobody stood out, so nobody is named.
   const shared =
     top !== null &&
-    contenders.filter((row) => !better(row, top) && !better(top, row)).length > 1;
-  if (top && !shared) {
+    contenders.filter((row) => !better(row, top) && !better(top, row)).length >
+      1;
+  // Co-op's one shared row has no siblings for that filter to catch, and
+  // recap() drops the engine's tied flag on the way out - so read it at the
+  // source: a timeline spread dead-level across decades names no best decade.
+  const coopTied =
+    state.mode === 'coop' &&
+    state.players.length > 0 &&
+    decadeStrengthFor(state, state.players[0].id).tied;
+  if (top && !shared && !coopTied) {
     const decade = `${String(top.decade).slice(2)}s`;
     // "Owns the 80s" is a claim; make it only when the engine says the lead is
     // big enough to be one, otherwise state the fact and let it speak.
@@ -3215,7 +3632,10 @@ function renderPot() {
     // scan it and pay their own share without typing a handle.
     qr.innerHTML = payable ? qrSvg(payout.url) : '';
     if (payable) {
-      qr.setAttribute('aria-label', `Scan to send ${payout.perPlayer} to @${payout.handle}`);
+      qr.setAttribute(
+        'aria-label',
+        `Scan to send ${payout.perPlayer} to @${payout.handle}`,
+      );
     }
   }
   const frame = qr && qr.closest('.pot__frame');
@@ -3259,7 +3679,8 @@ function closeSheet(id) {
   render();
   const back = view.lastFocus;
   view.lastFocus = null;
-  if (back && document.contains(back)) requestAnimationFrame(() => back.focus());
+  if (back && document.contains(back))
+    requestAnimationFrame(() => back.focus());
 }
 
 function closeSheets() {
@@ -3276,9 +3697,14 @@ function closeSheets() {
 
 function renderSheets() {
   const menuBtn = el('btn-menu');
-  if (menuBtn) menuBtn.setAttribute('aria-expanded', view.menuOpen ? 'true' : 'false');
+  if (menuBtn)
+    menuBtn.setAttribute('aria-expanded', view.menuOpen ? 'true' : 'false');
   const challengeBtn = el('btn-challenge');
-  if (challengeBtn) challengeBtn.setAttribute('aria-expanded', view.challengeOpen ? 'true' : 'false');
+  if (challengeBtn)
+    challengeBtn.setAttribute(
+      'aria-expanded',
+      view.challengeOpen ? 'true' : 'false',
+    );
   if (view.challengeOpen) renderChallengeSheet();
 }
 
@@ -3388,7 +3814,10 @@ function render() {
 
 function stepTarget(delta) {
   const index = TARGET_CHOICES.indexOf(view.setup.target);
-  const next = Math.min(TARGET_CHOICES.length - 1, Math.max(0, (index < 0 ? 1 : index) + delta));
+  const next = Math.min(
+    TARGET_CHOICES.length - 1,
+    Math.max(0, (index < 0 ? 1 : index) + delta),
+  );
   view.setup.target = TARGET_CHOICES[next];
   queueSetupSave();
   render();
@@ -3405,7 +3834,10 @@ function stepMistakes(delta) {
 
 function stepBuyin(delta) {
   const next = view.setup.buyin.amount + delta * BUYIN_STEP_CENTS;
-  view.setup.buyin.amount = Math.min(BUYIN_MAX_CENTS, Math.max(BUYIN_MIN_CENTS, next));
+  view.setup.buyin.amount = Math.min(
+    BUYIN_MAX_CENTS,
+    Math.max(BUYIN_MIN_CENTS, next),
+  );
   queueSetupSave();
   render();
 }
@@ -3420,7 +3852,8 @@ function payoutFor() {
   // the draft belongs to whatever game somebody is thinking about next, and
   // editing it must not touch the pot of the game on the table.
   const stake = getStored(ACTIVE_BUYIN_KEY, null);
-  if (!stake || typeof stake !== 'object' || stake.enabled !== true || !state) return null;
+  if (!stake || typeof stake !== 'object' || stake.enabled !== true || !state)
+    return null;
   const amount = Number.isInteger(stake.amount) ? stake.amount : 0;
   const handle = normaliseHandle(stake.handle || '');
   const pot = potFor({ amount, playerCount: state.players.length });
@@ -3428,7 +3861,9 @@ function payoutFor() {
 
   const won = winners(state);
   const champion = state.mode === 'coop' || won.length === 0 ? null : won[0];
-  const note = champion ? `Timeline - ${champion.name} took the pot` : 'Timeline - the pot';
+  const note = champion
+    ? `Timeline - ${champion.name} took the pot`
+    : 'Timeline - the pot';
   // The amount on the link is ONE buy-in, not the pot. Whoever taps this is a
   // person who owes their own share; a link pre-filled with the total would ask
   // every single player to pay for everybody, which is the one number here that
@@ -3437,7 +3872,9 @@ function payoutFor() {
     total: pot.total,
     perPlayer: pot.perPlayer,
     handle,
-    url: handle ? venmoPayUrl({ handle, amount: pot.perPlayerCents, note }) : null,
+    url: handle
+      ? venmoPayUrl({ handle, amount: pot.perPlayerCents, note })
+      : null,
   };
 }
 
@@ -3481,7 +3918,8 @@ function chipsAll(target) {
 function stepYear(delta) {
   if (!state) return;
   ensureCard();
-  const current = state.yearGuess === null ? DEFAULT_YEAR_GUESS : state.yearGuess;
+  const current =
+    state.yearGuess === null ? DEFAULT_YEAR_GUESS : state.yearGuess;
   const next = Math.min(YEAR_MAX, Math.max(YEAR_MIN, current + delta));
   dispatch({ type: ACTIONS.SET_YEAR_GUESS, year: next });
 }
@@ -3550,13 +3988,16 @@ function gated() {
  */
 function restoreIdentifyVote() {
   if (!state || gated()) return;
-  const confirmed = state.confirmations && state.confirmations.identify === true;
+  const confirmed =
+    state.confirmations && state.confirmations.identify === true;
   view.identifyVote = { title: confirmed, artist: confirmed };
 }
 
 /** True when the group has ticked that box, whichever store is in charge. */
 function voted(which) {
-  return gated() ? state.confirmations[which] === true : view.identifyVote[which];
+  return gated()
+    ? state.confirmations[which] === true
+    : view.identifyVote[which];
 }
 
 function confirmToggle(which) {
@@ -3564,12 +4005,22 @@ function confirmToggle(which) {
   const wasPending = verdictPending(state.outcome);
   const next = !voted(which);
   if (gated()) {
-    dispatch({ type: ACTIONS.CONFIRM_TITLE_ARTIST, [which]: next });
+    // The first tap settles the WHOLE vote: the untouched chip goes in as a
+    // "no" (false/false is the legitimate "they failed" resolution), so the
+    // reveal can never deadlock waiting on a chip nobody means to press.
+    dispatch({
+      type: ACTIONS.CONFIRM_TITLE_ARTIST,
+      title: which === 'title' ? next : voted('title'),
+      artist: which === 'artist' ? next : voted('artist'),
+    });
   } else {
     view.identifyVote = { ...view.identifyVote, [which]: next };
   }
   if (state.claimIdentify) {
-    dispatch({ type: ACTIONS.CONFIRM_IDENTIFY, ok: voted('title') && voted('artist') });
+    dispatch({
+      type: ACTIONS.CONFIRM_IDENTIFY,
+      ok: voted('title') && voted('artist'),
+    });
   } else {
     render();
   }
@@ -3645,13 +4096,16 @@ const HANDLERS = {
     closeSheets();
     showScreen('rules');
   },
-  'rules-back': () => showScreen(view.returnScreen === 'rules' ? 'home' : view.returnScreen),
+  'rules-back': () =>
+    showScreen(view.returnScreen === 'rules' ? 'home' : view.returnScreen),
   home: () => goHome(),
   'add-player': () => {
     if (view.setup.players.length >= MAX_PLAYERS) return;
     // The lowest free "Player N", not the row count: after a remove, counting
     // rows mints a duplicate of a name already on the roster.
-    view.setup.players.push(playerDraft(view.setup.players.length, freePlaceholderName()));
+    view.setup.players.push(
+      playerDraft(view.setup.players.length, freePlaceholderName()),
+    );
     render();
   },
   'remove-player': (node) => {
@@ -3677,9 +4131,16 @@ const HANDLERS = {
     if (row) skipPhoto(Number(row.dataset.playerIndex));
   },
   'add-person': (node) => addPersonToGame(node.dataset.name),
+  // Armed tap, like End game: forgetting deletes the person and their saved
+  // photos, and there is no undo to offer afterwards.
   'forget-person': (node) => {
     const name = node.dataset.name;
     if (!name) return;
+    if (view.forgetArmed !== name) {
+      armForget(name);
+      return;
+    }
+    disarmForget();
     forgetPerson(name);
     announce(`${name} forgotten.`);
     render();
@@ -3691,7 +4152,10 @@ const HANDLERS = {
   'use-saved-photo': (node) => {
     const row = node.closest('[data-player-index]');
     if (!row) return;
-    applySavedPhoto(Number(row.dataset.playerIndex), Number(node.dataset.photoIndex));
+    applySavedPhoto(
+      Number(row.dataset.playerIndex),
+      Number(node.dataset.photoIndex),
+    );
   },
   'target-dec': () => stepTarget(-1),
   'target-inc': () => stepTarget(1),
@@ -3868,7 +4332,9 @@ function onInput(event) {
     draft.name = node.value;
     // The initial in the circle is the fallback avatar, so it has to keep up
     // with the name as it is typed.
-    const avatar = row.querySelector('.player-row__avatar [data-field="initial"]');
+    const avatar = row.querySelector(
+      '.player-row__avatar [data-field="initial"]',
+    );
     if (avatar) avatar.textContent = initialFor(node.value);
     // The avatar library is FILED on commit only ('change' fires on blur or
     // Enter, never per keystroke) but READ per keystroke. Filing on every
@@ -3876,7 +4342,8 @@ function onInput(event) {
     // typed, and the library's 24-name cap then evicted every real person in
     // it. The lookup below is read-only, so offering saved faces while typing
     // stays live.
-    if (event.type === 'change' && draft.photo) fileAvatar(draft.name, draft.photo);
+    if (event.type === 'change' && draft.photo)
+      fileAvatar(draft.name, draft.photo);
     // The roster draft persists as the name is typed (debounced) and settles
     // on the commit, so a mid-setup reload restores what is on the screen
     // rather than resurrecting the name from the last photo/skip action.
@@ -3902,7 +4369,9 @@ function onInput(event) {
     const draft = view.setup.players[Number(row.dataset.playerIndex)];
     acceptPhoto(draft, file).catch(() => {
       if (draft) draft.pending = false;
-      alertUser('That photo could not be read. Try another one, or tap Skip photo.');
+      alertUser(
+        'That photo could not be read. Try another one, or tap Skip photo.',
+      );
       render();
     });
     return;
@@ -3967,7 +4436,8 @@ function onInput(event) {
     return;
   }
   if (node.id === 'opt-skip-pass') updateSettings({ skipPass: node.checked });
-  if (node.id === 'opt-reduced-motion') updateSettings({ reducedMotion: node.checked });
+  if (node.id === 'opt-reduced-motion')
+    updateSettings({ reducedMotion: node.checked });
   if (node.id === 'opt-sound') {
     updateSettings({ sound: node.checked });
     if (!node.checked) stopAudio();
@@ -3986,8 +4456,10 @@ function onResize() {
   railResizeTimer = window.setTimeout(() => {
     railResizeTimer = null;
     if (!state) return;
-    if (view.screen === 'play') paintRoster(el('play-roster-seats'), el('play-roster-team'));
-    else if (view.screen === 'reveal') paintRoster(el('reveal-roster-seats'), el('reveal-roster-team'));
+    if (view.screen === 'play')
+      paintRoster(el('play-roster-seats'), el('play-roster-team'));
+    else if (view.screen === 'reveal')
+      paintRoster(el('reveal-roster-seats'), el('reveal-roster-team'));
   }, 180);
 }
 
@@ -4032,11 +4504,20 @@ function trapSheetFocus(event, sheet) {
 }
 
 function onKeydown(event) {
-  // A stale tab is read-only until it reloads; only Tab (to reach the Reload
-  // button) and Enter/Space on it - plain button activation - pass through.
-  if (view.stale && event.key === 'Escape') {
-    event.preventDefault();
-    return;
+  // A stale tab is read-only until it reloads. Its overlay claims aria-modal,
+  // so Tab is trapped inside it (Reload is the only stop - the sheets' trap
+  // does the arithmetic) and Escape is swallowed; Enter/Space on Reload -
+  // plain button activation - passes through.
+  if (view.stale) {
+    if (event.key === 'Tab') {
+      const overlay = el('stale-overlay');
+      if (overlay && !overlay.hidden) trapSheetFocus(event, overlay);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      return;
+    }
   }
   if (event.key === 'Tab') {
     const sheet = openSheetLayer();

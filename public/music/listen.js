@@ -38,6 +38,19 @@ const dom = {
   revealLead: document.getElementById("reveal-lead"),
   revealNote: document.getElementById("reveal-note"),
   links: document.getElementById("links"),
+  footnote: document.getElementById("footnote"),
+};
+
+/*
+  The footnote promises "back to the game when the clip ends", which is only
+  true where a clip actually plays on this page. Link mode hands over a
+  streaming link and the error notices play nothing, so each state gets the
+  sentence it can keep.
+*/
+const FOOTNOTES = {
+  player: "Only the host's screen knows the year. Back to the game when the clip ends.",
+  link: "Only the host's screen knows the year. Back to the game once you've listened.",
+  bare: "Only the host's screen knows the year.",
 };
 
 /* ---------------------------------------------------------------- payload -- */
@@ -513,6 +526,7 @@ function showNotice(reason) {
   dom.notice.hidden = false;
   dom.player.hidden = true;
   dom.reveal.hidden = true;
+  if (dom.footnote) dom.footnote.textContent = FOOTNOTES.bare;
   dom.cardNo.textContent = "Listen";
   setState("blank");
 }
@@ -531,6 +545,7 @@ async function load() {
   dom.links.replaceChildren();
   if (dom.revealLead) dom.revealLead.textContent = "Show streaming links";
   if (dom.revealNote) dom.revealNote.textContent = "this reveals the song title";
+  if (dom.footnote) dom.footnote.textContent = FOOTNOTES.player;
   paint(0);
 
   const parsed = readCardFromHash(window.location.hash);
@@ -557,6 +572,7 @@ async function load() {
     if (dom.revealNote) {
       dom.revealNote.textContent = "the host picked this service - opening it shows the title";
     }
+    if (dom.footnote) dom.footnote.textContent = FOOTNOTES.link;
     setState("blank");
     dom.reveal.open = true;
     onRevealToggle();

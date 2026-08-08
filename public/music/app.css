@@ -649,6 +649,10 @@ body[data-screen='rules']      #rules { display: flex; }
   box-shadow: var(--sh-small);
   appearance: none;
   -webkit-appearance: none;
+  /* An option longer than the box must trail off, not hard-clip mid-word. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .select__caret {
   position: absolute;
@@ -1352,6 +1356,11 @@ body[data-mode='coop'] .roster__team { display: flex; }
 }
 .person__forget svg { width: 12px; height: 12px; display: block; margin: auto; }
 .people[data-editing='true'] .person__forget { display: block; }
+/* First tap arms the cross (same pattern as End game); the halo says "this one
+   is primed" while the aria-label carries the words. */
+.person__forget[data-armed='true'] {
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--bad);
+}
 
 /* Mode rows */
 .mode-list {

@@ -91,6 +91,25 @@ const VENMO_HOSTS = new Set([
 ]);
 
 /**
+ * Single path segments that are Venmo's own routes, never a profile. The one
+ * that bites in the wild is venmo.com/code?user_id=... - the URL Venmo's own
+ * share-my-QR flow puts on the clipboard - which read as the handle "@code"
+ * and pointed the whole table's payments at a reserved endpoint. These are
+ * rejected outright rather than resolved: the query string's user_id is not a
+ * handle, and guessing would mint a confident wrong payee.
+ */
+const RESERVED_PATHS = new Set([
+  'code',
+  'u',
+  'signup',
+  'account',
+  'pay',
+  'business',
+  'legal',
+  'settings',
+]);
+
+/**
  * Render cents as a bare decimal dollar string ("630" -> "6.30").
  * This is the form Venmo's `amount` parameter wants: no currency symbol, no
  * thousands separators.
@@ -247,9 +266,12 @@ export function normaliseHandle(input) {
     if (cut !== -1) path = path.slice(0, cut);
     const parts = path.split('/').filter((part) => part.length > 0);
     // Both shapes are in the wild: venmo.com/paula and the newer
-    // venmo.com/u/paula. Anything deeper is some other page, not a profile.
-    if (parts.length === 1) value = parts[0];
-    else if (parts.length === 2 && parts[0].toLowerCase() === 'u') value = parts[1];
+    // venmo.com/u/paula. Anything deeper is some other page, not a profile,
+    // and a lone segment naming one of Venmo's own routes is a route.
+    if (parts.length === 1) {
+      if (RESERVED_PATHS.has(parts[0].toLowerCase())) return null;
+      value = parts[0];
+    } else if (parts.length === 2 && parts[0].toLowerCase() === 'u') value = parts[1];
     else return null;
   }
 

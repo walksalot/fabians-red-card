@@ -139,7 +139,12 @@
                            seats that past player, reusing an untouched row
                            before appending a new one]
       forget-person       [the .person__forget cross on the same chip; only
-                           reachable while #people-block[data-editing="true"]]
+                           reachable while #people-block[data-editing="true"],
+                           and tabbable (tabindex 0) exactly then. Armed tap
+                           like end-game: the first tap arms THAT cross
+                           (data-armed="true", relabelled aria-label), only a
+                           second within ~4s deletes the person + photos.
+                           Leaving the setup screen resets edit mode]
       toggle-people-edit  [#btn-people-edit (aria-pressed) - swaps the guest
                            list between tap-to-add and tap-to-forget]
       use-saved-photo     [a .saved-avatar in that row's saved-list; carries
@@ -192,7 +197,11 @@
       confirm-artist      [#btn-confirm-artist]       (aria-pressed toggle)
       next-turn           [#btn-next-player - taps are ignored for ~700ms after
                            the reveal renders: it sits at Place-here's exact
-                           coordinates and a double tap used to skip the reveal]
+                           coordinates and a double tap used to skip the reveal.
+                           Disabled (with #btn-next-reason shown) while a gated
+                           mode's Title/Artist vote is still unresolved - an
+                           enabled Next there silently forfeits a correct
+                           placement]
       play-again          [#btn-play-again - the setup screen that replaces it
                            gets the same ~700ms guard on its mode rows and on
                            start-game, for the same double-tap reason]
@@ -215,7 +224,8 @@
     setup       - #player-count-note #target-cards-value #mistake-limit-value
                   #eligible-count-value ; #deck-warning ships [hidden]
                   #setup-photo-reason (ships [hidden]) - why Start is disabled
-                  #target-cards-hint  * NEW *  ("~ 45 min" per target)
+                  #target-cards-hint  * NEW *  ("≈ 35–50 min" - a range from
+                  target × seats, so 8 players read longer than 2)
                   #buyin-amount-value #buyin-pot  * NEW *  (see BUY-IN below)
     pass        - #pass-player-name #pass-turn-number #pass-progress
                   #pass-next-name ; hide the whole #pass-then line when there
@@ -233,7 +243,10 @@
                   #confirm-player-name
                   #reveal-who-name #reveal-who-sub (whose card it was)
                   #reveal-belongs #reveal-streak  * NEW *  (both ship [hidden])
+                  #btn-next-reason (ships [hidden]) - why Next is disabled
+                  while the gated vote is open
     scoreboard  - #scoreboard-meta  * NEW *  (ships [hidden]; "6 cards left")
+                  #scoreboard-title - "Standings", but "The team" in co-op
     win         - #win-eyebrow #win-player-name #win-summary
                   #win-title-prefix (the heading's sr-only prefix - write it
                   from the eyebrow, "Winner: " / "Game over: ", so a loss is
@@ -394,7 +407,8 @@
       #buyin-block #win-pot #challenge-locks #reveal-strip #reveal-belongs
       #reveal-streak #scoreboard-meta #win-recap #toast          (all * NEW *)
       #stale-overlay (shown when another tab holds a newer save - every input
-      except its Reload button is refused from then on)
+      except its Reload button is refused from then on, and Tab is trapped
+      inside the overlay like the sheets trap it)
     The per-row input[data-role="player-photo"] is NOT one of them: it is
     visually hidden by .player-row__file (not [hidden] - see the note on the
     template) and stays that way forever. The .avatar button is the accessible
@@ -551,7 +565,7 @@
       <fieldset class="sect" aria-labelledby="setup-target-label">
         <div class="sect__head">
           <h2 class="sect__eyebrow" id="setup-target-label">Cards to win</h2>
-          <p class="sect__note" id="target-cards-hint">&asymp; 45 min</p>
+          <p class="sect__note" id="target-cards-hint">&asymp; 35&ndash;50 min</p>
         </div>
         <div class="stepper" id="field-target-cards" role="group" aria-labelledby="target-cards-label">
           <span class="stepper__label" id="target-cards-label">First to</span>
@@ -737,11 +751,13 @@
           <div class="field">
             <label class="field__label" for="playback-source">Play songs with</label>
             <div class="select">
+              <!-- Labels sized for a 320px phone: the closed select hard-clips
+                   anything longer, and the hint below carries the detail. -->
               <select id="playback-source" name="playback-source">
-                <option value="preview" selected>In-app preview &mdash; 30 seconds, title hidden</option>
-                <option value="spotify">Spotify &mdash; opens on the scanning phone</option>
-                <option value="apple">Apple Music &mdash; opens on the scanning phone</option>
-                <option value="youtube">YouTube &mdash; opens on the scanning phone</option>
+                <option value="preview" selected>In-app preview (30s)</option>
+                <option value="spotify">Spotify (QR link)</option>
+                <option value="apple">Apple Music (QR link)</option>
+                <option value="youtube">YouTube (QR link)</option>
               </select>
               <svg viewBox="0 0 24 24" class="select__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
@@ -1059,6 +1075,8 @@
     </section>
 
     <div class="screen__foot">
+      <!-- Why Next is dead during a gated vote. Ships hidden. -->
+      <p class="setup__reason" id="btn-next-reason" hidden>Vote Title and Artist first</p>
       <button type="button" class="btn btn--primary" id="btn-next-player" data-action="next-turn">
         Next player
       </button>
@@ -1203,6 +1221,14 @@
         everyone is on the same side, so a miss burns a shared mistake instead.
       </p>
 
+      <h2>House rules &mdash; optional, switched on at setup</h2>
+      <ul>
+        <li><b>Streak bonus</b> &mdash; three right in a row earns a token, on the spot.</li>
+        <li><b>Buy-in</b> &mdash; everyone chips in the same amount and the winner takes the pot.
+          Nothing is ever charged in the app: the winner screen just shows who to pay, with a
+          Venmo link and QR when the host saved a handle, and the room settles up itself.</li>
+      </ul>
+
       <h2>House notes</h2>
       <ul>
         <li>Song previews need internet. Everything else works offline &mdash; offline you get a silent demo timer.</li>
@@ -1263,11 +1289,13 @@
     <div class="menu-card">
       <label class="field__label" for="opt-playback-source">Play songs with</label>
       <div class="select">
+        <!-- Same short labels as the setup copy of this select: the closed
+             control hard-clips at 320px, and the note below carries the detail. -->
         <select id="opt-playback-source">
-          <option value="preview" selected>In-app preview &mdash; 30 seconds, title hidden</option>
-          <option value="spotify">Spotify &mdash; opens on the scanning phone</option>
-          <option value="apple">Apple Music &mdash; opens on the scanning phone</option>
-          <option value="youtube">YouTube &mdash; opens on the scanning phone</option>
+          <option value="preview" selected>In-app preview (30s)</option>
+          <option value="spotify">Spotify (QR link)</option>
+          <option value="apple">Apple Music (QR link)</option>
+          <option value="youtube">YouTube (QR link)</option>
         </select>
         <svg viewBox="0 0 24 24" class="select__caret" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>

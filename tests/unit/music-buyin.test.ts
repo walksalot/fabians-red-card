@@ -347,6 +347,28 @@ describe('normaliseHandle', () => {
     expect(normaliseHandle('/paula')).toBeNull();
   });
 
+  it("rejects Venmo's own routes pasted as single-segment URLs", () => {
+    // The one that bites in the wild: the URL Venmo's share-my-QR flow puts on
+    // the clipboard. Reading "@code" out of it pointed every player's payment
+    // at a reserved endpoint that no user can hold.
+    expect(normaliseHandle('https://venmo.com/code?user_id=1234567890123456789')).toBeNull();
+    // Each reserved segment asserted separately, in both casings, so deleting
+    // any single entry from the blocklist - or the whole list - fails here.
+    const reserved = ['code', 'u', 'signup', 'account', 'pay', 'business', 'legal', 'settings'];
+    for (const route of reserved) {
+      expect(normaliseHandle(`https://venmo.com/${route}`)).toBeNull();
+      expect(normaliseHandle(`venmo.com/${route.toUpperCase()}`)).toBeNull();
+    }
+    // The names are reserved as ROUTES, not banned as handles: typed bare or
+    // under /u/ they are still somebody's (odd, grandfathered) username.
+    expect(normaliseHandle('code')).toBe('code');
+    expect(normaliseHandle('@pay')).toBe('pay');
+    expect(normaliseHandle('https://venmo.com/u/code')).toBe('code');
+    // And ordinary profiles in both shapes still read.
+    expect(normaliseHandle('venmo.com/paula')).toBe('paula');
+    expect(normaliseHandle('https://venmo.com/u/paula')).toBe('paula');
+  });
+
   it('returns null for anything that is not a string', () => {
     expect(normaliseHandle(null)).toBeNull();
     expect(normaliseHandle(undefined)).toBeNull();
