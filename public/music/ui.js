@@ -1945,7 +1945,13 @@ function armAutoNext() {
   // Never count down over a decision: gated modes wait for the title/artist
   // vote, and a claimed "I can name it" waits for the group's verdict.
   if (verdictPending(outcome)) return;
-  if (state.phase === 'revealed' && outcome.kind === 'placement' && state.claimIdentify && outcome.identifyConfirmed === null) return;
+  if (
+    state.phase === 'revealed' &&
+    outcome.kind === 'placement' &&
+    state.claimIdentify &&
+    outcome.identifyConfirmed === null
+  )
+    return;
   const button = el('btn-next-player');
   if (button) button.dataset.autonext = 'true';
   autoNextTimer = window.setTimeout(() => {
@@ -3046,7 +3052,9 @@ function renderPass() {
   // buy choice has to be visible BEFORE that tap, here, whenever it is legal.
   show(
     el('btn-pass-buy'),
-    settings.fastFlow && state.phase === 'turn-start' && buyBlockedReason(state) === null,
+    settings.fastFlow &&
+      state.phase === 'turn-start' &&
+      buyBlockedReason(state) === null,
   );
 
   renderStandings();
@@ -4098,8 +4106,6 @@ function confirmToggle(which) {
       type: ACTIONS.CONFIRM_IDENTIFY,
       ok: voted('title') && voted('artist'),
     });
-    // A resolved identify claim was the other thing holding the countdown.
-    if (state.outcome && state.outcome.identifyConfirmed !== null) armAutoNext();
   } else {
     render();
   }
@@ -4109,9 +4115,14 @@ function confirmToggle(which) {
     if (outcome.accepted) sfx.win();
     else sfx.lose();
     if (outcome.tokenAwards.some((award) => award.delta > 0)) sfx.token();
-    // The vote was the reason the reveal could not count down; it just resolved.
-    armAutoNext();
   }
+  // (Re)arm whenever this tap leaves the verdict settled - not only on the
+  // pending->settled transition the sound cue keys on. A vote tap is the vote
+  // progressing, not the table lingering, but the global click handler cannot
+  // tell those apart and already cancelled the countdown for this very tap:
+  // without this line, voting title THEN artist killed fast flow for the turn.
+  // armAutoNext itself declines while anything is genuinely unresolved.
+  if (outcome && !verdictPending(outcome)) armAutoNext();
 }
 
 function nextTurn() {
@@ -4415,7 +4426,8 @@ function onClick(event) {
   (ACTION_CUES[node.dataset.action] || sfx.tap)();
   // Any interaction on the reveal other than Next player itself means the
   // table is still using the screen - stop the countdown and let them.
-  if (autoNextTimer !== null && node.dataset.action !== 'next-turn') cancelAutoNext();
+  if (autoNextTimer !== null && node.dataset.action !== 'next-turn')
+    cancelAutoNext();
   handler(node);
 }
 
