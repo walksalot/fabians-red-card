@@ -83,6 +83,10 @@ import {
   forgetPerson,
   loadBuyin,
   saveBuyin,
+  isPersistent,
+  NAMESPACE,
+  VERSION,
+  KEYS,
 } from './storage.js';
 import { potFor, normaliseHandle, venmoPayUrl } from './buyin.js';
 import { qrSvg } from './qr.js';
@@ -236,7 +240,6 @@ const view = {
     linksShown: false,
     status: '',
   },
-  qrAlt: false,
   /**
    * The group's Title/Artist vote in classic + co-op, where the engine has no
    * title/artist gate and the two buttons are only there to settle an
@@ -244,6 +247,14 @@ const view = {
    */
   identifyVote: { title: false, artist: false },
   confettiStop: null,
+  /**
+   * The armed-tap guards on the two destructive controls (End game, and
+   * Shuffle & start over an unfinished save). Armed by the first tap, disarmed
+   * by a timeout, a sheet close or a screen change - never a dialog, because
+   * window.confirm steals focus and looks like a crash on a phone.
+   */
+  endGameArmed: false,
+  startArmed: false,
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -306,9 +317,33 @@ function announce(message) {
   if (node) node.textContent = String(message);
 }
 
+/**
+ * An error has two audiences: #live-alert for screen readers, and the #toast
+ * pill for everyone else - a message only assistive tech can perceive is no
+ * feedback at all for a sighted player who just picked a broken photo.
+ * The toast is presentation only (it is not a live region); it hides itself
+ * after a few seconds, and onClick clears it on the next tap either way.
+ */
+let toastTimer = null;
+
 function alertUser(message) {
+  const words = String(message);
   const node = el('live-alert');
-  if (node) node.textContent = String(message);
+  if (node) node.textContent = words;
+  const toast = el('toast');
+  if (!toast) return;
+  if (toastTimer !== null) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  toast.textContent = words;
+  show(toast, !!words);
+  if (words) {
+    toastTimer = window.setTimeout(() => {
+      toastTimer = null;
+      show(el('toast'), false);
+    }, 4500);
+  }
 }
 
 /* ========================================================================== */
@@ -516,7 +551,13 @@ function photosOutstanding() {
  * everybody every week. storage.js drops the photos first if the quota bites,
  * because losing the faces is survivable and losing the names is just rude.
  */
+let rosterSaveTimer = null;
+
 function rememberRoster() {
+  if (rosterSaveTimer !== null) {
+    clearTimeout(rosterSaveTimer);
+    rosterSaveTimer = null;
+  }
   savePlayers(
     view.setup.players.map((p) => ({
       name: (p.name || '').trim(),
@@ -524,6 +565,20 @@ function rememberRoster() {
       skipped: !!p.skipped,
     })),
   );
+}
+
+/**
+ * The keystroke path into rememberRoster. Debounced, because a name is typed
+ * one input event at a time and sixteen JSON writes per name is silly - but it
+ * has to exist at all: a name typed after the last photo/skip action used to
+ * be the one thing a mid-setup reload silently reverted.
+ */
+function queueRosterSave() {
+  if (rosterSaveTimer !== null) clearTimeout(rosterSaveTimer);
+  rosterSaveTimer = window.setTimeout(() => {
+    rosterSaveTimer = null;
+    rememberRoster();
+  }, 500);
 }
 
 /** Handle one chosen file. Async, so the draft is re-checked after the await. */
@@ -561,13 +616,28 @@ async function acceptPhoto(draft, file) {
   announce(`Photo added for ${draft.name || 'this player'}.`);
 }
 
-/** A row nobody has touched: still the placeholder name, no photo, not skipped. */
-function isUntouchedRow(draft, index) {
-  return (
-    !draft.photo
-    && !draft.skipped
-    && (!draft.name || draft.name.trim() === `Player ${index + 1}`)
-  );
+/**
+ * A row nobody has touched: still a placeholder name, no photo, not skipped.
+ * ANY "Player N" counts, not just the one matching this row's position -
+ * removing a row shifts every draft down a seat, and a "Player 3" sitting in
+ * row 2 is still an empty row, not somebody called Player 3. (storage.js makes
+ * the same call: rememberPerson refuses these names as not-a-person.)
+ */
+function isUntouchedRow(draft) {
+  const name = (draft.name || '').trim();
+  return !draft.photo && !draft.skipped && (name === '' || /^player\s*\d+$/i.test(name));
+}
+
+/**
+ * The lowest "Player N" placeholder no current row is using, so an added row
+ * never duplicates a name already on the roster (remove row 1, add a row, and
+ * counting rows alone mints a second "Player 4").
+ */
+function freePlaceholderName() {
+  const taken = new Set(view.setup.players.map((p) => (p.name || '').trim().toLowerCase()));
+  let n = 1;
+  while (taken.has(`player ${n}`)) n += 1;
+  return `Player ${n}`;
 }
 
 /**
@@ -826,8 +896,11 @@ function dispatch(action) {
 
 function persist() {
   if (!state) return;
-  if (isGameOver(state)) clearGame();
-  else saveGame(state);
+  // Finished games are saved too, not cleared: switching to the Venmo app to
+  // settle the pot reloads the tab on most phones, and the winner screen -
+  // recap, payout QR and all - has to still be reachable afterwards. A
+  // finished save is replaced the next time a game starts.
+  saveGame(state);
 }
 
 /* ========================================================================== */
@@ -839,6 +912,10 @@ function showScreen(name) {
   view.screen = name;
   document.body.dataset.screen = name;
   if (leavingPlay) stopAudio();
+  // A screen change stands down both armed-tap guards - the second tap has to
+  // land on the same screen the first one armed.
+  disarmEndGame();
+  disarmStartGame();
   render();
   focusHeading(name);
 }
@@ -866,13 +943,16 @@ function focusHeading(name) {
 /* Home                                                                       */
 /* ========================================================================== */
 
+/**
+ * The saved game, finished or not - the home screen offers an unfinished one
+ * as "Resume game" and a finished one as "See final result" (the pot is often
+ * still being collected when the tab reloads).
+ */
 function savedGame() {
   const raw = loadGame();
   if (!raw) return null;
   try {
-    const restored = deserialize(raw);
-    if (restored.phase === 'game-over') return null;
-    return restored;
+    return deserialize(raw);
   } catch {
     clearGame();
     return null;
@@ -895,8 +975,16 @@ function renderHome() {
   show(button, !!saved);
   if (saved) {
     const names = saved.players.map((p) => p.name).join(', ');
-    text('btn-resume-detail', `Turn ${saved.turn} - ${names}`);
+    if (saved.phase === 'game-over') {
+      text('btn-resume-title', 'See final result');
+      text('btn-resume-detail', `Game over — ${names}`);
+    } else {
+      text('btn-resume-title', 'Resume game');
+      text('btn-resume-detail', `Turn ${saved.turn} — ${names}`);
+    }
   }
+
+  show(el('home-storage-warn'), !isPersistent());
 }
 
 /* ========================================================================== */
@@ -941,13 +1029,18 @@ function loadSavedBuyin() {
   };
 }
 
-/** Rebuild the chip rows from deck.js, which is the authority on what exists. */
+/**
+ * Rebuild the chip rows from deck.js, which is the authority on what exists.
+ * The leading "All decades" / "All genres" chip ships inside each container and
+ * MUST survive the rebuild - replaceChildren without it deleted the only
+ * one-tap way back to a full deck.
+ */
 function buildChips() {
   const decadeBox = el('decade-chips');
   if (decadeBox) {
-    replaceChildren(
-      decadeBox,
-      DECADES.map((decade) => {
+    replaceChildren(decadeBox, [
+      el('btn-decades-all'),
+      ...DECADES.map((decade) => {
         const chip = clone('tpl-chip');
         if (!chip) return null;
         chip.dataset.action = 'toggle-decade';
@@ -956,13 +1049,13 @@ function buildChips() {
         fill(chip, { label: `${String(decade).slice(2)}s` });
         return chip;
       }),
-    );
+    ]);
   }
   const genreBox = el('genre-chips');
   if (genreBox) {
-    replaceChildren(
-      genreBox,
-      GENRES.map((genre) => {
+    replaceChildren(genreBox, [
+      el('btn-genres-all'),
+      ...GENRES.map((genre) => {
         const chip = clone('tpl-chip');
         if (!chip) return null;
         chip.dataset.action = 'toggle-genre';
@@ -971,7 +1064,7 @@ function buildChips() {
         fill(chip, { label: GENRE_LABELS[genre] || genre });
         return chip;
       }),
-    );
+    ]);
   }
 }
 
@@ -1085,6 +1178,27 @@ function paintBuyin() {
   // caret to the end while somebody is still typing their handle.
   if (field && field.value !== buyin.handle) field.value = buyin.handle;
 
+  // Live validation, in normaliseHandle's own terms: the winner screen will
+  // pay whatever that function reads out of this field, so the person typing
+  // gets shown that exact reading - or told there is none - right here, not
+  // after the game. Empty is fine (the handle is optional).
+  const hint = el('buyin-venmo-hint');
+  const typed = (buyin.handle || '').trim();
+  const handle = normaliseHandle(typed);
+  if (hint) {
+    hint.dataset.tone = typed && !handle ? 'bad' : 'ok';
+    hint.textContent = !typed
+      ? ''
+      : handle
+        ? `The winner screen will pay @${handle}`
+        : "That's not a Venmo handle or profile link — it won't be on the winner screen";
+    show(hint, !!typed);
+  }
+  if (field) {
+    if (typed && !handle) field.setAttribute('aria-invalid', 'true');
+    else field.removeAttribute('aria-invalid');
+  }
+
   const pot = potFor({ amount: buyin.amount, playerCount: view.setup.players.length });
   // potFor returns null rather than a wrong number; there is nothing honest to
   // put in the line in that case, so it says nothing.
@@ -1111,10 +1225,12 @@ function renderSetup() {
   if (radio) radio.checked = true;
   show(el('field-mistake-limit'), view.setup.mode === 'coop');
 
-  for (const chip of document.querySelectorAll('#decade-chips .chip')) {
+  // [data-decade] / [data-genre] so the leading All-chip - a plain button, not
+  // a toggle - never grows an aria-pressed it does not mean.
+  for (const chip of document.querySelectorAll('#decade-chips .chip[data-decade]')) {
     pressed(chip, view.setup.decades.includes(Number(chip.dataset.decade)));
   }
-  for (const chip of document.querySelectorAll('#genre-chips .chip')) {
+  for (const chip of document.querySelectorAll('#genre-chips .chip[data-genre]')) {
     pressed(chip, view.setup.genres.includes(chip.dataset.genre));
   }
 
@@ -1163,6 +1279,8 @@ function renderSetup() {
     show(reason, !!blocked);
   }
   disable(el('btn-start-game'), blocked !== null, blocked || undefined);
+
+  show(el('setup-storage-warn'), !isPersistent());
 }
 
 function startGame() {
@@ -1276,7 +1394,6 @@ function ensureCard() {
 }
 
 function showReveal() {
-  view.qrAlt = false;
   showScreen('reveal');
   runFlip();
   // One cue per reveal, fired on the transition rather than in renderReveal -
@@ -1308,7 +1425,6 @@ function runFlip() {
 }
 
 function showWin() {
-  clearGame();
   showScreen('win');
   const result = state && state.result;
   const lost = !result || result.coopWon === false || result.winnerIds.length === 0;
@@ -1323,8 +1439,75 @@ function endGame() {
   stopAudio();
   dispatch({ type: ACTIONS.END_GAME });
   closeSheets();
-  clearGame();
   showWin();
+}
+
+/**
+ * The armed-tap guard on the menu's End game row. The first tap arms it and
+ * relabels it; only a second tap while armed actually ends the game. ~4s (or
+ * closing the sheet) puts it back, so a mis-tap costs nothing.
+ */
+let endGameArmTimer = null;
+
+function paintEndGameArm() {
+  const button = el('btn-end-game');
+  if (button) button.textContent = view.endGameArmed ? 'Tap again to end the game' : 'End game';
+}
+
+function disarmEndGame() {
+  if (endGameArmTimer !== null) {
+    clearTimeout(endGameArmTimer);
+    endGameArmTimer = null;
+  }
+  if (!view.endGameArmed) return;
+  view.endGameArmed = false;
+  paintEndGameArm();
+}
+
+function armEndGame() {
+  view.endGameArmed = true;
+  paintEndGameArm();
+  announce('Tap End game again to end it for everyone. The game cannot be resumed.');
+  if (endGameArmTimer !== null) clearTimeout(endGameArmTimer);
+  endGameArmTimer = window.setTimeout(() => {
+    endGameArmTimer = null;
+    disarmEndGame();
+  }, 4000);
+}
+
+/**
+ * The same guard on Shuffle & start, armed only while an UNFINISHED game is in
+ * the save slot - starting would silently destroy it (a finished save has had
+ * its moment and is replaced without ceremony).
+ */
+let startArmTimer = null;
+
+function paintStartArm() {
+  const button = el('btn-start-game');
+  if (button) {
+    button.textContent = view.startArmed ? 'Tap again to replace the saved game' : 'Shuffle & start';
+  }
+}
+
+function disarmStartGame() {
+  if (startArmTimer !== null) {
+    clearTimeout(startArmTimer);
+    startArmTimer = null;
+  }
+  if (!view.startArmed) return;
+  view.startArmed = false;
+  paintStartArm();
+}
+
+function armStartGame() {
+  view.startArmed = true;
+  paintStartArm();
+  announce('Starting replaces the saved game. Tap Shuffle & start again to go ahead.');
+  if (startArmTimer !== null) clearTimeout(startArmTimer);
+  startArmTimer = window.setTimeout(() => {
+    startArmTimer = null;
+    disarmStartGame();
+  }, 4000);
 }
 
 function goHome() {
@@ -1369,7 +1552,6 @@ function resetCardAudio() {
         ? 'Tap play when everyone is listening.'
         : 'Sound is off. Turn it on in the menu.',
   };
-  view.qrAlt = false;
 }
 
 /** Tap-to-play. Every path through here starts inside a user gesture. */
@@ -1550,24 +1732,14 @@ function isLoopback() {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
 }
 
-/** Kept so the file:// note can be restored after the loopback hint overwrites it. */
-let fileNoteHtml = '';
-
 function paintQr() {
   const box = el('qr-code');
   const note = el('qr-file-note');
-  const altBtn = el('btn-qr-alt');
-  const altWarn = el('qr-alt-warn');
   if (!box) return;
   // An empty white frame reads as a broken image, so the frame goes with the code.
   const frame = box.closest('.qr__frame');
 
   const card = state && state.card;
-  const offline = window.location.protocol === 'file:';
-
-  show(altBtn, offline);
-  pressed(altBtn, view.qrAlt);
-  show(altWarn, offline && view.qrAlt);
 
   // Nothing has been drawn yet. Hiding the whole block would be tidier, but it
   // also hides the single best feature of the game from anyone who has not
@@ -1587,21 +1759,7 @@ function paintQr() {
     return;
   }
 
-  if (offline && !view.qrAlt) {
-    // A listen.html URL off the local disk is unreachable from any other phone,
-    // so a code here would just be a dead end someone keeps scanning.
-    box.textContent = '';
-    show(frame, false);
-    if (note) note.innerHTML = fileNoteHtml;
-    show(note, true);
-    return;
-  }
-
-  const target = offline
-    ? `https://www.youtube.com/results?search_query=${encodeURIComponent(
-        `${card.title || ''} ${card.artist || ''}`.trim(),
-      )}`
-    : listenUrl(card, state.turn);
+  const target = listenUrl(card, state.turn);
 
   try {
     box.innerHTML = qrSvg(target, { margin: 3, dark: '#0b0616', light: '#ffffff' });
@@ -1620,7 +1778,7 @@ function paintQr() {
   }
 
   if (note) {
-    if (!offline && isLoopback()) {
+    if (isLoopback()) {
       note.textContent =
         'This address only works on this device. Run "npm run music" and use the Wi-Fi address it prints so everyone can scan.';
       show(note, true);
@@ -1892,7 +2050,18 @@ function renderStandings() {
 
 function paintTokens(list, count, cap) {
   if (!list) return;
-  const pills = list.querySelectorAll('.token-pill');
+  // The markup ships the classic five pills; the cap is the engine's to set
+  // (co-op holds six), so the strip is rebuilt whenever the two disagree -
+  // restyling five pills for a six-token pool made 5 and 6 indistinguishable
+  // on the one screen where spend decisions happen.
+  let pills = list.querySelectorAll('.token-pill');
+  if (pills.length !== cap) {
+    replaceChildren(
+      list,
+      Array.from({ length: cap }, () => clone('tpl-token-pill')),
+    );
+    pills = list.querySelectorAll('.token-pill');
+  }
   pills.forEach((pill, index) => {
     pill.dataset.state = index < count ? 'full' : 'empty';
   });
@@ -2218,6 +2387,13 @@ function renderAwards(outcome) {
     let what = 'Bought a card';
     if (award.reason === 'identify') {
       what = award.delta === 0 ? 'Named it - tokens already full' : 'Named the song';
+    } else if (award.reason === 'streak') {
+      // Same cap-honesty as the identify row: a streak earned at the token cap
+      // pays nothing, and calling that a purchase started table arguments.
+      what =
+        award.delta === 0
+          ? 'Streak bonus - tokens already full'
+          : 'Streak bonus - three in a row';
     }
     fill(node, {
       who: state.mode === 'coop' ? 'Shared pool' : nameOf(award.playerId),
@@ -2581,6 +2757,9 @@ function renderPot() {
   }
   const frame = qr && qr.closest('.pot__frame');
   show(frame, !!payout.url);
+  // The caption describes the QR, so it goes wherever the QR goes - with no
+  // handle there is nothing to scan and "scan this to pay" would be a lie.
+  show(box.querySelector('.pot__note'), !!payout.url);
 }
 
 /* ========================================================================== */
@@ -2605,7 +2784,10 @@ function closeSheet(id) {
   const sheet = el(id);
   if (!sheet) return;
   sheet.dataset.open = 'false';
-  if (id === 'menu-sheet') view.menuOpen = false;
+  if (id === 'menu-sheet') {
+    view.menuOpen = false;
+    disarmEndGame();
+  }
   if (id === 'challenge-sheet') {
     view.challengeOpen = false;
     view.challengerId = null;
@@ -2626,6 +2808,7 @@ function closeSheets() {
   view.challengeOpen = false;
   view.challengerId = null;
   view.challengeGap = null;
+  disarmEndGame();
 }
 
 function renderSheets() {
@@ -2836,7 +3019,26 @@ function buyCard() {
   if (state.outcome) showReveal();
 }
 
+/**
+ * Guards `skip this card` against tap bursts. The button stays put and a skip
+ * repaints nothing around it, so a double-tap during the card-swap moment used
+ * to burn a second (unheard) song. Place and Buy get their guard from engine
+ * state; a skip lands on a fresh, skippable card, so this one is a cooldown -
+ * long enough to swallow a burst, short enough that no deliberate second skip
+ * ever meets a dead button.
+ */
+let skipGuardTimer = null;
+
 function skipCard() {
+  const button = el('btn-skip-card');
+  if (button && button.disabled) return;
+  disable(button, true);
+  if (skipGuardTimer !== null) clearTimeout(skipGuardTimer);
+  skipGuardTimer = window.setTimeout(() => {
+    skipGuardTimer = null;
+    disable(el('btn-skip-card'), false);
+  }, 650);
+
   stopAudio();
   dispatch({ type: ACTIONS.SKIP_CARD });
   if (state.card) {
@@ -2940,7 +3142,9 @@ const HANDLERS = {
   home: () => goHome(),
   'add-player': () => {
     if (view.setup.players.length >= MAX_PLAYERS) return;
-    view.setup.players.push(playerDraft(view.setup.players.length));
+    // The lowest free "Player N", not the row count: after a remove, counting
+    // rows mints a duplicate of a name already on the roster.
+    view.setup.players.push(playerDraft(view.setup.players.length, freePlaceholderName()));
     render();
   },
   'remove-player': (node) => {
@@ -2992,7 +3196,19 @@ const HANDLERS = {
   'toggle-decade': (node) => toggleChip('decade', Number(node.dataset.decade)),
   'toggle-genre': (node) => toggleChip('genre', node.dataset.genre),
   'chips-all': (node) => chipsAll(node.dataset.target),
-  'start-game': () => startGame(),
+  // Armed tap, but only while an unfinished game sits in the save slot -
+  // starting would silently destroy it. A finished save is replaced silently.
+  'start-game': () => {
+    if (!view.startArmed) {
+      const saved = savedGame();
+      if (saved && saved.phase !== 'game-over') {
+        armStartGame();
+        return;
+      }
+    }
+    disarmStartGame();
+    startGame();
+  },
   'pass-continue': () => enterPlay(),
   'open-menu': (node) => openSheet('menu-sheet', node),
   'close-menu': () => closeSheet('menu-sheet'),
@@ -3003,7 +3219,16 @@ const HANDLERS = {
   },
   'close-scoreboard': () =>
     showScreen(view.returnScreen === 'scoreboard' ? 'play' : view.returnScreen),
-  'end-game': () => endGame(),
+  // Armed tap: ending is one row above "done" and cannot be undone, so the
+  // first tap only arms the row and says what a second one will do.
+  'end-game': () => {
+    if (!view.endGameArmed) {
+      armEndGame();
+      return;
+    }
+    disarmEndGame();
+    endGame();
+  },
   'toggle-audio': () => {
     toggleAudio().catch(() => failAudio('The preview could not be loaded.'));
   },
@@ -3013,10 +3238,6 @@ const HANDLERS = {
     render();
   },
   'skip-card': () => skipCard(),
-  'toggle-qr-alt': () => {
-    view.qrAlt = !view.qrAlt;
-    render();
-  },
   'select-gap': (node) => {
     const index = Number(node.dataset.gapIndex);
     if (node.closest('#challenge-timeline')) {
@@ -3046,6 +3267,11 @@ const HANDLERS = {
     view.challengerId = node.dataset.playerId;
     view.challengeGap = null;
     render();
+    // The render rebuilds the option list, destroying the focused button, and
+    // keyboard focus fell to <body>. The next step is choosing a gap, so put
+    // focus on the first gap of the newly revealed timeline.
+    const gap = document.querySelector('#challenge-timeline .gap');
+    if (gap) gap.focus();
   },
   // A challenge is a token spent on a guess, and the guess is made by tapping a
   // tiny gap on somebody else's timeline. Getting it wrong was unrecoverable:
@@ -3118,11 +3344,18 @@ function onInput(event) {
     // with the name as it is typed.
     const avatar = row.querySelector('.player-row__avatar [data-field="initial"]');
     if (avatar) avatar.textContent = initialFor(node.value);
-    // Two things follow from a name changing, and both are why the library is
-    // keyed on the name rather than the seat: a face chosen before the name was
-    // typed has to end up filed under the finished name, and a name we already
-    // know should immediately offer its faces.
-    if (draft.photo) rememberAvatar(draft.name, draft.photo);
+    // The avatar library is FILED on commit only ('change' fires on blur or
+    // Enter, never per keystroke) but READ per keystroke. Filing on every
+    // input event stored the row's face under each prefix of the name being
+    // typed, and the library's 24-name cap then evicted every real person in
+    // it. The lookup below is read-only, so offering saved faces while typing
+    // stays live.
+    if (event.type === 'change' && draft.photo) rememberAvatar(draft.name, draft.photo);
+    // The roster draft persists as the name is typed (debounced) and settles
+    // on the commit, so a mid-setup reload restores what is on the screen
+    // rather than resurrecting the name from the last photo/skip action.
+    if (event.type === 'change') rememberRoster();
+    else queueRosterSave();
     paintSavedAvatars(row, draft, Number(row.dataset.playerIndex));
     return;
   }
@@ -3167,6 +3400,9 @@ function onInput(event) {
     // keystroke would delete the "@" the moment somebody typed it, and fight a
     // person halfway through their own name.
     view.setup.buyin.handle = node.value;
+    // Repaint only the buy-in block: the hint under the field tracks the
+    // keystrokes, and a full render here would be work for nothing.
+    paintBuyin();
     return;
   }
   if (node.id === 'opt-skip-pass') updateSettings({ skipPass: node.checked });
@@ -3194,7 +3430,52 @@ function onResize() {
   }, 180);
 }
 
+/** What openSheet() considers focusable; the Tab trap has to agree with it. */
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+/** The open sheet layer, or null. The two are mutually exclusive by design. */
+function openSheetLayer() {
+  if (view.challengeOpen) return el('challenge-sheet');
+  if (view.menuOpen) return el('menu-sheet');
+  return null;
+}
+
+/**
+ * Keep Tab inside the open sheet. The sheets claim aria-modal="true", and
+ * without this the claim was a lie: Shift+Tab walked straight out onto the
+ * covered play screen, where Enter could commit a placement from behind the
+ * scrim. Escape still closes (below), and closeSheet restores focus.
+ */
+function trapSheetFocus(event, sheet) {
+  const focusable = [...sheet.querySelectorAll(FOCUSABLE_SELECTOR)].filter(
+    (node) => !node.closest('[hidden]'),
+  );
+  if (!focusable.length) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const current = document.activeElement;
+  const inside = sheet.contains(current);
+  if (event.shiftKey) {
+    if (!inside || current === first) {
+      event.preventDefault();
+      last.focus();
+    }
+  } else if (!inside || current === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function onKeydown(event) {
+  if (event.key === 'Tab') {
+    const sheet = openSheetLayer();
+    if (sheet) trapSheetFocus(event, sheet);
+    return;
+  }
   if (event.key !== 'Escape') return;
   if (view.challengeOpen) {
     closeSheet('challenge-sheet');
@@ -3228,9 +3509,6 @@ function registerServiceWorker() {
 }
 
 function init() {
-  const note = el('qr-file-note');
-  fileNoteHtml = note ? note.innerHTML : '';
-
   // Start fetching the baked previews immediately. By the time anyone reaches a
   // play button the map is in memory, which is what lets the tap handler look a
   // card up without awaiting - see the note at the top of toggleAudio().
@@ -3247,6 +3525,16 @@ function init() {
   document.addEventListener('change', onInput);
   document.addEventListener('keydown', onKeydown);
   window.addEventListener('resize', onResize);
+
+  // Two tabs on one game is last-writer-wins by design (one phone is the whole
+  // premise), but a stale tab should not be a silent time machine. The storage
+  // event only fires in the OTHER tab, so this is exactly the cross-tab signal:
+  // refresh the home screen's resume card, or tell a mid-game tab it is stale.
+  window.addEventListener('storage', (event) => {
+    if (event.key !== `${NAMESPACE}:v${VERSION}:${KEYS.game}`) return;
+    if (view.screen === 'home') render();
+    else if (state) alertUser('This game changed in another tab — reload to catch up.');
+  });
 
   // Nothing here should ever throw, but if something does the player gets a
   // sentence instead of a frozen screen.

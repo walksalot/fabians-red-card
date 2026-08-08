@@ -4,9 +4,12 @@
   Timeline - the music year-guessing party game (app shell)
   ============================================================================
   Why this file exists: the whole game is one static, dependency-free page so it
-  can be served by Next, by scripts/music-server.mjs, or opened straight off
-  disk. Every screen ships in the markup up front; ui.js only ever toggles
-  attributes and fills containers. Nothing here fetches, computes or decides.
+  can be served by Next or by scripts/music-server.mjs (`npm run music`). It is
+  NOT openable straight off disk: ui.js is an ES module and every browser blocks
+  those over file://, so a double-clicked index.html renders a page where no
+  button does anything. Every screen ships in the markup up front; ui.js only
+  ever toggles attributes and fills containers. Nothing here fetches, computes
+  or decides.
 
   THEME: "record-sleeve pop" - butter paper, ink outlines, sticker cards with
   hard (never blurred) offset shadows, crayon player colours, one raspberry
@@ -108,7 +111,9 @@
 
   SHEETS (menu + challenge) - NOT screens, they layer over whatever is showing
     #menu-sheet, #challenge-sheet: set dataset.open = 'true' | 'false'.
-    Open  -> el.dataset.open = 'true';  move focus into the sheet.
+    Open  -> el.dataset.open = 'true';  move focus into the sheet. While a
+             sheet is open ui.js traps Tab/Shift+Tab inside it (they claim
+             aria-modal="true", so the covered screen must be unreachable).
     Close -> el.dataset.open = 'false'; restore focus to the opener.
     CSS handles visibility/inertness; do NOT toggle [hidden] on sheets.
     Both sheets contain a .sheet__scrim carrying data-action="close-menu" /
@@ -146,18 +151,24 @@
       toggle-decade       [buttons in #decade-chips, data-decade="1980"]
       toggle-genre        [buttons in #genre-chips,  data-genre="pop"]
       chips-all           [#btn-decades-all, #btn-genres-all, data-target]
-      start-game          [#btn-start-game]
+      start-game          [#btn-start-game - armed tap while an UNFINISHED
+                           saved game exists: first tap relabels it "Tap again
+                           to replace the saved game"; a second tap within ~4s
+                           on the same screen starts (finished saves are
+                           replaced without the ceremony)]
       pass-continue       [#btn-pass-continue]
       open-menu           [#btn-menu]
       close-menu          [#btn-menu-close, menu scrim]
       show-scoreboard     [#btn-menu-scoreboard, every rail chip]
       close-scoreboard    [#btn-scoreboard-back]
-      end-game            [#btn-end-game]
+      end-game            [#btn-end-game - armed tap: the first tap relabels
+                           the row "Tap again to end the game"; only a second
+                           tap within ~4s (sheet still open) actually ends it]
       toggle-audio        [#btn-play-song]
       replay-audio        [#btn-replay]
       show-streaming-links  [#btn-show-links]
-      skip-card           [#btn-skip-card]
-      toggle-qr-alt       [#btn-qr-alt]
+      skip-card           [#btn-skip-card - ui.js briefly disables it after a
+                           skip so a tap burst cannot burn unheard songs]
       select-gap          [gap buttons, data-gap-index="0"]
       buy-card            [#btn-buy-card]
       toggle-identify     [#btn-claim-identify]
@@ -178,14 +189,17 @@
       pay-venmo           [#btn-venmo]                (ships inside [hidden])  * NEW *
 
   TOGGLE BUTTONS - state lives in aria-pressed="true|false", CSS styles from it
-    #btn-play-song  #btn-claim-identify  #btn-qr-alt  #btn-confirm-title
-    #btn-confirm-artist  every .chip  every .gap  every .challenge-option
-    every .player-row__skip
+    #btn-play-song  #btn-claim-identify  #btn-confirm-title
+    #btn-confirm-artist  every .chip except the All-chips  every .gap
+    every .challenge-option  every .player-row__skip
 
   TEXT SLOTS (set .textContent)
     home        - #home-deck-stat  * NEW *  ("1080 songs - 1955-2024"; ships
                   with today's deck figures baked in, so it is honest even if
                   nothing ever writes it)
+                  #btn-resume-title #btn-resume-detail - the resume card reads
+                  "Resume game / Turn N — names" for a live save and "See final
+                  result / Game over — names" for a finished one
     setup       - #player-count-note #target-cards-value #mistake-limit-value
                   #eligible-count-value ; #deck-warning ships [hidden]
                   #setup-photo-reason (ships [hidden]) - why Start is disabled
@@ -248,10 +262,13 @@
     #decade-chips / #genre-chips ship with sensible defaults so the page is
     usable with no JS work; if deck.js exports a different DECADES/GENRES set,
     clear the container and rebuild from #tpl-chip. The leading "All decades" /
-    "All genres" chip (#btn-decades-all / #btn-genres-all) is NOT part of that
-    rebuild - it lives in the same row but outside the container.
-    #play-tokens ships 5 .token-pill <li>s; set each one's dataset.state to
-    'full' or 'empty' and update the <ul>'s aria-label.
+    "All genres" chip (#btn-decades-all / #btn-genres-all) ships INSIDE its
+    container and any rebuild MUST carry it over unharmed - it is the only
+    one-tap way back to a full deck.
+    #play-tokens ships 5 .token-pill <li>s (the classic cap); set each one's
+    dataset.state to 'full' or 'empty' and update the <ul>'s aria-label. When
+    state.tokenCap differs (co-op holds 6), rebuild the pills from
+    #tpl-token-pill so every token in the pool has a dot.
 
   FORM CONTROLS (read .value / .checked)
     #setup-form is a <form> whose buttons are all type="button" - it never
@@ -276,7 +293,16 @@
                            #opt-buyin is checked, hide it again when it is not
       #field-buyin-amount  stepper, data-action="buyin-dec" / "buyin-inc"
       #buyin-amount-value  <output>, whole dollars, ships "2"
-      #buyin-venmo         optional text input, the host's Venmo handle
+      #buyin-venmo         optional text input, the host's Venmo handle - a
+                           bare handle, @handle, or a pasted venmo.com /
+                           account.venmo.com profile URL (maxlength 120 so a
+                           full profile URL is never clipped into a wrong
+                           payee). Un-normalisable input is stored as null at
+                           start, never guessed at.
+      #buyin-venmo-hint    live line under the field (ships [hidden]): the
+                           normalised "@handle" the winner screen will pay, or
+                           the not-a-handle warning ([data-tone='bad'] +
+                           aria-invalid on the input)
       #buyin-pot           live line, e.g. "Pot: $8 with 4 players"
       #win-pot             winner-screen block, ships [hidden]
                            [data-field="pot"]    the total, e.g. "$8"
@@ -321,9 +347,12 @@
     .gap__mark ("+")      shown only on the selected gap.
     Elements that ship [hidden] and are yours to reveal:
       #btn-resume-game #deck-warning #audio-fallback #streaming-links
-      #qr-file-note #btn-qr-alt #qr-alt-warn #btn-buy-card-reason
+      #qr-file-note #btn-buy-card-reason
       #challenge-count #confirm-panel #challenge-step-gap #reveal-artwork
       #setup-photo-reason #win-avatar
+      #home-storage-warn #setup-storage-warn (shown while isPersistent() is
+      false - storage-blocked browsers must say so before a game is lost)
+      #buyin-venmo-hint
       #buyin-block #win-pot #challenge-locks #reveal-strip #reveal-belongs
       #reveal-streak #scoreboard-meta #win-recap #toast          (all * NEW *)
     The per-row input[data-role="player-photo"] is NOT one of them: it is
@@ -336,7 +365,9 @@
     #live-alert   role="alert"   aria-live="assertive"  errors only
     #verdict-banner and #audio-status are themselves role="status".
     #toast  * NEW *  is the design's ink pill ("Two players minimum"). It ships
-    [hidden] and is NOT a live region - #live-status still does the announcing.
+    [hidden] and is NOT a live region - #live-alert does the announcing while
+    ui.js paints the same error into the toast so sighted players see it too
+    (it hides itself after a few seconds, or on the next tap).
 
   THINGS THAT MUST NEVER HAPPEN BEFORE THE REVEAL
     Do not write the drawn card's year, title or artist into any node on the
@@ -407,7 +438,10 @@
       <button type="button" class="resume" id="btn-resume-game" data-action="resume-game" hidden>
         <span class="resume__dot" aria-hidden="true"></span>
         <span class="resume__body">
-          <span class="resume__title">Resume game</span>
+          <!-- ui.js retitles the card for a FINISHED save ("See final result"):
+               the winner screen with its recap and payout QR survives a reload
+               and this is the way back to it. -->
+          <span class="resume__title" id="btn-resume-title">Resume game</span>
           <span class="resume__sub" id="btn-resume-detail">Pick up where you left off</span>
         </span>
         <span class="resume__cta" aria-hidden="true">Open</span>
@@ -422,6 +456,10 @@
         Works offline &middot; nothing leaves this phone<br>
         only previews need Wi-Fi &mdash; offline gets a demo timer
       </p>
+      <p class="notice notice--warn" id="home-storage-warn" hidden>
+        This browser won&rsquo;t save games &mdash; play in Safari or Chrome, not a
+        private window.
+      </p>
     </div>
   </section>
 
@@ -433,6 +471,11 @@
       <button type="button" class="linkbtn bar__link" id="btn-setup-back" data-action="home"
               aria-label="Close setup and go home">close</button>
     </header>
+
+    <p class="notice notice--warn setup__storage-warn" id="setup-storage-warn" hidden>
+      This browser won&rsquo;t save games &mdash; play in Safari or Chrome, not a
+      private window.
+    </p>
 
     <form class="setup" id="setup-form" novalidate>
 
@@ -571,9 +614,14 @@
             </div>
             <div class="field">
               <label class="field__label" for="buyin-venmo">Venmo handle &mdash; optional</label>
+              <!-- maxlength 120: a pasted account.venmo.com profile URL spends 28
+                   characters before the handle even starts, and clipping one
+                   mid-paste used to mint a wrong-but-valid payee. -->
               <input class="field__input" type="text" id="buyin-venmo" name="buyin-venmo"
-                     placeholder="&#64;yourname" maxlength="32" autocomplete="off"
-                     autocapitalize="none" spellcheck="false" enterkeyhint="done">
+                     placeholder="&#64;yourname" maxlength="120" autocomplete="off"
+                     autocapitalize="none" spellcheck="false" enterkeyhint="done"
+                     aria-describedby="buyin-venmo-hint">
+              <p class="sect__hint field__hint" id="buyin-venmo-hint" role="status" aria-live="polite" hidden></p>
             </div>
             <p class="buyin__pot" id="buyin-pot" role="status" aria-live="polite">Pot: $8 with 4 players</p>
             <p class="sect__hint">Nothing is charged here. This is a note to settle up in the room.</p>
@@ -837,18 +885,11 @@
         <div class="qr__body">
           <p class="qr__caption" id="qr-caption">Scan to play it on your own phone</p>
           <p class="qr__sub">The scanned page shows a play button and nothing else. No year, no title.</p>
-          <!-- ui.js rewrites this for the exact reason (opened from a file, or
-               served on an address only this device can reach). The shipped text
-               is the one that covers both. -->
+          <!-- Unhidden by ui.js when the page is served on a loopback address
+               that no other phone can reach. -->
           <p class="notice notice--info" id="qr-file-note" hidden>
-            This address only works on this device, so the code has nothing to open.
-            Run <code>node scripts/music-server.mjs</code> on a computer and use the Wi-Fi address it prints.
-          </p>
-          <button type="button" class="linkbtn" id="btn-qr-alt" data-action="toggle-qr-alt" aria-pressed="false" hidden>
-            Encode a YouTube search instead
-          </button>
-          <p class="notice notice--warn" id="qr-alt-warn" hidden>
-            A YouTube link puts the song title on the scanning phone.
+            This address only works on this device. Run <code>npm run music</code>
+            and use the Wi-Fi address it prints so everyone can scan.
           </p>
         </div>
       </section>
@@ -954,7 +995,7 @@
 
     <section class="card card--tight" id="confirm-panel" hidden aria-labelledby="confirm-heading">
       <h2 class="sect__eyebrow sect__eyebrow--accent" id="confirm-heading">Did <span id="confirm-player-name">Player 1</span> name it?</h2>
-      <p class="card__lead">Group votes &mdash; tap what they got right, then reveal.</p>
+      <p class="card__lead">Group votes &mdash; tap what they got right.</p>
       <div class="votes">
         <button type="button" class="vote" id="btn-confirm-title" data-action="confirm-title" aria-pressed="false">Title</button>
         <button type="button" class="vote" id="btn-confirm-artist" data-action="confirm-artist" aria-pressed="false">Artist</button>
