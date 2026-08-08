@@ -205,6 +205,8 @@
       play-again          [#btn-play-again - the setup screen that replaces it
                            gets the same ~700ms guard on its mode rows and on
                            start-game, for the same double-tap reason]
+      pass-buy            [#btn-pass-buy]  (ships [hidden]; shown at
+                           turn-start when the buy is affordable - fast flow)
       pay-venmo           [#btn-venmo]                (ships inside [hidden])  * NEW *
       reload-page         [#btn-stale-reload - the stale overlay's only
                            control; the ONE action ui.js accepts while stale]
@@ -313,7 +315,9 @@
     mode:         radios name="mode" -> #mode-classic #mode-advanced
                                         #mode-expert #mode-coop
     playback:     <select id="playback-source">  (menu copy: #opt-playback-source)
-    settings:     #opt-skip-pass #opt-sound #opt-reduced-motion (checkboxes)
+    settings:     #opt-fast-flow #opt-skip-pass #opt-sound #opt-reduced-motion
+                  (checkboxes; fast-flow ships ON - one-tap handoffs and a
+                  self-advancing reveal via #btn-next-player[data-autonext])
     house rules:  #opt-streak-bonus  * NEW *  (checkbox, setup, off by default -
                   three right in a row earns a token)
     buy-in:       #opt-buyin #buyin-venmo      * NEW *  (see BUY-IN below)
@@ -815,9 +819,16 @@
         <!-- Turn order, spelled out. The rail says it in pictures on the play
              screen; here there is room for the sentence. -->
         <p class="pass__then" id="pass-then">then <span id="pass-next-name">Player 2</span></p>
-        <p class="pass__hint">Tap when only they can see the screen</p>
+        <p class="pass__hint">Tap when only they can see the screen &mdash; the song starts right away</p>
       </div>
     </div>
+
+    <!-- Fast flow's pass tap draws the card, which closes the buy window - so
+         the buy choice lives here, before that tap, whenever it is legal.
+         ui.js shows it only at turn-start with 3+ tokens. Ships hidden. -->
+    <button type="button" class="pass__buy" id="btn-pass-buy" data-action="pass-buy" hidden>
+      buy a card instead &middot; 3 tokens &mdash; skip the guess, keep the song unheard
+    </button>
 
     <!-- The handover is the moment the group checks the score, and this screen
          is the only one with room for the whole table at once. -->
@@ -1254,6 +1265,16 @@
     </ul>
 
     <ul class="switch-list">
+      <li>
+        <label class="switch" for="opt-fast-flow">
+          <input type="checkbox" id="opt-fast-flow" checked>
+          <span class="switch__text">
+            <span class="switch__title">Fast flow</span>
+            <span class="switch__hint">songs start on the pass tap; reveals advance themselves</span>
+          </span>
+          <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+        </label>
+      </li>
       <li>
         <label class="switch" for="opt-skip-pass">
           <input type="checkbox" id="opt-skip-pass">
