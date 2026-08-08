@@ -188,7 +188,17 @@ const DEFAULT_SETTINGS = {
   sound: true,
   playbackSource: 'preview',
   reducedMotion: false,
+  // One tap per handoff: the pass-screen tap draws AND plays the song, and the
+  // reveal advances itself after AUTONEXT_MS unless somebody interacts. Born of
+  // live family playtesting - three mandatory taps per turn read as "slow and
+  // disjointed" at a real table. On by default because the table that wants to
+  // linger just taps, while the table that never found the setting gets the
+  // fast game.
+  fastFlow: true,
 };
+
+/** How long the reveal lingers before advancing itself (Kris asked ~15s). */
+const AUTONEXT_MS = 15000;
 
 /**
  * Generic-storage keys owned by this file (KEYS in storage.js lists the shared
@@ -1004,6 +1014,8 @@ function applySettings() {
   if (sound) sound.checked = !!settings.sound;
   const motion = el('opt-reduced-motion');
   if (motion) motion.checked = !!settings.reducedMotion;
+  const fast = el('opt-fast-flow');
+  if (fast) fast.checked = !!settings.fastFlow;
   for (const id of ['playback-source', 'opt-playback-source']) {
     const select = el(id);
     if (select) select.value = settings.playbackSource;
@@ -1027,6 +1039,7 @@ function loadSavedSettings() {
           ? saved.playbackSource
           : 'preview',
       reducedMotion: !!saved.reducedMotion,
+      fastFlow: saved.fastFlow !== false,
     };
   }
   // A phone that asks for less motion gets it without having to find the switch.
@@ -1632,14 +1645,27 @@ function beginTurn() {
 function enterPlay() {
   resetCardAudio();
   showScreen('play');
-  const player = currentPlayer(state);
-  if (!player) return;
+  const active = currentPlayer(state);
+  if (!active) return;
   // Politely, on the existing status region: the handover is the one thing a
   // player who cannot see the rail still has to be told about.
   const upNext = nextPlayer(state);
   announce(
-    `${player.name}'s turn. Turn ${state.turn}.${upNext ? ` ${upNext.name} is next.` : ''}`,
+    `${active.name}'s turn. Turn ${state.turn}.${upNext ? ` ${upNext.name} is next.` : ''}`,
   );
+  // With the pass screen skipped there is no handoff tap to ride, so try to
+  // start the song unprompted - quiet on failure, because an autoplay block is
+  // the browser being a browser, not an error worth a red banner; the play
+  // button sits there exactly as before. Skipped when the player could buy a
+  // card: drawing would slam that window shut before they ever saw it open.
+  if (
+    settings.fastFlow &&
+    settings.skipPass &&
+    state.phase === 'turn-start' &&
+    buyBlockedReason(state) !== null
+  ) {
+    toggleAudio(true).catch(() => {});
+  }
 }
 
 /**
@@ -1683,6 +1709,43 @@ function verdictPending(outcome) {
   return state.confirmations.title === null || state.confirmations.artist === null;
 }
 
+/**
+ * The self-advancing reveal. Live playtesting's verdict on the old flow was
+ * "slow and disjointed": every turn demanded a Next-player tap even when the
+ * table had already moved on. With fast flow on, the reveal lingers
+ * AUTONEXT_MS and then taps Next player itself - the button shows the time
+ * draining so nobody is surprised - and ANY other interaction on the screen
+ * cancels the timer, because a tap means the table is still using the reveal
+ * (arguing, voting, reading the strip).
+ */
+let autoNextTimer = null;
+
+function armAutoNext() {
+  cancelAutoNext();
+  if (!settings.fastFlow || !state) return;
+  const outcome = state.outcome;
+  if (!outcome) return;
+  // Never count down over a decision: gated modes wait for the title/artist
+  // vote, and a claimed "I can name it" waits for the group's verdict.
+  if (verdictPending(outcome)) return;
+  if (state.phase === 'revealed' && outcome.kind === 'placement' && state.claimIdentify && outcome.identifyConfirmed === null) return;
+  const button = el('btn-next-player');
+  if (button) button.dataset.autonext = 'true';
+  autoNextTimer = window.setTimeout(() => {
+    autoNextTimer = null;
+    if (view.screen === 'reveal') nextTurn();
+  }, AUTONEXT_MS);
+}
+
+function cancelAutoNext() {
+  if (autoNextTimer !== null) {
+    window.clearTimeout(autoNextTimer);
+    autoNextTimer = null;
+  }
+  const button = el('btn-next-player');
+  if (button) delete button.dataset.autonext;
+}
+
 function showReveal() {
   revealTapGuardUntil = Date.now() + TAP_GUARD_MS;
   showScreen('reveal');
@@ -1692,6 +1755,7 @@ function showReveal() {
   // and a verdict sound that replayed each time would be maddening.
   const outcome = state && state.outcome;
   if (!outcome) return;
+  armAutoNext();
   // In gated modes the verdict is not settled yet; confirmToggle fires the cue
   // when the vote resolves it.
   if (verdictPending(outcome)) return;
@@ -1904,8 +1968,12 @@ function startDemoTimer() {
   }, 250);
 }
 
-/** Tap-to-play. Every path through here starts inside a user gesture. */
-async function toggleAudio() {
+/**
+ * Tap-to-play. Every path through here starts inside a user gesture - except
+ * the fast-flow autoplay attempt from enterPlay, which passes `quiet` so an
+ * autoplay block leaves the normal tap-to-play UI instead of a failure banner.
+ */
+async function toggleAudio(quiet = false) {
   // Everything from here to the play() call must stay synchronous. iOS grants
   // permission to start audio only inside a user gesture, and the first await
   // hands control back to the event loop and throws that permission away - the
@@ -1935,8 +2003,8 @@ async function toggleAudio() {
   }
   if (view.audio.resolved && view.audio.resolved.previewUrl) {
     const started = await p.play(view.audio.resolved.previewUrl);
-    if (!started) failAudio('That preview would not play here.');
-    else warmNextCard();
+    if (!started && !quiet) failAudio('That preview would not play here.');
+    else if (started) warmNextCard();
     return;
   }
 
@@ -1952,8 +2020,9 @@ async function toggleAudio() {
     // its status would land on the NEXT player's screen, about a card they have
     // not heard. The slow path already guarded this; the fast one did not.
     if (quickToken !== view.audio.token) return;
-    if (!started) failAudio('That preview would not play here.');
-    else {
+    if (!started) {
+      if (!quiet) failAudio('That preview would not play here.');
+    } else {
       // A retry that works has to clear the failure, or the song plays under a
       // banner still saying it would not - and, worse, under the streaming
       // links, which spell out the title nobody has guessed yet.
@@ -1988,8 +2057,9 @@ async function toggleAudio() {
   view.audio.resolved = track;
   const started = await p.play(track.previewUrl);
   if (token !== view.audio.token) return;
-  if (!started) failAudio('That preview would not play here.');
-  else {
+  if (!started) {
+    if (!quiet) failAudio('That preview would not play here.');
+  } else {
     // See the note on the fast path: a working retry must clear the failure, or
     // the streaming links stay on screen with the title in them.
     view.audio.failed = false;
@@ -2629,6 +2699,13 @@ function renderPass() {
   const upNext = nextPlayer(state);
   show(el('pass-then'), !!upNext);
   if (upNext) text('pass-next-name', upNext.name);
+
+  // Fast flow's main tap draws the card, which closes the buy window - so the
+  // buy choice has to be visible BEFORE that tap, here, whenever it is legal.
+  show(
+    el('btn-pass-buy'),
+    settings.fastFlow && state.phase === 'turn-start' && buyBlockedReason(state) === null,
+  );
 
   renderStandings();
 }
@@ -3570,6 +3647,8 @@ function confirmToggle(which) {
   }
   if (state.claimIdentify) {
     dispatch({ type: ACTIONS.CONFIRM_IDENTIFY, ok: voted('title') && voted('artist') });
+    // A resolved identify claim was the other thing holding the countdown.
+    if (state.outcome && state.outcome.identifyConfirmed !== null) armAutoNext();
   } else {
     render();
   }
@@ -3579,6 +3658,8 @@ function confirmToggle(which) {
     if (outcome.accepted) sfx.win();
     else sfx.lose();
     if (outcome.tokenAwards.some((award) => award.delta > 0)) sfx.token();
+    // The vote was the reason the reveal could not count down; it just resolved.
+    armAutoNext();
   }
 }
 
@@ -3587,6 +3668,7 @@ function nextTurn() {
   // of a tap burst used to skip the whole reveal (and, in gated modes, forfeit
   // a correctly placed card before anyone could vote). See TAP_GUARD_MS.
   if (Date.now() < revealTapGuardUntil) return;
+  cancelAutoNext();
   stopAudio();
   dispatch({ type: ACTIONS.NEXT_TURN });
   if (isGameOver(state)) showWin();
@@ -3719,7 +3801,21 @@ const HANDLERS = {
     disarmStartGame();
     startGame();
   },
-  'pass-continue': () => enterPlay(),
+  // Fast flow collapses the handoff to ONE tap: this tap is a real user
+  // gesture, so it can legally draw the card AND start the song in the same
+  // tick - the next player walks straight into music instead of a second play
+  // button. The buy window survives because `pass-buy` sits on the same screen
+  // whenever the player can afford it, so the choice is made before this tap.
+  'pass-continue': () => {
+    enterPlay();
+    if (settings.fastFlow && state && state.phase === 'turn-start') {
+      toggleAudio().catch(() => failAudio('The preview could not be loaded.'));
+    }
+  },
+  'pass-buy': () => {
+    enterPlay();
+    buyCard();
+  },
   'open-menu': (node) => openSheet('menu-sheet', node),
   'close-menu': () => closeSheet('menu-sheet'),
   'show-scoreboard': () => {
@@ -3853,6 +3949,9 @@ function onClick(event) {
   // shapes toggleAudio(). unlock() is cheap and idempotent after the first tap.
   sfx.unlock();
   (ACTION_CUES[node.dataset.action] || sfx.tap)();
+  // Any interaction on the reveal other than Next player itself means the
+  // table is still using the screen - stop the countdown and let them.
+  if (autoNextTimer !== null && node.dataset.action !== 'next-turn') cancelAutoNext();
   handler(node);
 }
 
@@ -3966,6 +4065,7 @@ function onInput(event) {
     paintBuyin();
     return;
   }
+  if (node.id === 'opt-fast-flow') updateSettings({ fastFlow: node.checked });
   if (node.id === 'opt-skip-pass') updateSettings({ skipPass: node.checked });
   if (node.id === 'opt-reduced-motion') updateSettings({ reducedMotion: node.checked });
   if (node.id === 'opt-sound') {

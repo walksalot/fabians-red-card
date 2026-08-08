@@ -2907,3 +2907,52 @@ body[data-motion='reduce'] *::after {
   .betbtn { font-size: 12px; padding: 10px 6px; }
   .recap__row { font-size: 12px; }
 }
+
+/* --------------------------------------------------------------------------
+   Fast flow (live-playtest feedback: too many mandatory taps per turn)
+   -------------------------------------------------------------------------- */
+
+/* The self-advancing Next button: a fill drains left-to-right over the
+   auto-advance window so the room can see the turn is about to move on. The
+   fill is soft ink over the button's own raspberry, so no new palette colour
+   is introduced. Duration mirrors AUTONEXT_MS in ui.js. */
+#btn-next-player { position: relative; overflow: hidden; }
+#btn-next-player[data-autonext]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(36, 28, 21, 0.22);
+  transform-origin: left center;
+  transform: scaleX(0);
+  animation: autonext-drain 15s linear forwards;
+  pointer-events: none;
+}
+#btn-next-player > * { position: relative; }
+@keyframes autonext-drain {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+/* Reduced motion: the global kill rules above collapse every animation to
+   0.001ms, which would leave this fill fully drawn for the whole window - a
+   dark slab instead of a countdown. Drop the visual there; the auto-advance
+   itself is a JS timer and still runs. */
+body[data-motion='reduce'] #btn-next-player[data-autonext]::before { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  #btn-next-player[data-autonext]::before { display: none; }
+}
+
+/* The pass screen's buy-instead escape hatch: quiet, under the hero tap. */
+.pass__buy {
+  display: block;
+  margin: 10px auto 0;
+  padding: 10px 16px;
+  max-width: 320px;
+  border: 1.5px dashed rgba(36, 28, 21, 0.4);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pass__buy:active { background: var(--accent-tint); }
