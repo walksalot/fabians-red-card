@@ -9,10 +9,20 @@ export const meta = {
   ],
 }
 
-const ROUND = args.round
-const ROOT = args.repoRoot || '/home/user/fabians-red-card'
-const BRIEF = args.brief || `${ROOT}/qa/BRIEF-REMOTE.md`
-const PRIOR = args.priorNote || 'This is the first round; there are no earlier rounds.'
+// The harness has delivered `args` as a JSON STRING in practice (observed: every
+// round's testers writing to scratch/qa/round-undefined/ because args.round read
+// off a string is undefined, silently dropping the brief path and the
+// regression priorNote with it). Parse-tolerant so both encodings work.
+const A = typeof args === 'string' ? JSON.parse(args) : (args || {})
+const ROUND = A.round
+const ROOT = A.repoRoot || '/home/user/fabians-red-card'
+const BRIEF = A.brief || `${ROOT}/qa/BRIEF-REMOTE.md`
+const PRIOR = A.priorNote || 'This is the first round; there are no earlier rounds.'
+
+// If the brief path above is wrong for this machine, agents must not guess at
+// the rubric: the prompt tells them to locate qa/BRIEF-REMOTE.md from the repo
+// root, and the rubric essentials ride inline in the adjudicator prompt.
+const RUBRIC = `Severity rubric: S1 Critical (13 pts) = crash/blank screen, game unwinnable or stuck, data loss, money math wrong anywhere, a wrong game-rule outcome. S2 Major (8) = a feature broken but the game survives, serious a11y failure, broken layout hiding controls at a common size. S3 Minor (3) = visual defect, misleading copy, janky-but-recoverable flow, minor a11y, overflow not hiding controls. S4 Nit (1) = polish, wording, subtle inconsistency.`
 
 const MISSIONS = [
   { key: 'first-run', title: 'First run & home screen', brief: `You are a brand-new visitor who just got the link. Clear localStorage first. Home screen at several sizes, the How-to-play rules read end to end (every word - typos, wrong rule statements vs the brief's rules, layout), resume behaviour (no saved game = no resume card; save a game mid-turn, reload, resume from home and check EVERYTHING came back), manifest.json + icon load, service worker registers, second visit works. Also the menu sheet from every screen: every row does what it says.` },
@@ -97,7 +107,7 @@ const VERDICT_SCHEMA = {
 
 const testerPrompt = (m) => `You are a QA tester simulating a real user on a live party-game site, round ${ROUND}.
 
-FIRST: Read ${BRIEF} in full. It has the launch config, the target URL, the rules of engagement, the severity rubric, and the list of by-design behaviours you must not report.
+FIRST: Read ${BRIEF} in full (if that exact path does not exist on this machine, it is qa/BRIEF-REMOTE.md at the root of the repository you are working in - find it, do not skip it). It has the launch config, the target URL, the rules of engagement, the severity rubric, and the list of by-design behaviours you must not report.
 
 ${PRIOR}
 
@@ -112,7 +122,9 @@ Return (as structured output) your findings per the schema. Zero findings is an 
 
 const adjPrompt = (all) => `You are the QA adjudicator for round ${ROUND} of a party-game site. Read ${BRIEF} for the severity rubric and by-design list.
 
-Below are ALL raw findings from 12 independent testers, as JSON. Your job:
+${RUBRIC}
+
+Below are ALL raw findings from the independent testers, as JSON. Your job:
 1. DEDUPE: merge reports that describe the same root defect (the same bug seen from two screens is ONE cluster; two different bugs on the same screen are TWO).
 2. DISCARD anything that is by-design per the brief, or is not a defect claim at all (praise, questions, coverage notes) - simply leave it out.
 3. For each surviving cluster, propose the severity the rubric actually supports - reporters routinely inflate. Money math, crashes, data loss, wrong game outcomes are the only S1s.
@@ -125,7 +137,7 @@ ${JSON.stringify(all, null, 1)}`
 
 const skepticPrompt = (c, nth) => `You are adversarial QA verifier #${nth} for round ${ROUND}. Your default stance: the finding below is WRONG - exaggerated, by-design, or not reproducible. Try to refute it.
 
-FIRST read ${BRIEF} (launch config, rubric, by-design list). Then attempt the repro EXACTLY as written in your own fresh browser session (script under scratch/qa/round-${ROUND}/verify-${c.id}-${nth}/, run from the repo root ${ROOT}, UI-only interaction). If the exact steps fail, try the obvious nearby variations once or twice - a finding that only reproduces with steps materially different from those reported should be REFUTED with the working variation noted in your reason.
+FIRST read ${BRIEF} (if that path does not exist here, it is qa/BRIEF-REMOTE.md at the repo root - find it). ${RUBRIC} Then attempt the repro EXACTLY as written in your own fresh browser session (script under scratch/qa/round-${ROUND}/verify-${c.id}-${nth}/, run from the repo root ${ROOT}, UI-only interaction). If the exact steps fail, try the obvious nearby variations once or twice - a finding that only reproduces with steps materially different from those reported should be REFUTED with the working variation noted in your reason.
 
 Verdicts:
 - CONFIRMED: you reproduced it and the rubric supports a severity (state which).
