@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Music Timeline — QA Round 2 Scorecard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Fragment+Mono&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --font-display:'Bricolage Grotesque','Georgia',serif;
+    --font-mono:'Fragment Mono','SF Mono',Consolas,monospace;
+    --font-sans:'Bricolage Grotesque',system-ui,sans-serif;
+
+    --bg:#faf7f5; --surface:#fffdfc; --surface2:#f4efeb; --surface-elevated:#fffefd;
+    --border:rgba(60,40,30,.10); --border-bright:rgba(60,40,30,.20);
+    --text:#231c17; --text-dim:#7a6a5f;
+
+    --s1:#b91c1c; --s1-dim:rgba(185,28,28,.10);
+    --s2:#c2410c; --s2-dim:rgba(194,65,12,.10);
+    --s3:#a16207; --s3-dim:rgba(161,98,7,.10);
+    --s4:#78716c; --s4-dim:rgba(120,113,108,.10);
+    --ok:#4d7c0f; --ok-dim:rgba(77,124,15,.10);
+    --accent:#c2410c;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#17120f; --surface:#201915; --surface2:#2a211c; --surface-elevated:#261e19;
+      --border:rgba(255,235,220,.09); --border-bright:rgba(255,235,220,.18);
+      --text:#f2e7de; --text-dim:#b3a094;
+      --s1:#f87171; --s1-dim:rgba(248,113,113,.14);
+      --s2:#fb923c; --s2-dim:rgba(251,146,60,.14);
+      --s3:#fbbf24; --s3-dim:rgba(251,191,36,.14);
+      --s4:#a8a29e; --s4-dim:rgba(168,162,158,.14);
+      --ok:#a3e635; --ok-dim:rgba(163,230,53,.14);
+      --accent:#fb923c;
+    }
+    /* Dark-mode severity swatches are light, so segment labels must go dark
+       or "S3 · 60" sits white-on-amber and fails contrast. Needs the extra
+       specificity: the base .seg span rule is defined later in this sheet. */
+    .bar .seg span{color:#1a120d;text-shadow:none}
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--bg);
+    background-image:
+      radial-gradient(ellipse at 12% 0%, var(--s1-dim) 0%, transparent 46%),
+      radial-gradient(ellipse at 88% 8%, var(--s3-dim) 0%, transparent 42%);
+    color:var(--text); font-family:var(--font-sans); padding:40px 24px; min-height:100vh;
+    overflow-wrap:break-word; -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  .grid>*,.flex>*{min-width:0}
+
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes fadeScale{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:scale(1)}}
+  .an{animation:fadeUp .4s ease-out both;animation-delay:calc(var(--i,0)*.05s)}
+  .kpi{animation:fadeScale .38s ease-out both;animation-delay:calc(var(--i,0)*.06s)}
+  @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;transition-duration:.01ms!important}}
+
+  /* header */
+  .eyebrow{font-family:var(--font-mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  h1{font-family:var(--font-display);font-size:clamp(30px,5vw,46px);font-weight:800;letter-spacing:-1.2px;line-height:1.03;margin-bottom:10px}
+  .sub{color:var(--text-dim);font-size:15px;line-height:1.6;max-width:70ch;margin-bottom:6px}
+  .meta{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:30px;line-height:1.9}
+  .meta a{color:var(--accent)}
+
+  h2{font-family:var(--font-display);font-size:20px;font-weight:600;letter-spacing:-.3px;margin:38px 0 14px;display:flex;align-items:center;gap:10px}
+  h2::before{content:'';width:10px;height:10px;border-radius:3px;background:var(--accent);flex:none}
+
+  /* KPI */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:14px;margin-bottom:8px}
+  .card{background:var(--surface-elevated);border:1px solid var(--border);border-radius:12px;padding:18px}
+  .card--hero{box-shadow:0 4px 22px rgba(80,40,20,.09),0 1px 3px rgba(80,40,20,.05)}
+  .kv{font-family:var(--font-display);font-size:38px;font-weight:800;line-height:1;letter-spacing:-1.5px;font-variant-numeric:tabular-nums}
+  .kl{font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:1.3px;color:var(--text-dim);margin-top:8px}
+  .kn{font-size:12px;color:var(--text-dim);margin-top:6px;line-height:1.45}
+
+  /* severity bar */
+  .bar{display:flex;height:46px;border-radius:10px;overflow:hidden;border:1px solid var(--border);margin:6px 0 10px}
+  .seg{display:flex;align-items:center;justify-content:center;min-width:0}
+  .seg span{font-family:var(--font-mono);font-size:11px;font-weight:600;color:#fff;white-space:nowrap;padding:0 6px;text-shadow:0 1px 2px rgba(0,0,0,.28);overflow:hidden;text-overflow:clip}
+  .seg--S1{background:var(--s1)} .seg--S2{background:var(--s2)}
+  .seg--S3{background:var(--s3)} .seg--S4{background:var(--s4)}
+  .barnote{font-family:var(--font-mono);font-size:11px;color:var(--text-dim)}
+
+  /* legend */
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:14px 0 6px}
+  .li{display:flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)}
+  .sw{width:11px;height:11px;border-radius:3px;flex:none}
+
+  /* comparison */
+  .cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .cmp>*{min-width:0}
+  .cmp .card{position:relative}
+  .rlabel{font-family:var(--font-mono);font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px}
+  .stat{display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px}
+  .stat:last-child{border-bottom:none}
+  .stat b{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:15px}
+  .unk{color:var(--text-dim);font-style:italic;font-size:12px;line-height:1.5;margin-top:10px}
+
+  /* S1 spotlight */
+  .spot{border:1px solid var(--s1);border-left:5px solid var(--s1);border-radius:12px;background:var(--s1-dim);padding:22px 24px}
+  .spot h3{font-family:var(--font-display);font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:10px;line-height:1.25}
+  .spot p{font-size:14px;line-height:1.65;margin-bottom:10px}
+  .spot .quote{font-family:var(--font-mono);font-size:12.5px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:11px 14px;margin:12px 0;line-height:1.6}
+
+  /* table */
+  .twrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;line-height:1.55}
+  thead{position:sticky;top:0;z-index:2}
+  th{background:var(--surface2);font-family:var(--font-mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-dim);text-align:left;padding:13px 14px;border-bottom:2px solid var(--border-bright);white-space:nowrap}
+  td{padding:13px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr{animation:fadeUp .35s ease-out both;animation-delay:calc(var(--i,0)*.025s);transition:background .15s ease}
+  tbody tr:hover{background:var(--surface2)}
+  .row--S1 td:first-child{box-shadow:inset 4px 0 0 var(--s1)}
+  .row--S2 td:first-child{box-shadow:inset 4px 0 0 var(--s2)}
+  .row--S3 td:first-child{box-shadow:inset 4px 0 0 var(--s3)}
+  .row--S4 td:first-child{box-shadow:inset 4px 0 0 var(--s4)}
+  .c-sev{width:1%;white-space:nowrap}
+  .c-title{min-width:260px;max-width:600px}
+  .c-title .t{font-weight:600;line-height:1.4}
+  .c-area{width:1%;white-space:nowrap}
+  .c-pts{width:1%;white-space:nowrap}
+  .num{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--text-dim)}
+  code{font-family:var(--font-mono);font-size:11px;background:var(--s2-dim);color:var(--accent);padding:1.5px 6px;border-radius:4px}
+
+  .pill{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:6px;white-space:nowrap;letter-spacing:.4px}
+  .pill::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+  .pill--S1{background:var(--s1-dim);color:var(--s1)}
+  .pill--S2{background:var(--s2-dim);color:var(--s2)}
+  .pill--S3{background:var(--s3-dim);color:var(--s3)}
+  .pill--S4{background:var(--s4-dim);color:var(--s4)}
+  .pill--ok{background:var(--ok-dim);color:var(--ok)}
+
+  details.detail{margin-top:7px}
+  details.detail summary{font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px}
+  details.detail summary::-webkit-details-marker{display:none}
+  details.detail summary::before{content:'▸';transition:transform .15s ease;display:inline-block}
+  details.detail[open] summary::before{transform:rotate(90deg)}
+  .detail__body{margin-top:9px;padding:12px 14px;background:var(--surface2);border-radius:8px;font-size:12.5px;line-height:1.6;color:var(--text-dim)}
+  .detail__body b{color:var(--text);font-weight:600;display:inline-block;min-width:64px}
+  .detail__body p{margin-bottom:7px}
+  .repro{list-style-position:inside;padding-left:0;margin-top:8px;font-family:var(--font-mono);font-size:11.5px;line-height:1.75}
+  .repro li{margin-bottom:2px}
+
+  details.coll{border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--surface);margin-bottom:12px}
+  details.coll summary{padding:14px 18px;font-family:var(--font-mono);font-size:12px;font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;gap:9px}
+  details.coll summary::-webkit-details-marker{display:none}
+  details.coll summary::before{content:'▸';color:var(--text-dim);transition:transform .15s ease}
+  details.coll[open] summary::before{transform:rotate(90deg)}
+  .coll__body{padding:16px 18px;border-top:1px solid var(--border);font-size:13px;line-height:1.65;color:var(--text-dim)}
+  .coll__body li{margin-bottom:9px;padding-left:14px;position:relative;list-style:none}
+  .coll__body li::before{content:'›';position:absolute;left:0;color:var(--accent);font-weight:700}
+
+  .callout{padding:16px 20px;border-radius:10px;border-left:4px solid var(--s3);background:var(--s3-dim);margin:16px 0;font-size:13.5px;line-height:1.65}
+  .callout b{color:var(--text)}
+
+  footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--border);font-family:var(--font-mono);font-size:11px;color:var(--text-dim);line-height:1.9}
+  footer a{color:var(--accent)}
+
+  @media (max-width:768px){
+    body{padding:20px 14px}
+    /* Narrow segments clip their own labels on a phone; the legend below
+       carries the same numbers, so drop the in-bar text entirely. */
+    .seg span{display:none}
+    .bar{height:34px}
+    .cmp{grid-template-columns:1fr}
+    th,td{padding:10px 11px}
+    .kv{font-size:32px}
+    .c-title{min-width:200px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow an" style="--i:0">Adversarial browser QA · Round 2</div>
+  <h1 class="an" style="--i:1">Music Timeline scorecard</h1>
+  <p class="sub an" style="--i:2">13 parallel testers drove the live site in real Google Chrome like a family would — tapping through the visible UI, no unit tests. Every candidate defect was then re-attacked by an independent skeptic whose job was to disprove it. Only survivors are counted below.</p>
+  <div class="callout an" style="--i:2;border-left-color:var(--ok);background:var(--ok-dim)">
+    <b>Scope, and current status.</b> Round 2 ran on <b>two independent fleets</b>: this Mac Studio (real Chrome, genuine AAC decoder) and a container fleet against the same live site. This page is the <b>studio fleet's 35 confirmed findings</b>. Merged with the other fleet, round 2 totals <b>40 unique confirmed defects — 1 Critical, 5 Major</b>, the same Critical and Majors shown here, with six findings reproduced independently by both fleets.<br><br>
+    <b>Every one of the 40 is already fixed and deployed</b> (commit <code>9baf0f2</code>). So read this as the record of what round 2 caught, not as a list of things still broken.
+  </div>
+  <div class="meta an" style="--i:3">
+    target &nbsp;<a href="https://music-timeline-walksalots-projects.vercel.app/index.html">music-timeline-walksalots-projects.vercel.app</a><br>
+    browser &nbsp;Google Chrome 151.0.7922.76 &nbsp;·&nbsp; AAC decode <b>"probably"</b> &nbsp;·&nbsp; previews genuinely played<br>
+    run &nbsp;57 agents · 0 errors · 100 min · 1,006 screenshots
+  </div>
+
+  <div class="kpis">
+    <div class="card card--hero kpi" style="--i:0">
+      <div class="kv" style="color:var(--accent)">122</div>
+      <div class="kl">Weighted score</div>
+      <div class="kn">S1×13 · S2×8 · S3×3 · S4×1</div>
+    </div>
+    <div class="card kpi" style="--i:1">
+      <div class="kv">35</div>
+      <div class="kl">Confirmed</div>
+      <div class="kn">of 37 clusters</div>
+    </div>
+    <div class="card kpi" style="--i:2">
+      <div class="kv" style="color:var(--s1)">1</div>
+      <div class="kl">Critical</div>
+      <div class="kn">real money bug</div>
+    </div>
+    <div class="card kpi" style="--i:3">
+      <div class="kv" style="color:var(--s2)">5</div>
+      <div class="kl">Major</div>
+      <div class="kn">feature broken</div>
+    </div>
+    <div class="card kpi" style="--i:4">
+      <div class="kv" style="color:var(--text-dim)">29</div>
+      <div class="kl">Minor + Nit</div>
+      <div class="kn">polish &amp; copy</div>
+    </div>
+  </div>
+
+  <h2>Where the 122 points come from</h2>
+  <div class="bar an" style="--i:4">
+    <div class="seg seg--S1" style="flex:13" title="1 × S1 = 13 pts"><span>S1 · 13</span></div><div class="seg seg--S2" style="flex:40" title="5 × S2 = 40 pts"><span>S2 · 40</span></div><div class="seg seg--S3" style="flex:60" title="20 × S3 = 60 pts"><span>S3 · 60</span></div><div class="seg seg--S4" style="flex:9" title="9 × S4 = 9 pts"><span>S4 · 9</span></div>
+  </div>
+  <div class="barnote an" style="--i:5">S1 1×13 = <b>13</b> &nbsp;·&nbsp; S2 5×8 = <b>40</b> &nbsp;·&nbsp; S3 20×3 = <b>60</b> &nbsp;·&nbsp; S4 9×1 = <b>9</b><br>Width = share of weighted score, not count. The single Critical outweighs all nine Nits combined.</div>
+
+  <div class="legend an" style="--i:5">
+    <div class="li"><span class="sw" style="background:var(--s1)"></span> S1 Critical · 13 pts — crash, data loss, wrong money, wrong rule outcome</div>
+    <div class="li"><span class="sw" style="background:var(--s2)"></span> S2 Major · 8 pts — feature broken, game survives</div>
+    <div class="li"><span class="sw" style="background:var(--s3)"></span> S3 Minor · 3 pts — visual, misleading copy, minor a11y</div>
+    <div class="li"><span class="sw" style="background:var(--s4)"></span> S4 Nit · 1 pt — polish</div>
+  </div>
+
+  <h2>Round 1 vs Round 2</h2>
+  <div class="cmp">
+    <div class="card an" style="--i:6">
+      <div class="rlabel">Round 1 · ran elsewhere</div>
+      <div class="stat"><span>Confirmed defects</span><b>25</b></div>
+      <div class="stat"><span>Weighted score</span><b>93</b></div>
+      <div class="stat"><span>Status</span><b style="color:var(--ok)">all fixed &amp; deployed</b></div>
+      <div class="unk">Round 1's per-severity breakdown isn't in this repo — that round ran on another machine and only its totals were handed over. Not reconstructed here rather than guessed.</div>
+    </div>
+    <div class="card card--hero an" style="--i:7">
+      <div class="rlabel">Round 2 · this run</div>
+      <div class="stat"><span>Confirmed defects</span><b>35</b></div>
+      <div class="stat"><span>Weighted score</span><b style="color:var(--accent)">122</b></div>
+      <div class="stat"><span>Critical / Major</span><b><span style="color:var(--s1)">1</span> / <span style="color:var(--s2)">5</span></b></div>
+      <div class="stat"><span>Minor / Nit</span><b>20 / 9</b></div>
+      <div class="stat"><span>Refuted by skeptics</span><b>2</b></div>
+    </div>
+  </div>
+
+  <div class="callout an" style="--i:8">
+    <b>The score went up, but the app did not get worse.</b> Round 1's 25 fixes held — skeptics re-tested those areas and none regressed. The rise is reach: 29 of 35 findings are minor polish, and this round reached surfaces round 1 never touched (co-op wording, offline and storage-full behaviour, landscape, the listen-page QR, screen-reader labels). Round 1 found the big breaks; round 2 is finding the long tail.
+  </div>
+
+  <h2>The one Critical</h2>
+  <div class="spot an" style="--i:9">
+    <h3>The winner screen pays out a pot nobody agreed to</h3>
+    <p>The payout reads the <i>live setup draft</i> instead of a snapshot taken when the game started. So if someone opens “New game”, fiddles with the buy-in, and backs out without starting — then resumes the game already in progress — the win screen settles up using the abandoned draft.</p>
+    <div class="quote">Verified in reverse too: a real agreed <b>$2/head to @realaunt</b> became <b>“$12 · send it to @some-other-cousin”</b> — a scannable Venmo QR, for the wrong amount, to someone who was never in the game.</div>
+    <p>The skeptic attacked this on four axes and it survived all of them, including the strongest defence: the app's own saved stake said <code>enabled:false</code> at the moment the screen displayed $40. Root cause is named in shipped code — <code>payoutFor()</code> in <code>ui.js</code> reads <code>view.setup.buyin</code> rather than a per-game snapshot.</p>
+    <p style="margin-bottom:0"><b>Why it rates Critical:</b> the rubric calls wrong money math S1 outright, and this lands on the exact screen the room uses to settle up.</p>
+  </div>
+
+  <h2>All 35 confirmed findings</h2>
+  <div class="twrap an" style="--i:10">
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Sev</th><th>Finding</th><th>Area</th><th class="num">Pts</th></tr></thead>
+        <tbody>
+    <tr class="row row--S1" style="--i:0">
+      <td class="c-sev"><span class="pill pill--S1">S1</span></td>
+      <td class="c-title">
+        <div class="t">Winner screen's pot is read from the live setup draft, so editing buy-in in a never-started setup rewrites the pot of the game you resume</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> A game started with the buy-in switched OFF ends with no pot block at all; a buy-in never started cannot attach itself to an already-running game.</p>
+            <p><b>Actual</b> The winner screen shows 'THE POT / $40 / Send it to @kid-who-fiddled' with a live Venmo button and a QR pre-filling a $20 payment, because payoutFor() reads view.setup.buyin instead of a per-game snapshot.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=1234 with localStorage cleared</li><li>New game -&gt; remove 2 rows so 2 players remain -&gt; name them Eve and Fin -&gt; tap each row's 'Skip photo' -&gt; tap the target '-' once (First to 5). Leave the Buy-in switch OFF (default)</li><li>Shuffle &amp; start. Play 2 turns normally (Play song, tap a gap, Place, Next player)</li><li>On the play screen tap menu -&gt; Home. Home shows 'Resume game / Turn 3 - Eve, Fin'</li><li>Tap New game. Flip Buy-in ON, tap '+' 18 times ($20 each), type @kid-who-fiddled in the Venmo field. Setup reads 'Pot: $40 with 2 players'</li><li>Do NOT start. Tap 'close' (#btn-setup-back) to go home</li><li>Tap Resume game and play out to the win screen</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>setup-options</code></td>
+      <td class="c-pts num">13</td>
+    </tr>
+    <tr class="row row--S2" style="--i:1">
+      <td class="c-sev"><span class="pill pill--S2">S2</span></td>
+      <td class="c-title">
+        <div class="t">Challenge button disables once every opponent has challenged, so the take-back control inside the sheet is unreachable and the token cannot be refunded</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The sheet reopens showing 'Locked in - tap to take it back'; tapping removes the challenge and refunds the token.</p>
+            <p><b>Actual</b> #btn-challenge is disabled with no tooltip, and the take-back control exists only inside that sheet (the lock pills are plain &lt;li&gt;, the badge a &lt;span&gt;, and querySelectorAll('[data-action=&quot;open-challenge&quot;]') returns only the disabled button). The gate is anyCanChallenge, which counts 'already challenged' as blocked. Only 'skip this card' recovers the token, and that discards the song for the table.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=131 at 393x852</li><li>New game -&gt; remove rows 3 and 4 so 2 players remain (Ann, Bob) -&gt; 'Skip photo' once per row -&gt; Shuffle &amp; start -&gt; Continue</li><li>Tap the vinyl to draw the card</li><li>Tap 'Challenge · 1 token' -&gt; tap Bob -&gt; tap either gap on Bob's timeline -&gt; tap 'Lock in — spend 1 token' (Bob drops 2 -&gt; 1 token, a 'Bob challenged' pill appears)</li><li>Tap 'Challenge · 1 token' again to take it back</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>tokens-bets</code></td>
+      <td class="c-pts num">8</td>
+    </tr>
+    <tr class="row row--S2" style="--i:2">
+      <td class="c-sev"><span class="pill pill--S2">S2</span></td>
+      <td class="c-title">
+        <div class="t">Co-op defeat screen still renders the buy-in pot block with a live Venmo link and payment QR, although nobody won</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Nobody won, so the pot block is suppressed (or says the stake goes back) — not a payment link.</p>
+            <p><b>Actual</b> #win carries data-outcome=&quot;loss&quot; and reads 'GAME OVER / So close', yet #win-pot renders directly beneath with '$6', 'Send it to @teamhost', an 'Open Venmo' button, a scannable QR and 'Other phones can scan this to pay.' renderPot()/payoutFor() only check that buy-in is enabled and the pot is non-zero.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=77 with localStorage cleared</li><li>New game -&gt; remove one row so 3 players remain -&gt; 'Skip photo' once per row</li><li>Select mode Co-op; in 'Mistakes allowed' tap '-' until it reads 1</li><li>Flip Buy-in ON (leave $2) and type @teamhost in the Venmo field (setup reads 'Pot: $6 with 3 players')</li><li>Shuffle &amp; start, continue, tap Play song, choose a gap that is wrong for the year shown, Place, Next player</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>setup-options</code></td>
+      <td class="c-pts num">8</td>
+    </tr>
+    <tr class="row row--S2" style="--i:3">
+      <td class="c-sev"><span class="pill pill--S2">S2</span></td>
+      <td class="c-title">
+        <div class="t">'Place the card' and 'Next player' occupy identical coordinates, so a second tap up to 800ms later skips the whole reveal</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The reveal (year, title, artist, verdict, token award) stays up until the player deliberately taps 'Next player'.</p>
+            <p><b>Actual</b> Both buttons render at x=197,y=807, so the second tap fires next-turn immediately: the app jumps to 'Pass the phone to Player 2', the turn advances and the reveal is never seen. Reproduced at 60/120/200/300/500/800ms gaps, 6/6.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=11 in Chrome at 393x852</li><li>New game -&gt; remove one row so 3 remain -&gt; 'Skip photo' once per row -&gt; Shuffle &amp; start -&gt; Continue</li><li>Tap the vinyl to draw the card</li><li>Tap a gap to select a placement (a deliberately wrong gap shows the worst case)</li><li>Tap 'Place the card' once, then tap the exact same spot 200ms later</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>chaos</code></td>
+      <td class="c-pts num">8</td>
+    </tr>
+    <tr class="row row--S2" style="--i:4">
+      <td class="c-sev"><span class="pill pill--S2">S2</span></td>
+      <td class="c-title">
+        <div class="t">In phone landscape the vinyl / play control sits underneath the pinned timeline sheet and cannot be tapped</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The record is visible and tapping it draws the card and starts the preview.</p>
+            <p><b>Actual</b> #btn-play-song sits at y230-269 beneath the fixed timeline sheet; elementFromPoint returns #timeline-hint/#play-actions, no &lt;audio&gt; is ever created and the status stays 'Tap play to draw the mystery song.' It is reachable only in one narrow scroll band.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=41 at 852x393 (iPhone 14/15 landscape); 568x320, 667x375 and 926x428 behave the same, as does rotating a running game</li><li>New game -&gt; 'Skip photo' once on each of the 4 rows -&gt; Shuffle &amp; start -&gt; Continue on the pass screen</li><li>Observe the play screen: only the header strip and the 'YOUR TIMELINE' sheet are visible; the vinyl is nowhere on screen</li><li>Tap the middle of the band between header and sheet (x=426 y=249 at 852x393)</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>responsive</code></td>
+      <td class="c-pts num">8</td>
+    </tr>
+    <tr class="row row--S2" style="--i:5">
+      <td class="c-sev"><span class="pill pill--S2">S2</span></td>
+      <td class="c-title">
+        <div class="t">A stale second tab writes over newer progress — the 'changed in another tab' toast warns but does not stop the write</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> A tab that has been told its snapshot is stale refuses to write over newer progress (forces the reload it just recommended).</p>
+            <p><b>Actual</b> Tab B writes turn 4 from its stale turn-3 snapshot; storage becomes turn 4 / Ann 3 cards / Bob 2 cards, tab A resumes at turn 4, Bob's turn-4 card is gone, and neither tab reports the loss.</p>
+            <ol class="repro"><li>Tab A: start a 2-player game (Ann, Bob), play 2 turns so it reads 'turn 3'</li><li>Open the same URL in tab B; tap 'Resume game' (B mirrors turn 3)</li><li>Back in tab A, play 2 more turns (A reaches turn 5; Ann 3 cards, Bob 3 cards)</li><li>Switch to tab B — still turn 3, with the toast 'This game changed in another tab — reload to catch up'</li><li>Ignore the toast and take B's turn normally (Start the turn -&gt; Play song -&gt; tap a gap -&gt; Place -&gt; Next player)</li><li>Reload tab A and tap 'Resume game'</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>persistence</code></td>
+      <td class="c-pts num">8</td>
+    </tr>
+    <tr class="row row--S3" style="--i:6">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">Advanced/Expert reveal shows a definitive red 'wrong' verdict before the group has voted, and the loudest button makes it permanent</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The verdict stays neutral/pending until the group votes — the markup already ships that state (#verdict-banner data-verdict=&quot;neutral&quot;, 'Waiting for the reveal').</p>
+            <p><b>Actual</b> The banner turns red (data-verdict=&quot;wrong&quot;) the instant the card flips and states the loss in past tense ('Right spot, but you had to name it too.'); voting both chips flips it green. Tapping the 54px pink 'Next player' — far more prominent than the two thin vote chips — discards the correctly-placed card (timeline unchanged, discard pile 1). Reproduced on 6 seeds in both advanced and expert.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=4242 at 393x852</li><li>New game; 'Skip photo' once per row; tap the Advanced mode row; Shuffle &amp; start; continue past the pass screen</li><li>Tap the vinyl to draw and play the card</li><li>Tap a gap that is correct for the card's year (seed 4242 turn 1: 1973 'Kodachrome', timeline [1977], gap 0 is correct), then 'Place here'</li><li>Look at the reveal BEFORE tapping the Title or Artist chips</li><li>Tap the big pink 'Next player' without voting</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>adv-expert</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:7">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">A photo added before a name is typed is filed under the placeholder 'player 1', so a later unnamed row is offered a previous player's face</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> A brand-new unnamed row offers no saved faces; the library should only key on names a person actually typed.</p>
+            <p><b>Actual</b> The new row shows 'PREVIOUS PLAYER 1 PHOTOS' containing Ada's face, adoptable in one tap (aria-label 'Use this saved photo for Player 1'). localStorage music-timeline:v1:avatars reads {&quot;player 1&quot;:[img],&quot;ada&quot;:[img]}.</p>
+            <ol class="repro"><li>Open /index.html on a fresh profile (localStorage cleared), tap New game</li><li>On the FIRST row (still showing the default 'Player 1'), tap the circle and choose a photo — do not type a name first</li><li>Type the real name over it ('Ada') and blur</li><li>'Skip photo' on rows 2-4, Shuffle &amp; start</li><li>Reload, tap New game (roster pre-fills Ada / Player 2 / Player 3 / Player 4)</li><li>Tap '+ Add player' — the new empty row is auto-named 'Player 1' — and scroll to it</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>roster</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:8">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">Co-op Scoreboard prints the shared timeline and shared token pool once per player under a 'Standings' heading</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> One team card, matching every other co-op surface (the pass screen's 'THE TEAM' box, the rail's 'team 4/10 · 0/3 missed' pills, and the win recap the engine collapses to one shared row).</p>
+            <p><b>Actual</b> A 'Standings' screen with 8 identical rows: same shared timeline (1982, 1982, 1994, 2021), same '6 to go', and each row drawing the single 6-cap shared pool as its own 2 dots. Verified programmatically that all 8 rows differ only by name.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=503 with localStorage cleared</li><li>New game -&gt; tap the Co-op mode tile -&gt; add rows until there are 8 players -&gt; 'Skip photo' once on each</li><li>Shuffle &amp; start; play 3 turns (vinyl, gap, 'Place here', 'Next player')</li><li>On the play screen tap any avatar in the player rail to open the scoreboard</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>coop</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:9">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">The folded 'Deck &amp; playback' summary is clipped, so the song count is never readable and the thin-deck warning vanishes with the controls</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The folded summary carries the live state it exists for — filters plus the song count — and a starved deck stays visible when the section is folded.</p>
+            <p><b>Actual</b> #setup-more-state is clipped by CSS (scrollWidth 244 vs clientWidth 151 at 393px; 94px at 320px), so '· 1080 songs' / '· 5 songs' is always ellipsised away. The red deck warning lives inside the foldout and disappears with it, and the summary never mentions the playback source at all.</p>
+            <ol class="repro"><li>Open the live site at 393px wide -&gt; New game</li><li>Read the collapsed 'Deck &amp; playback' row: 'All decades · all gen…'</li><li>Open the foldout, turn off every decade except the 50s and every genre except Jazz (5 songs match; the red 'That is a thin deck for this many players' notice appears), then fold the section again</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>setup-options</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:10">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">Turning every decade (or genre) chip off silently reopens the full deck while every chip still renders unselected</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> With nothing selected the deck is empty and Start is blocked, or the chips snap back to all-selected to match the deck actually in use.</p>
+            <p><b>Actual</b> The count jumps 94 -&gt; 1080 and the summary reads 'All decades · all genres · 1080 songs' while all 8 chips still report aria-pressed=&quot;false&quot;. Same for genres: the filter code treats an empty selection as no filter and nothing re-syncs the chips.</p>
+            <ol class="repro"><li>Live site -&gt; New game -&gt; open the 'Deck &amp; playback' foldout</li><li>Tap the decade chips off one at a time: 50s, 60s, 70s, 80s, 90s, 00s, 10s (count falls 1023 -&gt; 869 -&gt; 689 -&gt; 512 -&gt; 352 -&gt; 240 -&gt; 94)</li><li>Tap the last one (20s) off as well</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>setup-options</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:11">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">Offline play never produces the promised demo timer — the ring freezes at 30s and the error copy points to three internet-only fallbacks</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> A silent demo timer runs the 30-second turn window, as the home screen and How to play both promise.</p>
+            <p><b>Actual</b> No timer at all: the ring stays full and the label stays '30s' across 12 one-second samples, audio sits at MEDIA_ERR_SRC_NOT_SUPPORTED, and the caption offers only 'Show streaming links' and the scan-on-another-phone QR — both internet-only. Grepping the served audio.js/ui.js for demo/timer/countdown finds no offline-timer implementation.</p>
+            <ol class="repro"><li>Load /index.html once online so the service worker installs (~4s)</li><li>Go offline (DevTools offline or airplane mode) and reload — home loads from the worker and reads 'only previews need Wi-Fi — offline gets a demo timer'</li><li>New game -&gt; 'Skip photo' once on each of the 4 rows -&gt; Shuffle &amp; start -&gt; continue past the pass screen</li><li>Tap the vinyl (#btn-play-song) and watch for 12 seconds</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>perf-network</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:12">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">Double-tapping 'Play again — same players' silently resets the game mode to Classic</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Setup reopens with the same players AND the mode the table just played.</p>
+            <p><b>Actual</b> The second tap lands on the 'Classic' mode row, which occupies the same coordinates on the setup screen, so the mode silently flips to Classic. Verified for expert-&gt;classic and coop-&gt;classic.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=31 in Chrome at 393x852</li><li>New game; leave 3 players; 'Skip photo' once per row; tap the 'Co-op' mode row (or 'Expert'); Shuffle &amp; start</li><li>Continue to the play screen; open the menu; tap 'End game', then tap again to confirm</li><li>On the winner screen tap 'Play again — same players', then tap the same spot again ~150ms later</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>chaos</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:13">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">Choosing Spotify/Apple/YouTube changes nothing on the QR — it still encodes the in-app preview page while killing playback on the host phone</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The QR carries a Spotify link so the scanning phone opens Spotify, as the option label and both hint lines promise.</p>
+            <p><b>Actual</b> The QR is unchanged (identical 9,974-char SVG across preview/spotify/apple/youtube) and decodes to &lt;origin&gt;/listen.html#&lt;payload&gt; — the same spoiler-free 30s preview; meanwhile the host phone refuses to play ('Open Spotify to play this card.') and the only streaming link sits on the guesser's own screen, spoiling the title. paintQr() always builds listenUrl() and never consults settings.playbackSource.</p>
+            <ol class="repro"><li>Fresh page: open /index.html?debug=1&amp;seed=11 with localStorage cleared</li><li>New game -&gt; 'Skip photo' once per row -&gt; Shuffle &amp; start -&gt; continue past the pass screen</li><li>Tap 'menu'. Under 'Play songs with' choose 'Spotify — opens on the scanning phone'. Note the hint: 'The others put a link on the QR, and the scanning phone will see it.'</li><li>Tap 'done', tap the big vinyl to draw the card</li><li>Scroll to the QR block and decode the rendered SVG</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>qr-listen</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:14">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">At the 8-player cap an available 'Played before' chip stays enabled and silently seats nobody</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The chip is disabled at the cap with honest copy (as '+ Add player' correctly is), or tapping says 'Game is full — remove somebody first'.</p>
+            <p><b>Actual</b> Nothing happens: row count stays 8, roster unchanged, no toast, tally still '8 players'. Two taps, zero feedback. The app handles the easy case — if any row still carries a default 'Player N' name the chip overwrites that row — so the dead case is specifically 8 real names.</p>
+            <ol class="repro"><li>Fresh profile, New game, name rows Ann / Ben / Cal / Dee, 'Skip photo' each, Shuffle &amp; start</li><li>Reload, New game, remove the Dee row</li><li>Tap '+ Add player' until there are 8 rows and give every placeholder row a real name (Guest3, Guest4, …) so no row keeps its default name</li><li>The 'Played before' block still shows a Dee chip in normal style, aria-label 'Add Dee to this game', not disabled</li><li>Tap the Dee chip. Tap it again.</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>roster</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:15">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">'Played before' chips for people already in the game are pixel-identical to tappable ones and give no feedback when tapped</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> A chip that cannot be used is visibly distinct (dimmed/greyed) or gives feedback on tap.</p>
+            <p><b>Actual</b> Disabled chips measure identically to the one live chip (opacity 1, colour rgb(36,28,21), background rgb(255,253,246), same border, filter none, same class). Tapping produces no toast, flash or message while the hint still reads 'Tap somebody to add them.' The only signal is a title attribute a phone never shows.</p>
+            <ol class="repro"><li>Fresh profile, New game, name the four rows Ann / Ben / Cal / Dee, 'Skip photo' once per row, Shuffle &amp; start</li><li>Reload, tap New game (roster pre-fills with all four)</li><li>Look at the 'Played before' row: Ann, Ben, Cal, Dee chips</li><li>Tap the Ann chip</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>roster</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:16">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">When a 30-second preview ends on its own the vinyl reads '0s' and the caption still says 'Playing the preview.'</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> After the clip ends the control invites another listen (ring reset to 30s / 'tap to hear it again') and the status stops claiming the song is playing.</p>
+            <p><b>Actual</b> The ring is drained, the vinyl shows a play triangle over '0s', and the caption still reads 'Playing the preview.' two seconds later (ended=true, paused=true, currentTime=30.01). Tapping does restart the clip from 0 with zero network, but nothing on screen says so.</p>
+            <ol class="repro"><li>Load index.html -&gt; New game -&gt; 'Skip photo' per row -&gt; Shuffle &amp; start -&gt; continue past the pass screen</li><li>Tap the vinyl (#btn-play-song) and let the clip run all 30 seconds without touching anything</li><li>Look at the vinyl and the line beneath it</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>perf-network</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:17">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">'PREVIOUS &lt;NAME&gt; PHOTOS' heading renders with an empty box when a saved face exists but none is offered</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Either Adaline's saved face is offered, or the 'Previous photos' section stays hidden.</p>
+            <p><b>Actual</b> Row 4 shows a 'PREVIOUS ADALINE PHOTOS' heading with nothing beneath it, although localStorage music-timeline:v1:avatars contains {&quot;adaline&quot;:[img]}. Console: {savedHidden:false, savedLabel:'Previous Adaline photos', savedCount:0}. Reproduced 2/2 runs plus once in a longer sequence.</p>
+            <ol class="repro"><li>Fresh profile, tap New game</li><li>Row 1: tap the circle and choose a photo</li><li>Row 1: type 'Ada', blur</li><li>Row 1: retype the name to 'Adaline', blur</li><li>Row 4: type 'Adaline', blur, and look at row 4</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>roster</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:18">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">How to play states a token cap of 5 and says whose the tokens are is the only co-op difference, but co-op caps at 6</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The rules screen's cap matches the game.</p>
+            <p><b>Actual</b> Live co-op renders 6 token pills with aria-label 'Tokens: 2 of 6' (COOP_TOKEN_CAP = 6 vs TOKEN_CAP = 5). Round 1's '6 token pills' fix changed the UI but not the rules text.</p>
+            <ol class="repro"><li>Fresh page: Home -&gt; 'How to play'</li><li>Read 'TOKENS · START WITH 2, HOLD AT MOST 5' and the closing line 'Tokens are spent and earned the same way in every mode. The only difference is whose they are…'</li><li>Close -&gt; New game -&gt; 'Skip photo' per row -&gt; select mode 'Co-op' -&gt; Shuffle &amp; start -&gt; Continue</li><li>Look at the token rail next to the active player</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>first-run</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:19">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">Reloading during setup restores the player names but silently resets target, mode, streak, buy-in, Venmo handle and deck filters</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Either the whole setup comes back or none of it does — the app should not restore half of what was entered.</p>
+            <p><b>Actual</b> Only the names return. Target back to 10, streak OFF, buy-in OFF, amount and Venmo handle blank, deck filters back to all 8 decades. No message. Closing and reopening the sheet preserves everything, so the loss is specific to reload.</p>
+            <ol class="repro"><li>Open /index.html?debug=1 in a fresh profile</li><li>Tap New game; name two players (Ann, Bob); remove the extra rows</li><li>Tap '+' next to 'First to' once (target 15); turn ON 'Streak bonus'; turn ON 'Buy-in'; tap '+' on 'Each' ($3, Pot: $6 with 2 players); type '@ann-kibak' in the Venmo field and blur</li><li>Reload the page, then tap New game again on the home screen</li><li>Compare with what you configured</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>persistence</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:20">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">Changing 'Play songs with' while a preview is playing leaves the song playing and makes the Pause control dead</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Either switching the source stops the running preview, or the button that says 'Pause' pauses it.</p>
+            <p><b>Actual</b> The preview keeps playing (audio.paused stays false, currentTime advances 3.99 -&gt; 5.83s across the tap), the button still reads 'Pause 25s', and the status beneath says 'Open Spotify to play this card.' Tapping 'replay' even restarts the clip. Only leaving the play screen or letting the 30s clip end stops it; the Sound-off toggle does stop it correctly, so the defect is specific to the source switch.</p>
+            <ol class="repro"><li>Fresh page (localStorage cleared): New game -&gt; 'Skip photo' each row -&gt; Shuffle &amp; start -&gt; continue past the pass screen</li><li>Tap the vinyl to play the preview (the button now reads 'Pause NNs', audio audible)</li><li>Tap 'menu', set 'Play songs with' to 'Spotify', tap 'done'</li><li>Tap the vinyl again (it still says 'Pause')</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>first-run</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:21">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">Renaming a player leaves the previous name in every control's screen-reader label until the list re-renders</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The circle announces 'Add a photo for Rosalind', the remove link 'Remove Rosalind', the toggle 'Skip the photo for Rosalind'.</p>
+            <p><b>Actual</b> They still announce the previous value ('Add a photo for Omar' / 'Remove Omar' / 'Skip the photo for Omar'); visible text and the saved-photo lookup update live, only the aria-labels are stale. They correct themselves only when the list re-renders (adding or removing any player).</p>
+            <ol class="repro"><li>Fresh profile, New game</li><li>Row 2 is named 'Player 2'. Type 'Rosalind' over it and blur</li><li>Inspect that row's three controls in the accessibility tree</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>roster</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:22">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">When localStorage is full the game saves nothing, warns nobody, and disappears on reload — unlike blocked storage, which does warn</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The same treatment as blocked storage: a visible line such as 'This browser won't save games…' so the family knows the night is not being saved.</p>
+            <p><b>Actual</b> No warning at any point, the save write fails silently, and after reload the home screen has no 'Resume game' card — the game is simply gone. With storage blocked rather than full, the app does show its warning.</p>
+            <ol class="repro"><li>Fill the origin's localStorage to quota before the app loads (addInitScript writing 256 KB then 2 KB chunks until setItem throws)</li><li>Load the site — home renders normally with no notice</li><li>New game -&gt; 2 players -&gt; 'Skip photo' each -&gt; Shuffle &amp; start</li><li>Play a complete turn (Start the turn -&gt; Play song -&gt; tap a gap -&gt; Place -&gt; Next player)</li><li>Read localStorage['music-timeline:v1:game'] -&gt; null, then reload the page</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>persistence</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:23">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">The 'Correct' verdict pill fails WCAG AA at 3.81:1 while the matching 'wrong' pill passes</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Body-size verdict text meets AA 4.5:1 — the round-1 fix pass claimed secondary text now clears AA.</p>
+            <p><b>Actual</b> 3.81:1. The green pair (--good-text #2b8a3e on --good-tint #d3f9d8) misses AA while the red pair it mirrors (#c92a2a on #ffe3e3) passes at 4.51:1. The same --good-text on paper also fails at 4.29:1 for the setup deck tally ('X songs match').</p>
+            <ol class="repro"><li>Open /index.html -&gt; New game -&gt; 'Skip photo' once per row -&gt; Shuffle &amp; start -&gt; Start the turn</li><li>Tap the vinyl, tap a correct gap, tap 'Place here'</li><li>Inspect .verdict[data-verdict=&quot;correct&quot;]: color rgb(43,138,62) on rgb(211,249,216), 13.5px, weight 600</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>a11y</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:24">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">The end screen's focused heading always announces 'Winner:', so a co-op loss is read out as 'Winner: So close'</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The h1 that receives focus announces the outcome that happened, e.g. 'Game over: So close'.</p>
+            <p><b>Actual</b> #win-title contains a hardcoded &lt;span class=&quot;sr-only&quot;&gt;Winner: &lt;/span&gt;, so its accessible name is 'Winner: So close' on a loss (#win[data-outcome=&quot;loss&quot;]) and it is the focused element on entry. The same prefix mislabels every non-victory ending: 'Stopped early', 'Level when it ended', 'Ahead when it ended', 'Joint winners', 'No winner' — verified live on an end-early game announcing 'Winner: Player 1, Player 2, Player 3 &amp; Player 4'.</p>
+            <ol class="repro"><li>Open /index.html -&gt; New game -&gt; remove Player 4 then Player 3 (2 players left) -&gt; 'Skip photo' once per row</li><li>Pick Co-op, tap 'Fewer mistakes allowed' until the limit reads 1</li><li>Shuffle &amp; start -&gt; Start the turn -&gt; vinyl -&gt; tap a clearly wrong gap -&gt; Place here -&gt; Next player</li><li>On the 'GAME OVER / So close' screen read the focused heading's accessible name</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>a11y</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S3" style="--i:25">
+      <td class="c-sev"><span class="pill pill--S3">S3</span></td>
+      <td class="c-title">
+        <div class="t">The winner's name is clipped off both edges of the win screen at 320, 375 and 393 px</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The winner's name fits and is fully readable, as the pass screen already achieves with the same name.</p>
+            <p><b>Actual</b> #win-title / #win-player-name renders wider than the viewport and is clipped with no horizontal scroll to recover it: 320x568 left=-13 right=333, 375x667 left=-15 right=390, 393x852 left=-9 right=402. It fits only from 428px up.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=5 at 393x852</li><li>New game -&gt; remove rows down to 2 players -&gt; name player 1 'Bartholomewxxxxx' (16 chars, exactly the app's own maxlength) and player 2 'Wilhelmina Grace' -&gt; 'Skip photo' each -&gt; Shuffle &amp; start</li><li>Play until player 1 reaches the target and the win screen appears</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>responsive</code></td>
+      <td class="c-pts num">3</td>
+    </tr>
+    <tr class="row row--S4" style="--i:26">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">Player initials on two of the eight seat colours miss WCAG AA (4.20:1 and 4.35:1)</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The initial — the only identifier when the photo is skipped, which is the app's own fast path — meets AA 4.5:1 on every seat colour.</p>
+            <p><b>Actual</b> Seat 4 white on rgb(28,126,214) = 4.20:1 and seat 1 white on rgb(12,133,153) = 4.35:1; both are 16px bold, below the 18.66px bold threshold for WCAG large text, so 4.5:1 applies. The other six seats pass (4.48-6.88).</p>
+            <ol class="repro"><li>Open /index.html -&gt; New game -&gt; tap '+ Add player' four times to see all eight seat colours</li><li>Measure each .avatar__initial against its avatar background (16px, weight 700)</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>a11y</code></td>
+      <td class="c-pts num">1</td>
+    </tr>
+    <tr class="row row--S4" style="--i:27">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">Co-op game-over line reads '1 mistakes reached on 1 card.' when the mistake limit is 1</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> '1 mistake reached on 1 card.' — the same plural() helper the app already uses for the card count on the same line.</p>
+            <p><b>Actual</b> '1 mistakes reached on 1 card.' The card half is pluralised, the mistake half interpolates state.mistakeLimit raw (ui.js:2623). The same string is pushed to the aria-live region, so screen readers announce it too.</p>
+            <ol class="repro"><li>Open /index.html -&gt; New game -&gt; remove Player 4 and Player 3 -&gt; 'Skip photo' once per row</li><li>Pick Co-op, tap 'Fewer mistakes allowed' until the limit reads 1</li><li>Shuffle &amp; start -&gt; Start the turn -&gt; vinyl -&gt; tap a clearly wrong gap -&gt; Place here -&gt; Next player</li><li>Read the summary line under 'So close'</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>a11y</code></td>
+      <td class="c-pts num">1</td>
+    </tr>
+    <tr class="row row--S4" style="--i:28">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">Co-op play screen says 'you have 2' about the shared token pool</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Shared-pool wording, matching every other co-op surface (the same screen's token row is aria-labelled 'Tokens: 2 of 6', the reveal credits awards to 'Shared pool', the pass screen says 'Shared tokens').</p>
+            <p><b>Actual</b> 'Needs 3 tokens (you have 2)' — second person, as if the active player owned a personal pile. Persists all game, including on turn 3 with a different active player.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=601 with localStorage cleared</li><li>New game -&gt; tap the Co-op mode tile -&gt; reduce to 3 players -&gt; 'Skip photo' once per row</li><li>Shuffle &amp; start, continue to the play screen, and read the line under 'buy a card · 3 tokens'</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>coop</code></td>
+      <td class="c-pts num">1</td>
+    </tr>
+    <tr class="row row--S4" style="--i:29">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">The vinyl countdown flips from '30s' to '1s' the moment you tap play in Spotify/Apple/YouTube mode</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The countdown keeps reading 30s or disappears — this mode plays no in-app clip, so it should not advertise a one-second one.</p>
+            <p><b>Actual</b> The disc immediately shows '1s' under the play glyph, next to 'Open Spotify to play this card.', and stays there. Does not happen in preview mode even when the preview fails (with the iTunes host blocked the disc still reads '30s'), pointing at paintAudio() measuring the silent unlock buffer from player.unlock().</p>
+            <ol class="repro"><li>Fresh page: open /index.html?debug=1&amp;seed=11 with localStorage cleared</li><li>New game -&gt; 'Skip photo' once per row -&gt; Shuffle &amp; start -&gt; continue past the pass screen (the disc reads '30s')</li><li>menu -&gt; 'Play songs with' -&gt; 'Spotify — opens on the scanning phone' -&gt; done (still '30s')</li><li>Tap the vinyl once</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>qr-listen</code></td>
+      <td class="c-pts num">1</td>
+    </tr>
+    <tr class="row row--S4" style="--i:30">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">manifest.json declares a near-black theme/background for a cream light-themed app, and no apple-touch-icon is provided</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Install metadata matches the app it installs: a light theme/background, plus an iOS home-screen icon.</p>
+            <p><b>Actual</b> The manifest claims a near-black theme and splash background, disagreeing with the page's own theme-color; iOS 'Add to Home Screen' has no apple-touch-icon to use. The manifest and icon.svg themselves load fine and the SW precaches 27 shell entries with working offline reload.</p>
+            <ol class="repro"><li>curl /manifest.json — theme_color and background_color are both #0b0b12</li><li>View index.html's head — &lt;meta name=&quot;theme-color&quot; content=&quot;#fff8e7&quot;&gt; and &lt;meta name=&quot;color-scheme&quot; content=&quot;light&quot;&gt;; the shipped UI is cream/paper</li><li>The head has apple-mobile-web-app-* meta and &lt;link rel=&quot;icon&quot; type=&quot;image/svg+xml&quot;&gt; but no &lt;link rel=&quot;apple-touch-icon&quot;&gt;</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>first-run</code></td>
+      <td class="c-pts num">1</td>
+    </tr>
+    <tr class="row row--S4" style="--i:31">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">Player names are silently cut at 16 characters with no limit shown anywhere</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Either the name fits, or the UI says how long a name may be (counter or hint).</p>
+            <p><b>Actual</b> The field stops at 16 (maxlength=&quot;16&quot;, no hint anywhere) and the row reads 'Grandma Josephin' — the name used on the pass screen, player rail, scoreboard and win screen all night. Emoji cost two characters each, so emoji nicknames are cut shorter still.</p>
+            <ol class="repro"><li>Fresh profile, New game</li><li>In row 1 type 'Grandma Josephine' (17 characters)</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>roster</code></td>
+      <td class="c-pts num">1</td>
+    </tr>
+    <tr class="row row--S4" style="--i:32">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">Before the song is drawn, the play screen shows the 'Scan to play it on your own phone' heading and body copy with no QR beneath it</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> Either the whole scan block stays hidden until there is a card to scan, or a placeholder appears with the caption.</p>
+            <p><b>Actual</b> .qr__frame is hidden (#qr-code measures [0,0,0,0] with empty innerHTML) but the caption 'Scan to play it on your own phone' and 'The scanned page shows a play button and nothing else. No year, no title.' still render as an orphan heading. After tapping play the QR appears and the caption moves beneath it.</p>
+            <ol class="repro"><li>Open /index.html?debug=1&amp;seed=41 at 820x1180 (iPad portrait, where the whole play screen is above the fold)</li><li>New game -&gt; 'Skip photo' once per row -&gt; Shuffle &amp; start -&gt; Continue</li><li>Look below the vinyl, before tapping play</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>responsive</code></td>
+      <td class="c-pts num">1</td>
+    </tr>
+    <tr class="row row--S4" style="--i:33">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">Resuming into a reveal loses the album artwork — the cover is replaced by the generic music-note placeholder</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The reveal after resume looks like the reveal before it, artwork included.</p>
+            <p><b>Actual</b> Everything else is identical (year, title, artist, verdict, mini timeline, token rail) but the cover thumbnail is replaced by the pink music-note placeholder — artwork is fetched only during playback, and resume skips that.</p>
+            <ol class="repro"><li>Fresh page (localStorage cleared): New game -&gt; 'Skip photo' each row -&gt; Shuffle &amp; start -&gt; continue past the pass screen</li><li>Tap the vinyl, tap a gap, tap 'Place here' — the reveal shows year, title, artist and the album cover</li><li>Reload the page</li><li>Home -&gt; 'Resume game' — the same reveal returns</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>first-run</code></td>
+      <td class="c-pts num">1</td>
+    </tr>
+    <tr class="row row--S4" style="--i:34">
+      <td class="c-sev"><span class="pill pill--S4">S4</span></td>
+      <td class="c-title">
+        <div class="t">Cold first visit transfers ~879 KB for ~492 KB of content because the SW install refetches with cache:'reload'</div>
+        <details class="detail">
+          <summary>repro &amp; verdict</summary>
+          <div class="detail__body">
+            <p><b>Expected</b> The precache reuses the HTTP-cache entries the page just filled, so a cold visit costs roughly the unique shell size (~492 KB).</p>
+            <p><b>Actual</b> ~879,033 bytes on a cold visit: 17 URLs downloaded twice (379,128 duplicated bytes — previews.json 128,893 B twice, ui.js 41,205 B, deck.js 37,899 B, four woff2s, engine.js, app.css), plus './' and './index.html' both precached so the 24,380-byte document is fetched twice inside install. install uses fetch(path,{cache:'reload'}) justified for a LAN dev server, but Vercel serves everything must-revalidate, so the flag buys nothing.</p>
+            <ol class="repro"><li>Fresh browser profile / cleared site data (no SW, no HTTP cache)</li><li>Load /index.html and wait ~6s for the SW install to finish</li><li>Compare the page's resource timing (19 requests, ~401 KB) with the service worker's (27 entries, ~500 KB, none from the HTTP cache)</li><li>Repro script: node scratch/qa/round-2/perf-network/02-sw-precache-bytes.mjs from the repo root</li></ol>
+          </div>
+        </details>
+      </td>
+      <td class="c-area"><code>perf-network</code></td>
+      <td class="c-pts num">1</td>
+    </tr></tbody>
+        <tfoot></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <h2>What the skeptics killed</h2>
+  <details class="coll an" style="--i:11">
+    <summary>2 refuted or by-design</summary>
+    <div class="coll__body"><ul>
+      <li><span class="pill pill--ok">BY_DESIGN</span> The reveal after a wrong placement omits the mini-timeline and the 'where it belonged' line that every correct reveal shows</li><li><span class="pill pill--ok">REFUTED</span> Expert mode's year-call stepper value is not in a live region, so its value is never announced when changed</li>
+    </ul></div>
+  </details>
+  <div class="callout an" style="--i:12">
+    <b>Read this number with suspicion:</b> 35 of 37 clusters survived, which is a high pass rate for a gate designed to kill findings. Two things explain most of it — the adjudicator dropped by-design reports <i>before</i> verification, and the 13 missions barely overlap, so there was little duplicate inflation to strip. It is not proof the gate was soft, but if round 3 also refutes only ~2 of ~37, the skeptic stance needs re-tuning.
+  </div>
+
+  <h2>Coverage</h2>
+  <details class="coll an" style="--i:13">
+    <summary>What each of the 13 testers actually covered</summary>
+    <div class="coll__body"><ul>
+      <li><code>first-run</code> Real Chrome 151 (channel:'chrome', canPlayType 'probably'), 12 throwaway Playwright scripts in /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/first-run/ (01-home … 12-confirm-pause), all run from the repo root against the live Vercel site, ~40 screenshots, every script watching pageerror/console-error/requestfailed. WHAT I TESTED - First run: localStorage clear</li><li><code>roster</code> Real Google Chrome 151 via chromium.launch({channel:'chrome'}), iPhone-sized viewport 393x852, against the live site https://music-timeline-walksalots-projects.vercel.app/index.html?debug=1 (I verified the live index.html is byte-identical to the repo copy, sha1 cc80aa94...). Thirteen throwaway Playwright scripts under /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/rou</li><li><code>setup-options</code> Real Google Chrome 151, iPhone-sized viewport (393x852, plus a 320x720 pass), live production site, 9 throwaway Playwright scripts under /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/setup-options/ (a- through i-), 45 screenshots, all driven through visible-UI clicks/typing/paste only (state reads were assertion-only). AAC canPlayType returned &quot;probably&quot; throu</li><li><code>classic-game</code> Real Google Chrome 151 (channel:'chrome'), 393x852 iPhone-ish viewport unless noted, live Vercel site, ~22 minutes of driving. canPlayType('audio/mp4; codecs=&quot;mp4a.40.2&quot;') = &quot;probably&quot;, so REAL-CHROME audio rules applied. Scripts and screenshots: /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/classic-game/ (lib.mjs, game1.mjs, game1b.mjs, game2b.mjs, probe3-pro</li><li><code>tokens-bets</code> Roughly 20 minutes of live driving in real Google Chrome (channel=chrome, 393x852 and 320x720), all through visible UI taps; window.__timeline.state and DOM reads used only to assert. Nine throwaway scripts + screenshots in /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/tokens-bets/ (lib.mjs, run1-challenge, run2-nameit, run3-buy, run4-edges, run5-wins, run6-ti</li><li><code>adv-expert</code> Roughly 45 minutes of live driving of https://music-timeline-walksalots-projects.vercel.app/index.html in real Google Chrome (canPlayType 'probably'), 393x852 and 320x568, all through visible UI taps; the debug seam was used only to assert outcomes. Scripts and 65 screenshots are in /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/adv-expert/. WHAT I VERIFIED AS </li><li><code>coop</code> Roughly 16 minutes of live testing against https://music-timeline-walksalots-projects.vercel.app/index.html in real Google Chrome (channel:'chrome', canPlayType AAC = &quot;probably&quot;) at 393x852, plus a 320x640 pass. Eight throwaway Playwright scripts under /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/coop/ (lib.mjs + 01-win, 02-mistakes, 03-tokencap, 04-endgame, </li><li><code>persistence</code> Real Google Chrome (channel:'chrome'), 393x852 viewport, live Vercel site, ~10 browser sessions, all against ?debug=1 with seeds 7/11/42. Every session recorded pageerror + console.error: ZERO of either in any run, including all 14 sabotage cases. RELOAD AT EVERY PHASE (script 02/04, all PASS): mid-setup, turn-start/pass screen, listening (mid-preview), placing (gap selected, uncommitted), reveale</li><li><code>qr-listen</code> Real Google Chrome 151 (channel: 'chrome'), viewports 393x852 / 390x844 / 375x667 / 414x896 / 320x568, all against the live Vercel site. Codec check returned &quot;probably&quot;, so I held audio to the REAL-CHROME bar throughout. Scripts and every screenshot are in /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/qr-listen/. QR block (play screen) — PASSED. Wrote a real Q</li><li><code>a11y</code> Real Google Chrome 151 via chromium.launch({channel:'chrome'}), iPhone-sized 393x852 viewport, ~14 live sessions against https://music-timeline-walksalots-projects.vercel.app/index.html?debug=1. Scripts and every screenshot are in /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/a11y/ (lib.mjs plus 01-home, 02-setup, 03-deck-tab, 04-play, 05-sheets, 06-turn, 07-n</li><li><code>responsive</code> Scripts (throwaway, nothing in the app touched, nothing committed) live in /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/responsive/ and all ran from the repo root against the live Vercel site in real Google Chrome (canPlayType 'audio/mp4; codecs=\&quot;mp4a.40.2\&quot;' == \&quot;probably\&quot;). WHAT I COVERED - Full flow at all six required sizes (320x568, 375x667, 393x852, 4</li><li><code>perf-network</code> Roughly 20 minutes of live testing against https://music-timeline-walksalots-projects.vercel.app in real Google Chrome (canPlayType('audio/mp4; codecs=&quot;mp4a.40.2&quot;') = &quot;probably&quot;), driving only visible UI, all scripts and screenshots under /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/perf-network/ (01-09 .mjs + .json + .png). No app file edited; git status cle</li><li><code>chaos</code> ~16 minutes of live testing against https://music-timeline-walksalots-projects.vercel.app/index.html in real Google Chrome 151 (canPlayType returned &quot;probably&quot;), iPhone-sized viewport, 13 throwaway Playwright scripts + 48 screenshots under /Users/krisstudio/Developer/Worktrees/fabians-red-card/qa-round2/scratch/qa/round-2/chaos/. All interaction was through the visible UI; multi-taps were real mou</li>
+    </ul></div>
+  </details>
+
+  <footer>
+    <b>Source of truth</b> — commit <code>05ba5f3</code> on branch <code>claude/phone-music-timeline-game-c96gtw</code> (walksalot/fabians-red-card)<br>
+    <b>Machine-readable</b> — <code>qa/results/round-2.json</code> · full write-up <code>qa/results/round-2.md</code> · 49 screenshots in <code>qa/results/round-2-evidence/</code><br>
+    <b>Generated</b> — 2026-08-08 from the round-2 workflow result · studio Mac (kris-studio)<br>
+    <b>Session</b> — <code>claude --resume e59d7bc7-5384-4f90-b941-9478bf447233</code><br>
+    <b>Status</b> — CURRENT. Supersedes nothing; round 3 will supersede this page.
+  </footer>
+
+</div>
+</body>
+</html>

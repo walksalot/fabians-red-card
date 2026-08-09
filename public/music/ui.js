@@ -58,6 +58,7 @@ import {
   pendingResult,
   seatColor,
   recap,
+  decadeStrengthFor,
 } from './engine.js';
 import { DECK, DECADES, GENRES, filterDeck } from './deck.js';
 import {
@@ -83,6 +84,13 @@ import {
   forgetPerson,
   loadBuyin,
   saveBuyin,
+  isPersistent,
+  NAMESPACE,
+  VERSION,
+  KEYS,
+  get as getStored,
+  set as setStored,
+  remove as removeStored,
 } from './storage.js';
 import { potFor, normaliseHandle, venmoPayUrl } from './buyin.js';
 import { qrSvg } from './qr.js';
@@ -101,12 +109,25 @@ const PREVIEW_SECONDS = 30;
 const TARGET_CHOICES = [5, 10, 15];
 
 /**
- * Roughly how long a game runs, per target, so somebody choosing the length can
- * see what they are choosing. Measured against the design prototype's own
- * numbers rather than guessed - a family picking "15" deserves to know that is
- * over an hour before they start, not after.
+ * Roughly how long a game runs, so somebody choosing the length can see what
+ * they are choosing. Per card of target, per seat, because player count is the
+ * dominant variable a fixed per-target number ignored: first-to-10 is an hour
+ * shorter with 2 players than with 8, and a family planning dinner around the
+ * hint deserves the real shape. ~0.9 min covers a listen-place-reveal cycle;
+ * the spread absorbs misses and table talk rather than promising one number.
  */
-const SESSION_MINUTES = { 5: 20, 10: 45, 15: 70 };
+const MINUTES_PER_TARGET_SEAT = 0.9;
+const SESSION_SPREAD = 1.4;
+
+/** "≈ 35–50 min", rounded to fives - honest about being an estimate. */
+function sessionEstimate(target, seats) {
+  const round5 = (minutes) => Math.max(5, Math.round(minutes / 5) * 5);
+  const low = round5(target * seats * MINUTES_PER_TARGET_SEAT);
+  const high = round5(
+    target * seats * MINUTES_PER_TARGET_SEAT * SESSION_SPREAD,
+  );
+  return high > low ? `≈ ${low}–${high} min` : `≈ ${low} min`;
+}
 
 /**
  * Buy-in steps in whole dollars. $2 is the default because that is what this was
@@ -181,7 +202,40 @@ const DEFAULT_SETTINGS = {
   sound: true,
   playbackSource: 'preview',
   reducedMotion: false,
+  // One tap per handoff: the pass-screen tap draws AND plays the song, and the
+  // reveal advances itself after AUTONEXT_MS unless somebody interacts. Born of
+  // live family playtesting - three mandatory taps per turn read as "slow and
+  // disjointed" at a real table. On by default because the table that wants to
+  // linger just taps, while the table that never found the setting gets the
+  // fast game.
+  fastFlow: true,
 };
+
+/** How long the reveal lingers before advancing itself (Kris asked ~15s). */
+const AUTONEXT_MS = 15000;
+
+/**
+ * Generic-storage keys owned by this file (KEYS in storage.js lists the shared
+ * ones). ACTIVE_BUYIN_KEY is the stake SNAPSHOT taken at Shuffle & start - the
+ * winner screen pays from it, never from the live setup draft, so fiddling
+ * with the buy-in in a setup that was never started cannot rewrite the pot of
+ * the game being resumed. SETUP_DRAFT_KEY is the whole setup form, so a reload
+ * mid-setup restores the options as well as the names.
+ */
+const ACTIVE_BUYIN_KEY = 'buyin-active';
+const SETUP_DRAFT_KEY = 'setup';
+
+/**
+ * How long a tap burst is swallowed after a tap replaces the screen under the
+ * finger. Place-here and Next-player render at the same coordinates, so a
+ * double tap used to skip the whole reveal; same story for Play again over the
+ * mode rows. 700ms outlasts any accidental burst without ever meeting a
+ * deliberate second tap.
+ */
+const TAP_GUARD_MS = 700;
+
+/** The name inputs' maxlength; the counter under a long name reads against it. */
+const NAME_MAX = 16;
 
 /* ========================================================================== */
 /* Module state                                                               */
@@ -236,7 +290,6 @@ const view = {
     linksShown: false,
     status: '',
   },
-  qrAlt: false,
   /**
    * The group's Title/Artist vote in classic + co-op, where the engine has no
    * title/artist gate and the two buttons are only there to settle an
@@ -244,6 +297,22 @@ const view = {
    */
   identifyVote: { title: false, artist: false },
   confettiStop: null,
+  /**
+   * The armed-tap guards on the two destructive controls (End game, and
+   * Shuffle & start over an unfinished save). Armed by the first tap, disarmed
+   * by a timeout, a sheet close or a screen change - never a dialog, because
+   * window.confirm steals focus and looks like a crash on a phone.
+   */
+  endGameArmed: false,
+  startArmed: false,
+  /** The guest-list cross that has been tapped once; only a second tap deletes. */
+  forgetArmed: null,
+  /**
+   * True once another tab has written a newer save than this tab holds. Every
+   * input except the Reload button is refused from then on - a stale tab that
+   * keeps playing writes somebody else's turn out of existence.
+   */
+  stale: false,
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -277,6 +346,32 @@ function disable(node, off, reason) {
   else node.removeAttribute('title');
 }
 
+/**
+ * disable() for a stepper button. Disabling the control under keyboard focus
+ * drops focus on <body> (ring gone, screen reader re-announces the document),
+ * so focus is handed to the enabled sibling in the same group - or, with both
+ * ends dead, the group's <output> - before the button goes dark.
+ */
+function disableStepper(node, off) {
+  if (!node) return;
+  if (off && !node.disabled && node === document.activeElement) {
+    const group = node.closest('[role="group"]');
+    const sibling = group
+      ? [...group.querySelectorAll('button')].find(
+          (b) => b !== node && !b.disabled,
+        )
+      : null;
+    const rescue = sibling || (group && group.querySelector('output'));
+    if (rescue) {
+      // Outputs only accept focus once they carry a tabindex; -1 keeps them
+      // out of the Tab order while still catching this hand-off.
+      if (!sibling) rescue.tabIndex = -1;
+      rescue.focus();
+    }
+  }
+  disable(node, off);
+}
+
 /** Clone a <template>'s single root element. Templates are the only row markup. */
 function clone(templateId) {
   const tpl = el(templateId);
@@ -306,9 +401,33 @@ function announce(message) {
   if (node) node.textContent = String(message);
 }
 
+/**
+ * An error has two audiences: #live-alert for screen readers, and the #toast
+ * pill for everyone else - a message only assistive tech can perceive is no
+ * feedback at all for a sighted player who just picked a broken photo.
+ * The toast is presentation only (it is not a live region); it hides itself
+ * after a few seconds, and onClick clears it on the next tap either way.
+ */
+let toastTimer = null;
+
 function alertUser(message) {
+  const words = String(message);
   const node = el('live-alert');
-  if (node) node.textContent = String(message);
+  if (node) node.textContent = words;
+  const toast = el('toast');
+  if (!toast) return;
+  if (toastTimer !== null) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  toast.textContent = words;
+  show(toast, !!words);
+  if (words) {
+    toastTimer = window.setTimeout(() => {
+      toastTimer = null;
+      show(el('toast'), false);
+    }, 4500);
+  }
 }
 
 /* ========================================================================== */
@@ -357,6 +476,42 @@ function seatInk(hex) {
   return vsWhite >= vsInk ? '#ffffff' : '#241c15';
 }
 
+/**
+ * The circle an initial sits on. Usually the seat colour itself - but the
+ * initial is 16px bold, under WCAG's large-text threshold, so its ink needs
+ * 4.5:1 and two of the eight crayons leave white at 4.2-4.35. Those are nudged
+ * (darkened under white ink, lightened under dark ink) until the pairing
+ * crosses the line; the seat colour everywhere else - borders, tints, meters -
+ * stays exactly what the engine handed out.
+ */
+function seatFill(hex) {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return hex;
+  const dark = seatInk(hex) !== '#ffffff';
+  const value = Number.parseInt(match[1], 16);
+  let [r, g, b] = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+  const toHex = () =>
+    `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+  const contrast = () => {
+    const seat = luminance(toHex());
+    return dark
+      ? (seat + 0.05) / (luminance('#241c15') + 0.05)
+      : 1.05 / (seat + 0.05);
+  };
+  for (let i = 0; i < 12 && contrast() < 4.5; i += 1) {
+    if (dark) {
+      r = Math.min(255, Math.round(r * 1.06 + 6));
+      g = Math.min(255, Math.round(g * 1.06 + 6));
+      b = Math.min(255, Math.round(b * 1.06 + 6));
+    } else {
+      r = Math.round(r * 0.93);
+      g = Math.round(g * 0.93);
+      b = Math.round(b * 0.93);
+    }
+  }
+  return toHex();
+}
+
 function applySeat(node, color) {
   if (!node) return;
   const hex = typeof color === 'string' && color ? color : seatColor(0);
@@ -364,6 +519,7 @@ function applySeat(node, color) {
   node.style.setProperty('--seat-soft', seatAlpha(hex, 0.18));
   node.style.setProperty('--seat-glow', seatAlpha(hex, 0.45));
   node.style.setProperty('--seat-ink', seatInk(hex));
+  node.style.setProperty('--seat-fill', seatFill(hex));
 }
 
 /**
@@ -372,7 +528,9 @@ function applySeat(node, color) {
  * back whole instead of as half a surrogate pair.
  */
 function initialFor(name) {
-  const trimmed = String(name === null || name === undefined ? '' : name).trim();
+  const trimmed = String(
+    name === null || name === undefined ? '' : name,
+  ).trim();
   if (!trimmed) return '?';
   return [...trimmed][0].toLocaleUpperCase();
 }
@@ -383,7 +541,9 @@ function initialFor(name) {
  * one place a hand-written value would turn into a request.
  */
 function safePhoto(value) {
-  return typeof value === 'string' && /^data:image\//.test(value) ? value : null;
+  return typeof value === 'string' && /^data:image\//.test(value)
+    ? value
+    : null;
 }
 
 /**
@@ -412,6 +572,18 @@ function paintAvatar(node, person) {
 /* ========================================================================== */
 /* Taking a photo                                                             */
 /* ========================================================================== */
+
+/**
+ * File a face in the avatar library - unless the row still carries a
+ * "Player N" placeholder. storage.js's rememberPerson refuses those names as
+ * not-a-person; filing an avatar under one would offer this face to every
+ * future unnamed row, so the same rule applies at every call site here.
+ */
+function fileAvatar(name, photo) {
+  const trimmed = (name || '').trim();
+  if (!trimmed || /^player\s*\d+$/i.test(trimmed)) return;
+  rememberAvatar(trimmed, photo);
+}
 
 /** A fresh setup row. */
 function playerDraft(index, name) {
@@ -495,7 +667,8 @@ async function squareThumbnail(file) {
     // Drop the backing store now rather than waiting for the next GC.
     canvas.width = 0;
     canvas.height = 0;
-    if (!/^data:image\/jpeg/.test(url)) throw new Error('canvas would not encode');
+    if (!/^data:image\/jpeg/.test(url))
+      throw new Error('canvas would not encode');
     return url;
   } finally {
     if (source && typeof source.close === 'function') source.close();
@@ -516,7 +689,13 @@ function photosOutstanding() {
  * everybody every week. storage.js drops the photos first if the quota bites,
  * because losing the faces is survivable and losing the names is just rude.
  */
+let rosterSaveTimer = null;
+
 function rememberRoster() {
+  if (rosterSaveTimer !== null) {
+    clearTimeout(rosterSaveTimer);
+    rosterSaveTimer = null;
+  }
   savePlayers(
     view.setup.players.map((p) => ({
       name: (p.name || '').trim(),
@@ -524,6 +703,110 @@ function rememberRoster() {
       skipped: !!p.skipped,
     })),
   );
+}
+
+/**
+ * The keystroke path into rememberRoster. Debounced, because a name is typed
+ * one input event at a time and sixteen JSON writes per name is silly - but it
+ * has to exist at all: a name typed after the last photo/skip action used to
+ * be the one thing a mid-setup reload silently reverted.
+ */
+function queueRosterSave() {
+  if (rosterSaveTimer !== null) clearTimeout(rosterSaveTimer);
+  rosterSaveTimer = window.setTimeout(() => {
+    rosterSaveTimer = null;
+    rememberRoster();
+  }, 500);
+}
+
+/**
+ * The rest of the setup form - target, mode, mistakes, filters, house rules,
+ * stake. The roster taught the lesson: restoring the names but not the options
+ * makes a reload look like the app forgot on purpose, so everything set on
+ * this screen persists, debounced on the same clock as the names.
+ */
+let setupSaveTimer = null;
+
+function saveSetupDraft() {
+  if (setupSaveTimer !== null) {
+    clearTimeout(setupSaveTimer);
+    setupSaveTimer = null;
+  }
+  setStored(SETUP_DRAFT_KEY, {
+    target: view.setup.target,
+    mode: view.setup.mode,
+    mistakeLimit: view.setup.mistakeLimit,
+    decades: view.setup.decades,
+    genres: view.setup.genres,
+    streakBonus: view.setup.streakBonus,
+    buyin: {
+      enabled: view.setup.buyin.enabled,
+      amount: view.setup.buyin.amount,
+      handle: view.setup.buyin.handle,
+    },
+  });
+}
+
+function queueSetupSave() {
+  if (setupSaveTimer !== null) clearTimeout(setupSaveTimer);
+  setupSaveTimer = window.setTimeout(() => {
+    setupSaveTimer = null;
+    saveSetupDraft();
+  }, 500);
+}
+
+/**
+ * The debounces above trade sixteen writes for one - the wrong trade in the
+ * one moment the page is going away, when an edit made inside the 500ms
+ * window would simply be lost. Flush, never re-debounce: a timer restarted on
+ * pagehide runs after the page is gone, which is to say never. Wired to both
+ * pagehide (the last reliable tick on iOS Safari - beforeunload is not) and
+ * the tab going hidden, because a hidden tab can be discarded without ever
+ * coming back.
+ */
+function flushPendingSaves() {
+  if (rosterSaveTimer !== null) rememberRoster();
+  if (setupSaveTimer !== null) saveSetupDraft();
+}
+
+/** Restore the draft, field by field - a corrupt or partial payload restores
+ * what it can and defaults the rest, never throws. */
+function loadSetupDraft() {
+  const saved = getStored(SETUP_DRAFT_KEY, null);
+  if (!saved || typeof saved !== 'object') return;
+  if (TARGET_CHOICES.includes(saved.target)) view.setup.target = saved.target;
+  if (['classic', 'advanced', 'expert', 'coop'].includes(saved.mode))
+    view.setup.mode = saved.mode;
+  if (Number.isInteger(saved.mistakeLimit)) {
+    view.setup.mistakeLimit = Math.min(
+      MAX_MISTAKES,
+      Math.max(MIN_MISTAKES, saved.mistakeLimit),
+    );
+  }
+  // Empty selections are never restored: empty means "everything" to the
+  // filter, and the chips would all sit unpressed over a full deck.
+  if (Array.isArray(saved.decades)) {
+    const decades = saved.decades.filter((d) => DECADES.includes(d));
+    if (decades.length) view.setup.decades = decades;
+  }
+  if (Array.isArray(saved.genres)) {
+    const genres = saved.genres.filter((g) => GENRES.includes(g));
+    if (genres.length) view.setup.genres = genres;
+  }
+  view.setup.streakBonus = saved.streakBonus === true;
+  const buyin = saved.buyin;
+  if (buyin && typeof buyin === 'object') {
+    view.setup.buyin = {
+      enabled: buyin.enabled === true,
+      amount:
+        Number.isInteger(buyin.amount) &&
+        buyin.amount >= BUYIN_MIN_CENTS &&
+        buyin.amount <= BUYIN_MAX_CENTS
+          ? buyin.amount
+          : view.setup.buyin.amount,
+      handle: typeof buyin.handle === 'string' ? buyin.handle : '',
+    };
+  }
 }
 
 /** Handle one chosen file. Async, so the draft is re-checked after the await. */
@@ -547,7 +830,9 @@ async function acceptPhoto(draft, file) {
   if (!view.setup.players.includes(draft)) return;
   draft.pending = false;
   if (!photo) {
-    alertUser('That photo could not be read. Try another one, or tap Skip photo.');
+    alertUser(
+      'That photo could not be read. Try another one, or tap Skip photo.',
+    );
     render();
     return;
   }
@@ -555,19 +840,44 @@ async function acceptPhoto(draft, file) {
   draft.skipped = false;
   rememberRoster();
   // File it under the name too, so this face is offered next time even if the
-  // roster has moved on.
-  rememberAvatar(draft.name, photo);
+  // roster has moved on. (Not under a placeholder - onInput files it when the
+  // real name is committed.)
+  fileAvatar(draft.name, photo);
   render();
   announce(`Photo added for ${draft.name || 'this player'}.`);
 }
 
-/** A row nobody has touched: still the placeholder name, no photo, not skipped. */
-function isUntouchedRow(draft, index) {
-  return (
-    !draft.photo
-    && !draft.skipped
-    && (!draft.name || draft.name.trim() === `Player ${index + 1}`)
+/**
+ * A row nobody has touched: still a placeholder name, no photo, not skipped.
+ * ANY "Player N" counts, not just the one matching this row's position -
+ * removing a row shifts every draft down a seat, and a "Player 3" sitting in
+ * row 2 is still an empty row, not somebody called Player 3. (storage.js makes
+ * the same call: rememberPerson refuses these names as not-a-person.)
+ */
+function isUntouchedRow(draft) {
+  const name = (draft.name || '').trim();
+  // A leftover skipped flag does not make a seat taken: rows restored from a
+  // previous game arrive with skipped=true, and clearing such a row's name
+  // used to leave a ghost seat no guest chip could fill - at eight rows the
+  // freed seat even read as "table is full". Once the name is gone the seat is
+  // free; only a photo still protects it, because a photo means somebody is
+  // actively mid-setup on that row and overwriting it would destroy their work.
+  if (name === '') return !draft.photo;
+  return !draft.photo && !draft.skipped && /^player\s*\d+$/i.test(name);
+}
+
+/**
+ * The lowest "Player N" placeholder no current row is using, so an added row
+ * never duplicates a name already on the roster (remove row 1, add a row, and
+ * counting rows alone mints a second "Player 4").
+ */
+function freePlaceholderName() {
+  const taken = new Set(
+    view.setup.players.map((p) => (p.name || '').trim().toLowerCase()),
   );
+  let n = 1;
+  while (taken.has(`player ${n}`)) n += 1;
+  return `Player ${n}`;
 }
 
 /**
@@ -602,47 +912,124 @@ function paintPeople() {
   }
 
   const seated = new Set(
-    view.setup.players.map((p) => (p.name || '').trim().toLowerCase()).filter(Boolean),
+    view.setup.players
+      .map((p) => (p.name || '').trim().toLowerCase())
+      .filter(Boolean),
   );
-  const full = view.setup.players.length >= MAX_PLAYERS
-    && !view.setup.players.some((p, i) => isUntouchedRow(p, i));
+  const full =
+    view.setup.players.length >= MAX_PLAYERS &&
+    !view.setup.players.some((p, i) => isUntouchedRow(p, i));
 
-  replaceChildren(
-    list,
-    people.map((person) => {
-      const node = clone('tpl-person');
-      if (!node) return null;
-      const item = node.querySelector('.person');
-      const add = node.querySelector('.person__add');
-      const forget = node.querySelector('.person__forget');
-      const already = seated.has(person.name.toLowerCase());
-      if (item) item.dataset.name = person.name;
-      if (add) {
-        add.dataset.name = person.name;
-        add.setAttribute(
-          'aria-label',
-          already ? `${person.name} is already playing` : `Add ${person.name} to this game`,
+  // A removed chip strands keyboard focus on <body>; remember where it was so
+  // confirming a forget (which deletes the node under focus) can hand focus
+  // to the Edit button instead of dropping it.
+  const focused = document.activeElement;
+  const keep =
+    focused && list.contains(focused) && focused.closest('.person')
+      ? focused.closest('.person').dataset.name
+      : null;
+
+  // Update chips IN PLACE, keyed by folded name - never rebuild the list
+  // wholesale. This repaint runs on the name field's blur-fired 'change',
+  // which lands BETWEEN the mousedown and mouseup of a tap on a chip: a
+  // replaceChildren rebuild there removed the half-tapped button, so the
+  // composed click retargeted to this container and died. Keeping the node
+  // alive lets that first tap land. (Chips stay click-activated on purpose -
+  // pointerdown activation would break scroll intent on touch.)
+  const fold = (name) => String(name || '').toLowerCase();
+  const existing = new Map();
+  for (const child of list.children) {
+    if (child.dataset && child.dataset.name)
+      existing.set(fold(child.dataset.name), child);
+  }
+  const setText = (node, value) => {
+    if (node && node.textContent !== value) node.textContent = value;
+  };
+
+  let cursor = list.firstElementChild;
+  for (const person of people) {
+    let item = existing.get(fold(person.name));
+    if (!item) {
+      item = clone('tpl-person');
+      if (!item) continue;
+    }
+    const add = item.querySelector('.person__add');
+    const forget = item.querySelector('.person__forget');
+    const already = seated.has(person.name.toLowerCase());
+    item.dataset.name = person.name;
+    if (add) {
+      add.dataset.name = person.name;
+      add.setAttribute(
+        'aria-label',
+        already
+          ? `${person.name} is already playing`
+          : `Add ${person.name} to this game`,
+      );
+      disable(
+        add,
+        already || full,
+        already
+          ? 'Already in this game'
+          : full
+            ? 'Eight players is the maximum'
+            : undefined,
+      );
+      // The reason rides on the chip, not in a title attribute a phone never
+      // shows - a dead-looking chip with no explanation reads as a bug.
+      const note = item.querySelector('[data-field="note"]');
+      if (note) {
+        setText(
+          note,
+          already ? 'already playing' : full ? 'table is full' : '',
         );
-        disable(
-          add,
-          already || full,
-          already ? 'Already in this game' : full ? 'Eight players is the maximum' : undefined,
-        );
+        show(note, already || full);
       }
-      if (forget) {
-        forget.dataset.name = person.name;
-        forget.setAttribute('aria-label', `Forget ${person.name}`);
-      }
-      fill(node, { name: person.name });
-      paintAvatar(node.querySelector('.avatar'), person);
-      return node;
-    }),
-  );
+    }
+    if (forget) {
+      forget.dataset.name = person.name;
+      // Tabbable exactly while edit mode shows the crosses: this is the
+      // app's only route to deleting a stored name and its photos, and it
+      // has to be reachable by keyboard, not only by pointer.
+      forget.tabIndex = view.peopleEditing ? 0 : -1;
+      const armed = view.forgetArmed === person.name;
+      forget.dataset.armed = armed ? 'true' : 'false';
+      forget.setAttribute(
+        'aria-label',
+        armed ? `Tap again to forget ${person.name}` : `Forget ${person.name}`,
+      );
+    }
+    setText(item.querySelector('[data-field="name"]'), person.name);
+    paintAvatar(item.querySelector('.avatar'), person);
+    // Keep DOM order in step with the stored order, moving nodes only when
+    // they are genuinely out of place.
+    if (item === cursor) cursor = cursor.nextElementSibling;
+    else list.insertBefore(item, cursor);
+  }
+  // Everything still at or past the cursor matched no person: forgotten.
+  while (cursor) {
+    const next = cursor.nextElementSibling;
+    cursor.remove();
+    cursor = next;
+  }
+
+  // Surviving chips keep their own focus; only a chip that vanished under
+  // focus (a confirmed forget) needs the hand-off.
+  if (keep && focused && !focused.isConnected) {
+    const again = [...list.children].find(
+      (li) => li.dataset && fold(li.dataset.name) === fold(keep),
+    );
+    const target = again
+      ? again.querySelector('.person__forget')
+      : el('btn-people-edit');
+    if (target && !target.disabled) target.focus();
+  }
 }
 
 /** Seat somebody from the guest list, reusing an empty row before adding one. */
 function addPersonToGame(name) {
-  const person = loadPeople().find((p) => p.name.toLowerCase() === String(name).toLowerCase());
+  const person = loadPeople().find(
+    (p) => p.name.toLowerCase() === String(name).toLowerCase(),
+  );
   if (!person) return;
   const already = view.setup.players.some(
     (p) => (p.name || '').trim().toLowerCase() === person.name.toLowerCase(),
@@ -689,6 +1076,10 @@ function paintSavedAvatars(row, draft, index) {
   const saved = avatarsFor(name).filter((photo) => photo !== draft.photo);
   show(box, saved.length > 0);
   if (!saved.length) {
+    // The signature must go with the children: keeping it meant a name typed
+    // through an empty state and back to the same face-set matched the stale
+    // signature and left the heading over an empty box.
+    delete list.dataset.signature;
     replaceChildren(list, []);
     return;
   }
@@ -713,7 +1104,10 @@ function paintSavedAvatars(row, draft, index) {
       if (button) {
         button.dataset.photoIndex = String(i);
         button.dataset.playerIndex = String(index);
-        button.setAttribute('aria-label', `Use this saved photo for ${name || 'this player'}`);
+        button.setAttribute(
+          'aria-label',
+          `Use this saved photo for ${name || 'this player'}`,
+        );
       }
       return node;
     }),
@@ -732,7 +1126,7 @@ function applySavedPhoto(index, photoIndex) {
   draft.pending = false;
   rememberRoster();
   // Re-file it so the one they just picked is the first offered next time.
-  rememberAvatar(draft.name, photo);
+  fileAvatar(draft.name, photo);
   render();
   announce(`Photo set for ${draft.name || 'this player'}.`);
 }
@@ -771,6 +1165,8 @@ function applySettings() {
   if (sound) sound.checked = !!settings.sound;
   const motion = el('opt-reduced-motion');
   if (motion) motion.checked = !!settings.reducedMotion;
+  const fast = el('opt-fast-flow');
+  if (fast) fast.checked = !!settings.fastFlow;
   for (const id of ['playback-source', 'opt-playback-source']) {
     const select = el(id);
     if (select) select.value = settings.playbackSource;
@@ -790,21 +1186,30 @@ function loadSavedSettings() {
       skipPass: !!saved.skipPass,
       sound: saved.sound !== false,
       playbackSource:
-        typeof saved.playbackSource === 'string' && SOURCE_LABELS[saved.playbackSource]
+        typeof saved.playbackSource === 'string' &&
+        SOURCE_LABELS[saved.playbackSource]
           ? saved.playbackSource
           : 'preview',
       reducedMotion: !!saved.reducedMotion,
+      fastFlow: saved.fastFlow !== false,
     };
   }
   // A phone that asks for less motion gets it without having to find the switch.
-  if (!saved && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (
+    !saved &&
+    window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ) {
     settings.reducedMotion = true;
   }
 }
 
 function motionIsReduced() {
   if (settings.reducedMotion) return true;
-  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  return !!(
+    window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
 }
 
 /* ========================================================================== */
@@ -824,10 +1229,70 @@ function dispatch(action) {
   return state;
 }
 
-function persist() {
+/**
+ * The save slot's write counter, as this tab last wrote or loaded it. It rides
+ * inside the saved payload (`__writes` - deserialize tolerates the extra
+ * field), and it is what stops a stale second tab from time-machining the
+ * game: before writing, the stored counter is read back, and a counter AHEAD
+ * of ours means another tab has moved the game on - so this tab must not
+ * write, it must stop and ask for a reload.
+ */
+let saveCounter = 0;
+
+/** Whether the couldn't-save toast has fired for the current run of failures. */
+let saveWarned = false;
+
+function storedWriteCount() {
+  const stored = loadGame();
+  return stored && Number.isFinite(stored.__writes) ? stored.__writes : 0;
+}
+
+function persist(replacing) {
   if (!state) return;
-  if (isGameOver(state)) clearGame();
-  else saveGame(state);
+  const stored = storedWriteCount();
+  // `replacing` is Shuffle & start deliberately taking the slot over; anything
+  // else yields to a newer save rather than clobbering it.
+  if (!replacing && stored > saveCounter) {
+    enterStaleState();
+    return;
+  }
+  saveCounter = Math.max(saveCounter, stored) + 1;
+  // Finished games are saved too, not cleared: switching to the Venmo app to
+  // settle the pot reloads the tab on most phones, and the winner screen -
+  // recap, payout QR and all - has to still be reachable afterwards. A
+  // finished save is replaced the next time a game starts.
+  const ok = saveGame({ ...state, __writes: saveCounter });
+  if (!ok) {
+    // Once per run of failures, and again only after a success-then-failure -
+    // a toast per turn would drown the game it is warning about.
+    if (!saveWarned) {
+      saveWarned = true;
+      alertUser(
+        "Couldn't save — storage is full. The game still works, but a reload loses it.",
+      );
+    }
+  } else {
+    saveWarned = false;
+  }
+}
+
+/**
+ * The stale-tab dead end: another tab has written a newer save, so every input
+ * here would either lie or destroy progress. A full-screen notice with a
+ * Reload button blocks the lot; onClick and onKeydown honour `view.stale` as
+ * well, in case the overlay is missing from a stripped-down DOM.
+ */
+function enterStaleState() {
+  if (view.stale) return;
+  view.stale = true;
+  stopAudio();
+  const overlay = el('stale-overlay');
+  if (overlay) {
+    show(overlay, true);
+    const button = overlay.querySelector('[data-action="reload-page"]');
+    if (button) requestAnimationFrame(() => button.focus());
+  }
+  alertUser('This game changed in another tab — reload to catch up.');
 }
 
 /* ========================================================================== */
@@ -836,9 +1301,19 @@ function persist() {
 
 function showScreen(name) {
   const leavingPlay = view.screen === 'play' && name !== 'play';
+  const leavingSetup = view.screen === 'setup' && name !== 'setup';
   view.screen = name;
   document.body.dataset.screen = name;
   if (leavingPlay) stopAudio();
+  // Guest-list edit mode is a stance taken on the setup screen, not device
+  // state: closing setup and coming back must not resurrect armed crosses
+  // over every saved face.
+  if (leavingSetup) view.peopleEditing = false;
+  // A screen change stands down the armed-tap guards - the second tap has to
+  // land on the same screen the first one armed.
+  disarmEndGame();
+  disarmStartGame();
+  disarmForget();
   render();
   focusHeading(name);
 }
@@ -866,15 +1341,35 @@ function focusHeading(name) {
 /* Home                                                                       */
 /* ========================================================================== */
 
+/**
+ * The saved game, finished or not - the home screen offers an unfinished one
+ * as "Resume game" and a finished one as "See final result" (the pot is often
+ * still being collected when the tab reloads).
+ */
 function savedGame() {
   const raw = loadGame();
   if (!raw) return null;
   try {
-    const restored = deserialize(raw);
-    if (restored.phase === 'game-over') return null;
-    return restored;
+    const saved = deserialize(raw);
+    // deserialize vouches for the envelope, not the contents: a hand-edited
+    // save can pass its checks with hollow players and no turn, and it then
+    // resumes as a zombie game ("Turn undefined" on the resume card, a vinyl
+    // that can only apologise). Treat it exactly like corrupt JSON.
+    const hollow =
+      !Number.isInteger(saved.turn) ||
+      saved.players.some(
+        (p) =>
+          !p ||
+          typeof p.name !== 'string' ||
+          !p.name ||
+          !Array.isArray(p.timeline),
+      );
+    if (hollow) throw new TypeError('savedGame: hollow save');
+    return saved;
   } catch {
     clearGame();
+    // The stake snapshot belongs to that save; it goes with it.
+    removeStored(ACTIVE_BUYIN_KEY);
     return null;
   }
 }
@@ -883,7 +1378,10 @@ function renderHome() {
   // The deck figures ship baked into the markup so the line is honest with no
   // JS at all; this keeps them honest after the deck grows.
   const years = DECK.reduce(
-    (span, card) => [Math.min(span[0], card.year), Math.max(span[1], card.year)],
+    (span, card) => [
+      Math.min(span[0], card.year),
+      Math.max(span[1], card.year),
+    ],
     [Infinity, -Infinity],
   );
   if (Number.isFinite(years[0])) {
@@ -895,8 +1393,16 @@ function renderHome() {
   show(button, !!saved);
   if (saved) {
     const names = saved.players.map((p) => p.name).join(', ');
-    text('btn-resume-detail', `Turn ${saved.turn} - ${names}`);
+    if (saved.phase === 'game-over') {
+      text('btn-resume-title', 'See final result');
+      text('btn-resume-detail', `Game over — ${names}`);
+    } else {
+      text('btn-resume-title', 'Resume game');
+      text('btn-resume-detail', `Turn ${saved.turn} — ${names}`);
+    }
   }
+
+  show(el('home-storage-warn'), !isPersistent());
 }
 
 /* ========================================================================== */
@@ -941,13 +1447,18 @@ function loadSavedBuyin() {
   };
 }
 
-/** Rebuild the chip rows from deck.js, which is the authority on what exists. */
+/**
+ * Rebuild the chip rows from deck.js, which is the authority on what exists.
+ * The leading "All decades" / "All genres" chip ships inside each container and
+ * MUST survive the rebuild - replaceChildren without it deleted the only
+ * one-tap way back to a full deck.
+ */
 function buildChips() {
   const decadeBox = el('decade-chips');
   if (decadeBox) {
-    replaceChildren(
-      decadeBox,
-      DECADES.map((decade) => {
+    replaceChildren(decadeBox, [
+      el('btn-decades-all'),
+      ...DECADES.map((decade) => {
         const chip = clone('tpl-chip');
         if (!chip) return null;
         chip.dataset.action = 'toggle-decade';
@@ -956,13 +1467,13 @@ function buildChips() {
         fill(chip, { label: `${String(decade).slice(2)}s` });
         return chip;
       }),
-    );
+    ]);
   }
   const genreBox = el('genre-chips');
   if (genreBox) {
-    replaceChildren(
-      genreBox,
-      GENRES.map((genre) => {
+    replaceChildren(genreBox, [
+      el('btn-genres-all'),
+      ...GENRES.map((genre) => {
         const chip = clone('tpl-chip');
         if (!chip) return null;
         chip.dataset.action = 'toggle-genre';
@@ -971,7 +1482,7 @@ function buildChips() {
         fill(chip, { label: GENRE_LABELS[genre] || genre });
         return chip;
       }),
-    );
+    ]);
   }
 }
 
@@ -981,6 +1492,69 @@ const PHOTO_STATUS = {
   skipped: 'Using their initial',
   pending: 'Shrinking the photo...',
 };
+
+/**
+ * The row's control labels, in one place so the keystroke path and the render
+ * path cannot drift: renaming a player must rename what a screen reader hears
+ * on the same keystroke, not on the next roster rebuild.
+ */
+function paintRowLabels(row, draft, index) {
+  const person = (draft.name || '').trim() || `player ${index + 1}`;
+  const avatar = row.querySelector('.player-row__avatar');
+  if (avatar) {
+    avatar.setAttribute(
+      'aria-label',
+      draft.photo
+        ? `Replace the photo for ${person}`
+        : `Add a photo for ${person}`,
+    );
+  }
+  const skip = row.querySelector('[data-action="skip-photo"]');
+  if (skip) skip.setAttribute('aria-label', `Skip the photo for ${person}`);
+  const remove = row.querySelector('[data-action="remove-player"]');
+  if (remove) remove.setAttribute('aria-label', `Remove ${person}`);
+}
+
+/**
+ * The input clips silently at maxlength, so the last few characters of a long
+ * name need a visible count - "Grandma Josephine" becoming "Grandma Josephin"
+ * for the whole night should never be a surprise.
+ */
+function paintNameCount(row, draft) {
+  const count = row.querySelector('[data-field="count"]');
+  if (!count) return;
+  const length = (draft.name || '').length;
+  const near = length >= NAME_MAX - 3;
+  if (near) count.textContent = `${length}/${NAME_MAX}`;
+  show(count, near);
+}
+
+/**
+ * Two family members really can share a name, so a duplicate never blocks the
+ * start - but the pass screen's one job is naming who gets the phone, and
+ * "Alex, then Alex" deserves a heads-up while a thumb is still on the
+ * keyboard. Painted across ALL rows on every name edit, because clearing the
+ * clash in one row has to clear the note in the other.
+ */
+function paintDupeNames() {
+  const list = el('player-list');
+  if (!list) return;
+  const folded = view.setup.players.map((p) =>
+    (p.name || '').trim().toLowerCase(),
+  );
+  folded.forEach((name, index) => {
+    const row = list.children[index];
+    if (!row) return;
+    const note = row.querySelector('[data-field="dupe"]');
+    if (!note) return;
+    const twin = name
+      ? folded.findIndex((other, j) => j !== index && other === name)
+      : -1;
+    if (twin !== -1)
+      note.textContent = `Same name as player ${twin + 1} — fine if that's on purpose.`;
+    show(note, twin !== -1);
+  });
+}
 
 function renderPlayerRows() {
   const list = el('player-list');
@@ -1017,49 +1591,72 @@ function renderPlayerRows() {
     const row = list.children[index];
     if (!row) return;
     const input = row.querySelector('[data-role="player-name"]');
-    if (input && input.value !== draft.name && document.activeElement !== input) {
+    if (
+      input &&
+      input.value !== draft.name &&
+      document.activeElement !== input
+    ) {
       input.value = draft.name;
     }
 
     // Seat colours come from the same palette the engine will hand out, so the
     // face somebody sets up in row 3 is the face - and the colour - they play
     // with. Nothing is re-rolled at Shuffle & start.
-    const who = { name: draft.name, photo: draft.photo, color: seatColor(index) };
+    const who = {
+      name: draft.name,
+      photo: draft.photo,
+      color: seatColor(index),
+    };
     applySeat(row, who.color);
     const avatar = row.querySelector('.player-row__avatar');
     paintAvatar(avatar, who);
 
-    const stateName = draft.photo ? 'photo' : draft.skipped ? 'skipped' : 'none';
+    const stateName = draft.photo
+      ? 'photo'
+      : draft.skipped
+        ? 'skipped'
+        : 'none';
     row.dataset.photoState = stateName;
     const label = row.querySelector('[data-field="status"]');
-    if (label) label.textContent = draft.pending ? PHOTO_STATUS.pending : PHOTO_STATUS[stateName];
+    if (label)
+      label.textContent = draft.pending
+        ? PHOTO_STATUS.pending
+        : PHOTO_STATUS[stateName];
 
     paintSavedAvatars(row, draft, index);
 
-    const person = draft.name || `player ${index + 1}`;
-    if (avatar) {
-      avatar.setAttribute(
-        'aria-label',
-        draft.photo ? `Replace the photo for ${person}` : `Add a photo for ${person}`,
-      );
-    }
     const skip = row.querySelector('[data-action="skip-photo"]');
     pressed(skip, stateName === 'skipped');
-    if (skip) {
-      skip.textContent = stateName === 'skipped' ? 'Photo skipped' : 'Skip photo';
-      skip.setAttribute('aria-label', `Skip the photo for ${person}`);
-    }
-    const remove = row.querySelector('[data-action="remove-player"]');
-    if (remove) remove.setAttribute('aria-label', `Remove ${person}`);
-    disable(remove, drafts.length <= MIN_PLAYERS, 'At least two players');
+    if (skip)
+      skip.textContent =
+        stateName === 'skipped' ? 'Photo skipped' : 'Skip photo';
+    paintRowLabels(row, draft, index);
+    paintNameCount(row, draft);
+    disable(
+      row.querySelector('[data-action="remove-player"]'),
+      drafts.length <= MIN_PLAYERS,
+      'At least two players',
+    );
   });
 
-  text('player-count-note', `${drafts.length} player${drafts.length === 1 ? '' : 's'}`);
-  disable(el('btn-add-player'), drafts.length >= MAX_PLAYERS, 'Eight players is the maximum');
+  paintDupeNames();
+
+  text(
+    'player-count-note',
+    `${drafts.length} player${drafts.length === 1 ? '' : 's'}`,
+  );
+  disable(
+    el('btn-add-player'),
+    drafts.length >= MAX_PLAYERS,
+    'Eight players is the maximum',
+  );
 }
 
 function eligibleDeck() {
-  return filterDeck(DECK, { decades: view.setup.decades, genres: view.setup.genres });
+  return filterDeck(DECK, {
+    decades: view.setup.decades,
+    genres: view.setup.genres,
+  });
 }
 
 /**
@@ -1085,7 +1682,49 @@ function paintBuyin() {
   // caret to the end while somebody is still typing their handle.
   if (field && field.value !== buyin.handle) field.value = buyin.handle;
 
-  const pot = potFor({ amount: buyin.amount, playerCount: view.setup.players.length });
+  // Both hints below talk about "the winner", and co-op does not have one -
+  // its win screen deliberately pays nobody ("settle it together"). Mode
+  // changes reach here through renderSetup(), so the copy follows the mode
+  // radio, not just the buy-in fields.
+  const coop = view.setup.mode === 'coop';
+  const switchHint = el('buyin-switch-hint');
+  if (switchHint) {
+    switchHint.textContent = coop
+      ? 'Everyone chips in the same. Co-op has no winner — settle it together.'
+      : 'Everyone chips in the same. Winner takes the pot.';
+  }
+
+  // Live validation, in normaliseHandle's own terms: the winner screen will
+  // pay whatever that function reads out of this field, so the person typing
+  // gets shown that exact reading - or told there is none - right here, not
+  // after the game. Empty is fine (the handle is optional). In co-op the
+  // handle is not used at all, and the one thing this line must never do is
+  // promise a payout the co-op win screen was designed not to make.
+  const hint = el('buyin-venmo-hint');
+  const typed = (buyin.handle || '').trim();
+  const handle = normaliseHandle(typed);
+  if (hint) {
+    hint.dataset.tone = !coop && typed && !handle ? 'bad' : 'ok';
+    hint.textContent = !typed
+      ? ''
+      : coop
+        ? "Co-op has no single winner — you'll settle it together, so this handle isn't used."
+        : handle
+          ? `The winner screen will pay @${handle}`
+          : "That's not a Venmo handle or profile link — it won't be on the winner screen";
+    show(hint, !!typed);
+  }
+  if (field) {
+    // Validation noise over a field the mode ignores would contradict the
+    // hint, so co-op never flags the handle invalid.
+    if (!coop && typed && !handle) field.setAttribute('aria-invalid', 'true');
+    else field.removeAttribute('aria-invalid');
+  }
+
+  const pot = potFor({
+    amount: buyin.amount,
+    playerCount: view.setup.players.length,
+  });
   // potFor returns null rather than a wrong number; there is nothing honest to
   // put in the line in that case, so it says nothing.
   text('buyin-pot', pot ? pot.label : '');
@@ -1099,9 +1738,41 @@ function renderSetup() {
   text('target-cards-value', view.setup.target);
   text('mistake-limit-value', view.setup.mistakeLimit);
 
-  // How long this will take, next to the number that decides it.
-  const minutes = SESSION_MINUTES[view.setup.target];
-  text('target-cards-hint', minutes ? `≈ ${minutes} min` : '');
+  // Steppers pin at their bounds the way the roster buttons already do -
+  // a live-looking "+" that silently does nothing reads as a broken button.
+  const stepper = (action) =>
+    document.querySelector(`[data-action="${action}"]`);
+  disableStepper(stepper('target-dec'), view.setup.target <= TARGET_CHOICES[0]);
+  disableStepper(
+    stepper('target-inc'),
+    view.setup.target >= TARGET_CHOICES[TARGET_CHOICES.length - 1],
+  );
+  disableStepper(
+    stepper('mistakes-dec'),
+    view.setup.mistakeLimit <= MIN_MISTAKES,
+  );
+  disableStepper(
+    stepper('mistakes-inc'),
+    view.setup.mistakeLimit >= MAX_MISTAKES,
+  );
+  disableStepper(
+    stepper('buyin-dec'),
+    view.setup.buyin.amount <= BUYIN_MIN_CENTS,
+  );
+  disableStepper(
+    stepper('buyin-inc'),
+    view.setup.buyin.amount >= BUYIN_MAX_CENTS,
+  );
+
+  // How long this will take, next to the number that decides it. Seats scale
+  // it linearly - except co-op, where the table fills ONE timeline together.
+  text(
+    'target-cards-hint',
+    sessionEstimate(
+      view.setup.target,
+      view.setup.mode === 'coop' ? 1 : view.setup.players.length,
+    ),
+  );
 
   const streak = el('opt-streak-bonus');
   if (streak) streak.checked = view.setup.streakBonus;
@@ -1111,15 +1782,24 @@ function renderSetup() {
   if (radio) radio.checked = true;
   show(el('field-mistake-limit'), view.setup.mode === 'coop');
 
-  for (const chip of document.querySelectorAll('#decade-chips .chip')) {
+  // [data-decade] / [data-genre] so the leading All-chip - a plain button, not
+  // a toggle - never grows an aria-pressed it does not mean.
+  for (const chip of document.querySelectorAll(
+    '#decade-chips .chip[data-decade]',
+  )) {
     pressed(chip, view.setup.decades.includes(Number(chip.dataset.decade)));
   }
-  for (const chip of document.querySelectorAll('#genre-chips .chip')) {
+  for (const chip of document.querySelectorAll(
+    '#genre-chips .chip[data-genre]',
+  )) {
     pressed(chip, view.setup.genres.includes(chip.dataset.genre));
   }
 
   const eligible = eligibleDeck();
   text('eligible-count-value', eligible.length);
+  // "0 songs match" in success green sat directly above two red warnings.
+  const match = el('eligible-count');
+  if (match) match.dataset.tone = eligible.length === 0 ? 'bad' : 'ok';
 
   // The foldout's summary. Folding may hide the controls; it must never hide the
   // fact that a filter is on, or somebody wonders for a whole game why the deck
@@ -1136,13 +1816,20 @@ function renderSetup() {
     allGenres ? 'all genres' : plural(genres.length, 'genre', 'genres'),
     `${eligible.length} songs`,
   ];
+  // The playback select lives in this same foldout, and a non-default source
+  // IS something switched on: without a trace here a table persisted on
+  // Spotify reads identical to the preview default until the first card
+  // plays silence.
+  if (settings.playbackSource !== 'preview')
+    parts.push(`${SOURCE_LABELS[settings.playbackSource]} links`);
   text('setup-more-state', parts.join(' · '));
 
   // In co-op there is one timeline, so the group needs far fewer cards than
   // four people racing to ten each.
   const seats = view.setup.mode === 'coop' ? 1 : view.setup.players.length;
   const comfortable = seats * view.setup.target + DECK_SLACK;
-  const dealable = view.setup.mode === 'coop' ? 2 : view.setup.players.length + 1;
+  const dealable =
+    view.setup.mode === 'coop' ? 2 : view.setup.players.length + 1;
   show(el('deck-warning'), eligible.length < comfortable);
 
   // Two ways to be blocked, one line to say which. The photo one names the
@@ -1150,12 +1837,13 @@ function renderSetup() {
   // not want to take must never be the reason a family cannot play.
   const outstanding = photosOutstanding();
   let blocked = null;
-  if (eligible.length < dealable) blocked = 'Not enough songs match these filters';
+  if (eligible.length < dealable)
+    blocked = 'Not enough songs match these filters';
   else if (outstanding > 0) {
     blocked =
       outstanding === 1
-        ? 'One player still needs a photo - or tap Skip photo for them'
-        : `${outstanding} players still need a photo - or tap Skip photo for them`;
+        ? 'One player still needs a photo — or tap Skip photo for them'
+        : `${outstanding} players still need a photo — or tap Skip photo for them`;
   }
   const reason = el('setup-photo-reason');
   if (reason) {
@@ -1163,6 +1851,8 @@ function renderSetup() {
     show(reason, !!blocked);
   }
   disable(el('btn-start-game'), blocked !== null, blocked || undefined);
+
+  show(el('setup-storage-warn'), !isPersistent());
 }
 
 function startGame() {
@@ -1170,8 +1860,24 @@ function startGame() {
   // The engine hands out the seat colour; the photo rides along so every screen
   // can read a player's face straight off game state instead of a side map that
   // a reload would lose.
-  const roster = view.setup.players.map((draft, i) => ({
-    name: (draft.name || '').trim() || `Player ${i + 1}`,
+  //
+  // The blank-name fallback dedupes the same way freePlaceholderName does for
+  // Add player: index-based "Player i+1" minted a second "Player 2" whenever a
+  // row had been removed and another blanked, and the pass screen then read
+  // "PASS THE PHONE TO Player 2 - then Player 2" for the whole game.
+  const takenNames = new Set(
+    view.setup.players
+      .map((draft) => (draft.name || '').trim().toLowerCase())
+      .filter((name) => name),
+  );
+  const fallbackName = () => {
+    let n = 1;
+    while (takenNames.has(`player ${n}`)) n += 1;
+    takenNames.add(`player ${n}`);
+    return `Player ${n}`;
+  };
+  const roster = view.setup.players.map((draft) => ({
+    name: (draft.name || '').trim() || fallbackName(),
     photo: draft.photo,
   }));
   // Starting a game is the moment a line-up is real, so this is where the guest
@@ -1184,22 +1890,28 @@ function startGame() {
       photo: draft.photo,
       skipped: !!draft.skipped,
     });
-    if (draft.photo) rememberAvatar(draft.name, draft.photo);
+    if (draft.photo) fileAvatar(draft.name, draft.photo);
   }
   const dealable = view.setup.mode === 'coop' ? 2 : roster.length + 1;
   if (eligible.length < dealable) {
-    alertUser('Not enough songs match these filters. Turn some decades or genres back on.');
+    alertUser(
+      'Not enough songs match these filters. Turn some decades or genres back on.',
+    );
     return;
   }
   if (!rosterReady()) {
-    alertUser('Everyone needs a photo, or a tap on Skip photo, before the game can start.');
+    alertUser(
+      'Everyone needs a photo, or a tap on Skip photo, before the game can start.',
+    );
     return;
   }
 
   rememberRoster();
   const params = new URLSearchParams(window.location.search);
   const forced = Number.parseInt(params.get('seed') || '', 10);
-  const seed = Number.isInteger(forced) ? forced : (Date.now() ^ Math.floor(Math.random() * 1e9)) | 0;
+  const seed = Number.isInteger(forced)
+    ? forced
+    : (Date.now() ^ Math.floor(Math.random() * 1e9)) | 0;
 
   try {
     state = createGame({
@@ -1212,19 +1924,28 @@ function startGame() {
       seed,
     });
   } catch (error) {
-    alertUser(error && error.message ? error.message : 'That game could not be set up.');
+    alertUser(
+      error && error.message ? error.message : 'That game could not be set up.',
+    );
     return;
   }
   // The stake is remembered per device, not per game: the same reunion plays
   // several rounds and nobody wants to retype a Venmo handle on a phone each
   // time. Normalised on the way out so what we store is a handle, not whatever
   // shape it was pasted in.
-  saveBuyin({
+  const stake = {
     enabled: view.setup.buyin.enabled,
     amount: view.setup.buyin.amount,
     handle: normaliseHandle(view.setup.buyin.handle),
-  });
-  persist();
+  };
+  saveBuyin(stake);
+  // ...and snapshotted per game: the winner screen pays from THIS copy, so a
+  // buy-in fiddled with in a later setup draft - one that never started -
+  // cannot rewrite the pot of the game actually being played. Cleared with the
+  // game (play-again), replaced here on every start.
+  setStored(ACTIVE_BUYIN_KEY, stake);
+  saveSetupDraft();
+  persist(true);
   beginTurn();
 }
 
@@ -1239,21 +1960,35 @@ function beginTurn() {
     if (settings.skipPass) return enterPlay();
     return showScreen('pass');
   }
-  if (state.phase === 'revealed' || state.phase === 'turn-end') return showReveal();
+  if (state.phase === 'revealed' || state.phase === 'turn-end')
+    return showReveal();
   return showScreen('play');
 }
 
 function enterPlay() {
   resetCardAudio();
   showScreen('play');
-  const player = currentPlayer(state);
-  if (!player) return;
+  const active = currentPlayer(state);
+  if (!active) return;
   // Politely, on the existing status region: the handover is the one thing a
   // player who cannot see the rail still has to be told about.
   const upNext = nextPlayer(state);
   announce(
-    `${player.name}'s turn. Turn ${state.turn}.${upNext ? ` ${upNext.name} is next.` : ''}`,
+    `${active.name}'s turn. Turn ${state.turn}.${upNext ? ` ${upNext.name} is next.` : ''}`,
   );
+  // With the pass screen skipped there is no handoff tap to ride, so try to
+  // start the song unprompted - quiet on failure, because an autoplay block is
+  // the browser being a browser, not an error worth a red banner; the play
+  // button sits there exactly as before. Skipped when the player could buy a
+  // card: drawing would slam that window shut before they ever saw it open.
+  if (
+    settings.fastFlow &&
+    settings.skipPass &&
+    state.phase === 'turn-start' &&
+    buyBlockedReason(state) !== null
+  ) {
+    toggleAudio(true).catch(() => {});
+  }
 }
 
 /**
@@ -1275,8 +2010,113 @@ function ensureCard() {
   render();
 }
 
+/**
+ * Tap-burst guards on the two transitions that swap a button out from under a
+ * finger (Place here -> Next player, Play again -> the setup form). A tap
+ * inside the window is dropped silently - no flash, no disabled style, because
+ * the button is fine; it is the finger that has not caught up.
+ */
+let revealTapGuardUntil = 0;
+let setupTapGuardUntil = 0;
+
+/**
+ * Advanced and expert gate the placement on a vote that has not happened yet
+ * when the card flips: `confirmations` still holds nulls. Until both boxes are
+ * voted there IS no verdict, and the banner, the tint and the cue must not
+ * announce one - the engine recomputes the outcome the moment the votes land.
+ */
+function verdictPending(outcome) {
+  if (!state || !gated()) return false;
+  if (!outcome || outcome.kind !== 'placement') return false;
+  if (state.phase !== 'revealed') return false;
+  return (
+    state.confirmations.title === null || state.confirmations.artist === null
+  );
+}
+
+/**
+ * The self-advancing reveal. Live playtesting's verdict on the old flow was
+ * "slow and disjointed": every turn demanded a Next-player tap even when the
+ * table had already moved on. With fast flow on, a reveal that arrives with
+ * nothing left to decide lingers AUTONEXT_MS and then taps Next player itself
+ * - the button shows the time draining and says so to assistive tech. The
+ * countdown arms in exactly one place: on entering the reveal with no vote
+ * pending (showReveal). After that, ANY pointerdown or keydown on the screen
+ * cancels it for the rest of the turn - card face, verdict, strip, a vote
+ * chip, blank paper, a Tab press - because interaction means the table is
+ * still using the reveal. It never re-arms, not even when a vote resolves:
+ * the tap that resolved it was the table engaged. The one carve-out is Next
+ * player itself, whose tap IS the advance the timer was about to perform.
+ */
+let autoNextTimer = null;
+
+function armAutoNext() {
+  cancelAutoNext();
+  if (!settings.fastFlow || !state) return;
+  const outcome = state.outcome;
+  if (!outcome) return;
+  // Never count down over a decision: gated modes wait for the title/artist
+  // vote, and a claimed "I can name it" waits for the group's verdict.
+  if (verdictPending(outcome)) return;
+  if (
+    state.phase === 'revealed' &&
+    outcome.kind === 'placement' &&
+    state.claimIdentify &&
+    outcome.identifyConfirmed === null
+  )
+    return;
+  const button = el('btn-next-player');
+  if (button) {
+    button.dataset.autonext = 'true';
+    // The drain animation carries no text and is removed entirely under
+    // reduced motion, so the countdown also names itself on the button...
+    button.setAttribute('aria-label', 'Next player — advancing automatically');
+  }
+  // ...and announces itself once on the polite live region.
+  announce(
+    `Next player in ${AUTONEXT_MS / 1000} seconds — tap anywhere to stay.`,
+  );
+  autoNextTimer = window.setTimeout(() => {
+    autoNextTimer = null;
+    if (view.screen === 'reveal') nextTurn();
+  }, AUTONEXT_MS);
+}
+
+function cancelAutoNext() {
+  if (autoNextTimer !== null) {
+    window.clearTimeout(autoNextTimer);
+    autoNextTimer = null;
+  }
+  const button = el('btn-next-player');
+  if (button) {
+    delete button.dataset.autonext;
+    // Back to the visible text as the accessible name.
+    button.removeAttribute('aria-label');
+  }
+}
+
+/**
+ * The cancel side of the fast-flow promise, at screen level: while the
+ * countdown is armed, ANY pointer contact with the reveal stops it. Wired to
+ * the #reveal section itself (see init), so no other screen pays for the
+ * check. Next player is the one exception - cancelling on its pointerdown
+ * would also let a tap-burst tap the guard drops (see revealTapGuardUntil)
+ * kill the timed advance that rescues exactly that dropped tap.
+ */
+function onRevealPointerDown(event) {
+  if (autoNextTimer === null) return;
+  const target = event.target;
+  if (
+    target &&
+    typeof target.closest === 'function' &&
+    target.closest('#btn-next-player')
+  )
+    return;
+  cancelAutoNext();
+}
+
 function showReveal() {
-  view.qrAlt = false;
+  revealTapGuardUntil = Date.now() + TAP_GUARD_MS;
   showScreen('reveal');
   runFlip();
   // One cue per reveal, fired on the transition rather than in renderReveal -
@@ -1284,6 +2124,10 @@ function showReveal() {
   // and a verdict sound that replayed each time would be maddening.
   const outcome = state && state.outcome;
   if (!outcome) return;
+  armAutoNext();
+  // In gated modes the verdict is not settled yet; confirmToggle fires the cue
+  // when the vote resolves it.
+  if (verdictPending(outcome)) return;
   if (outcome.accepted) sfx.win();
   else sfx.lose();
   // The token cue rides on top, and only when the pool actually moved: a claim
@@ -1308,14 +2152,20 @@ function runFlip() {
 }
 
 function showWin() {
-  clearGame();
   showScreen('win');
   const result = state && state.result;
-  const lost = !result || result.coopWon === false || result.winnerIds.length === 0;
-  if (!lost && !motionIsReduced()) {
+  const lost =
+    !result || result.coopWon === false || result.winnerIds.length === 0;
+  // An early end with the table level is nobody's win: raining confetti on it
+  // celebrated whichever tied player the layout happened to put first.
+  const levelEnd =
+    !!result && result.reason === 'ended' && result.winnerIds.length > 1;
+  if (!lost && !levelEnd && !motionIsReduced()) {
     const canvas = el('confetti');
     if (view.confettiStop) view.confettiStop();
-    view.confettiStop = canvas ? burst(canvas, { count: 160, duration: 4000 }) : null;
+    view.confettiStop = canvas
+      ? burst(canvas, { count: 160, duration: 4000 })
+      : null;
   }
 }
 
@@ -1323,8 +2173,112 @@ function endGame() {
   stopAudio();
   dispatch({ type: ACTIONS.END_GAME });
   closeSheets();
-  clearGame();
   showWin();
+}
+
+/**
+ * The armed-tap guard on the menu's End game row. The first tap arms it and
+ * relabels it; only a second tap while armed actually ends the game. ~4s (or
+ * closing the sheet) puts it back, so a mis-tap costs nothing.
+ */
+let endGameArmTimer = null;
+
+function paintEndGameArm() {
+  const button = el('btn-end-game');
+  if (button)
+    button.textContent = view.endGameArmed
+      ? 'Tap again to end the game'
+      : 'End game';
+}
+
+function disarmEndGame() {
+  if (endGameArmTimer !== null) {
+    clearTimeout(endGameArmTimer);
+    endGameArmTimer = null;
+  }
+  if (!view.endGameArmed) return;
+  view.endGameArmed = false;
+  paintEndGameArm();
+}
+
+function armEndGame() {
+  view.endGameArmed = true;
+  paintEndGameArm();
+  announce(
+    'Tap End game again to end it for everyone. The game cannot be resumed.',
+  );
+  if (endGameArmTimer !== null) clearTimeout(endGameArmTimer);
+  endGameArmTimer = window.setTimeout(() => {
+    endGameArmTimer = null;
+    disarmEndGame();
+  }, 4000);
+}
+
+/**
+ * The same guard on Shuffle & start, armed only while an UNFINISHED game is in
+ * the save slot - starting would silently destroy it (a finished save has had
+ * its moment and is replaced without ceremony).
+ */
+let startArmTimer = null;
+
+function paintStartArm() {
+  const button = el('btn-start-game');
+  if (button) {
+    button.textContent = view.startArmed
+      ? 'Tap again to replace the saved game'
+      : 'Shuffle & start';
+  }
+}
+
+function disarmStartGame() {
+  if (startArmTimer !== null) {
+    clearTimeout(startArmTimer);
+    startArmTimer = null;
+  }
+  if (!view.startArmed) return;
+  view.startArmed = false;
+  paintStartArm();
+}
+
+function armStartGame() {
+  view.startArmed = true;
+  paintStartArm();
+  announce(
+    'Starting replaces the saved game. Tap Shuffle & start again to go ahead.',
+  );
+  if (startArmTimer !== null) clearTimeout(startArmTimer);
+  startArmTimer = window.setTimeout(() => {
+    startArmTimer = null;
+    disarmStartGame();
+  }, 4000);
+}
+
+/**
+ * And on the guest list's forget crosses: one tap deletes a person AND their
+ * saved photos with no undo to offer, so the first tap only arms that
+ * person's cross and says what a second one will do.
+ */
+let forgetArmTimer = null;
+
+function disarmForget() {
+  if (forgetArmTimer !== null) {
+    clearTimeout(forgetArmTimer);
+    forgetArmTimer = null;
+  }
+  if (view.forgetArmed === null) return;
+  view.forgetArmed = null;
+  paintPeople();
+}
+
+function armForget(name) {
+  view.forgetArmed = name;
+  paintPeople();
+  announce(`Tap the cross again to forget ${name}. Their saved photos go too.`);
+  if (forgetArmTimer !== null) clearTimeout(forgetArmTimer);
+  forgetArmTimer = window.setTimeout(() => {
+    forgetArmTimer = null;
+    disarmForget();
+  }, 4000);
 }
 
 function goHome() {
@@ -1344,12 +2298,27 @@ function goHome() {
 function player() {
   if (!audioPlayer) {
     audioPlayer = getPlayer();
-    audioPlayer.subscribe(paintAudio);
+    audioPlayer.subscribe(onAudioEvent);
   }
   return audioPlayer;
 }
 
+/**
+ * Every player event repaints the ring; 'ended' also rewinds it. A clip that
+ * runs out on its own used to freeze at '0s' under copy still claiming the
+ * song was playing - the honest state is "over, tap to hear it again".
+ */
+function onAudioEvent(snapshot) {
+  paintAudio();
+  if (!snapshot || snapshot.type !== 'ended') return;
+  if (view.screen !== 'play' || !view.audio.resolved) return;
+  audioPlayer.seek(0);
+  view.audio.status = 'That was the 30 seconds. Play it again?';
+  render();
+}
+
 function stopAudio() {
+  stopDemoTimer();
   if (audioPlayer) audioPlayer.stop();
 }
 
@@ -1363,17 +2332,63 @@ function resetCardAudio() {
     resolved: null,
     failed: false,
     linksShown: false,
-    status: !state || !state.card
-      ? 'Tap play to draw the mystery song.'
-      : settings.sound
-        ? 'Tap play when everyone is listening.'
-        : 'Sound is off. Turn it on in the menu.',
+    /** The offline stand-in clock; see startDemoTimer(). */
+    demo: null,
+    status:
+      !state || !state.card
+        ? 'Tap play to draw the mystery song.'
+        : settings.sound
+          ? 'Tap play when everyone is listening.'
+          : 'Sound is off. Turn it on in the menu.',
   };
-  view.qrAlt = false;
 }
 
-/** Tap-to-play. Every path through here starts inside a user gesture. */
-async function toggleAudio() {
+/* The silent 30-second demo timer the home screen promises offline. It runs
+   the existing ring from a wall clock, keeps skip and the streaming links
+   reachable, and never pretends a song is coming. */
+let demoTimerTick = null;
+
+function stopDemoTimer() {
+  if (demoTimerTick !== null) {
+    clearInterval(demoTimerTick);
+    demoTimerTick = null;
+  }
+  if (view.audio.demo) view.audio.demo = null;
+}
+
+function startDemoTimer() {
+  stopDemoTimer();
+  view.audio.resolving = false;
+  // failed=true keeps the fallback block (links + skip) on screen, exactly as
+  // a failed preview would; only the copy differs, because this one is honest
+  // about why.
+  view.audio.failed = true;
+  view.audio.demo = { startedAt: performance.now() };
+  view.audio.status = 'No connection — using a silent 30s timer.';
+  render();
+  demoTimerTick = window.setInterval(() => {
+    const demo = view.audio.demo;
+    if (!demo) {
+      stopDemoTimer();
+      return;
+    }
+    if ((performance.now() - demo.startedAt) / 1000 >= PREVIEW_SECONDS) {
+      stopDemoTimer();
+      view.audio.status =
+        "Time's up — place your best guess, or skip this card.";
+      render();
+      return;
+    }
+    paintAudio();
+  }, 250);
+}
+
+/**
+ * Tap-to-play. Every path through here starts inside a user gesture - except
+ * the fast-flow autoplay attempt from enterPlay, which passes `quiet` so an
+ * autoplay block leaves the normal tap-to-play UI instead of a failure banner.
+ */
+async function toggleAudio(quiet = false) {
   // Everything from here to the play() call must stay synchronous. iOS grants
   // permission to start audio only inside a user gesture, and the first await
   // hands control back to the event loop and throws that permission away - the
@@ -1397,14 +2412,45 @@ async function toggleAudio() {
     return;
   }
 
-  if (p.playing) {
+  // "Playing" in this tick can be the ~10ms unlock buffer, not the song: on
+  // the first-ever tap with the card already drawn (a gap tap or a claim drew
+  // it), nothing has stopped that buffer yet, and pausing IT swallowed the
+  // tap. A real preview is exactly a src set through play() - unlock() loads
+  // its silence without touching src.
+  if (p.playing && p.src && !/^data:/.test(p.src)) {
     p.pause();
+    // Say so. The status line kept reading "Playing the preview." over a
+    // frozen countdown and a button already relabelled "Play song" - the one
+    // line on the screen stating a falsehood. Written here, on the deliberate
+    // pause only, so the failure and fallback copies are never overwritten.
+    //
+    // The bump matters as much as the copy: this pause also rejects any play()
+    // still settling from an EARLIER call (the fast-flow autostart, a resume)
+    // with an AbortError the player deliberately reports as success. Without a
+    // new token that stale continuation would stamp "Playing the preview."
+    // right back over this line - a paused, silent player captioned as playing
+    // until the next tap.
+    view.audio.token += 1;
+    view.audio.status = 'Paused — tap play to continue.';
+    render();
     return;
   }
   if (view.audio.resolved && view.audio.resolved.previewUrl) {
+    // Same token guard as the paths below: a pause taken while this play()
+    // settles must win the last word on the status line.
+    const resumeToken = view.audio.token;
     const started = await p.play(view.audio.resolved.previewUrl);
-    if (!started) failAudio('That preview would not play here.');
-    else warmNextCard();
+    if (resumeToken !== view.audio.token) return;
+    if (!started && !quiet) failAudio('That preview would not play here.');
+    else if (started) {
+      // The resume must speak too, or the paused copy above outlives the
+      // pause - and, as on the paths below, a retry that works clears the
+      // failure so the links (title included) do not linger over a song.
+      view.audio.failed = false;
+      view.audio.status = 'Playing the preview.';
+      render();
+      warmNextCard();
+    }
     return;
   }
 
@@ -1420,8 +2466,9 @@ async function toggleAudio() {
     // its status would land on the NEXT player's screen, about a card they have
     // not heard. The slow path already guarded this; the fast one did not.
     if (quickToken !== view.audio.token) return;
-    if (!started) failAudio('That preview would not play here.');
-    else {
+    if (!started) {
+      if (!quiet) failAudio('That preview would not play here.');
+    } else {
       // A retry that works has to clear the failure, or the song plays under a
       // banner still saying it would not - and, worse, under the streaming
       // links, which spell out the title nobody has guessed yet.
@@ -1456,8 +2503,9 @@ async function toggleAudio() {
   view.audio.resolved = track;
   const started = await p.play(track.previewUrl);
   if (token !== view.audio.token) return;
-  if (!started) failAudio('That preview would not play here.');
-  else {
+  if (!started) {
+    if (!quiet) failAudio('That preview would not play here.');
+  } else {
     // See the note on the fast path: a working retry must clear the failure, or
     // the streaming links stay on screen with the title in them.
     view.audio.failed = false;
@@ -1468,6 +2516,13 @@ async function toggleAudio() {
 }
 
 function failAudio(message) {
+  // Offline is not a failure to apologise for - the home screen promises a
+  // demo timer, so a fetch that died with no connection delivers one instead
+  // of pointing at three fallbacks that all need the internet.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    startDemoTimer();
+    return;
+  }
   view.audio.resolving = false;
   view.audio.failed = true;
   view.audio.status = `${message} Use the links below, or skip this card.`;
@@ -1485,9 +2540,20 @@ function replayAudio() {
   const p = player();
   p.seek(0);
   if (view.audio.resolved && view.audio.resolved.previewUrl) {
+    // The toggle paths' token guard, for the same reason: a vinyl tap that
+    // pauses while this replay settles must not be talked over.
+    const token = view.audio.token;
     p.play(view.audio.resolved.previewUrl)
       .then((started) => {
+        if (token !== view.audio.token) return;
         if (!started) failAudio('That preview would not play here.');
+        else {
+          // A replay taken while paused (or after the 30s ran out) is playing
+          // again - the status has to follow, same as the resume path.
+          view.audio.failed = false;
+          view.audio.status = 'Playing the preview.';
+          render();
+        }
       })
       .catch(() => failAudio('That preview would not play here.'));
   } else {
@@ -1501,19 +2567,62 @@ function replayAudio() {
  */
 function paintAudio() {
   if (view.screen !== 'play') return;
+  const ring = el('countdown-ring');
+  const button = el('btn-play-song');
+  const badge = button ? button.querySelector('.disc__time') : null;
+
+  // Link modes play nothing on this phone, so a countdown is a promise the
+  // vinyl cannot keep - the hub names the service instead. (This is also what
+  // kept the unlock buffer's 10ms duration from arithmetic-ing "1s" into view.)
+  if (settings.playbackSource !== 'preview') {
+    text('countdown-value', SOURCE_LABELS[settings.playbackSource] || '');
+    text('countdown-unit', '');
+    if (badge) badge.dataset.mode = 'link';
+    if (ring) ring.style.setProperty('--ring-progress', '1');
+    pressed(button, false);
+    text('btn-play-label', 'Play song');
+    return;
+  }
+  if (badge) delete badge.dataset.mode;
+  text('countdown-unit', 's');
+
+  // The offline demo timer drives the same ring from a wall clock.
+  const demo = view.audio.demo;
+  if (demo) {
+    const remaining = Math.max(
+      0,
+      PREVIEW_SECONDS - (performance.now() - demo.startedAt) / 1000,
+    );
+    text('countdown-value', Math.ceil(remaining));
+    if (ring)
+      ring.style.setProperty(
+        '--ring-progress',
+        String(remaining / PREVIEW_SECONDS),
+      );
+    pressed(button, false);
+    text('btn-play-label', 'Play song');
+    return;
+  }
+
   const p = audioPlayer;
   const playing = !!(p && p.playing);
-  const duration = p && p.duration > 0 ? p.duration : PREVIEW_SECONDS;
-  const elapsed = p ? Math.min(p.currentTime, duration) : 0;
+  // The unlock buffer's 10ms duration must never reach the arithmetic - the
+  // ring is 30s until a real clip says otherwise. unlock() loads its silence
+  // without touching src, so while it runs `src` is still empty: a real clip
+  // is a non-empty, non-data: src (this is what kept the badge off "1s").
+  const real = !!(p && p.duration > 0 && p.src && !/^data:/.test(p.src));
+  const duration = real ? p.duration : PREVIEW_SECONDS;
+  const elapsed = real ? Math.min(p.currentTime, duration) : 0;
   const remaining = Math.max(0, duration - elapsed);
 
   text('countdown-value', Math.ceil(remaining));
-  const ring = el('countdown-ring');
-  if (ring) ring.style.setProperty('--ring-progress', String(remaining / duration));
-
-  const button = el('btn-play-song');
+  if (ring)
+    ring.style.setProperty('--ring-progress', String(remaining / duration));
   pressed(button, playing);
-  text('btn-play-label', playing ? 'Pause' : view.audio.resolving ? 'Loading' : 'Play song');
+  text(
+    'btn-play-label',
+    playing ? 'Pause' : view.audio.resolving ? 'Loading' : 'Play song',
+  );
 }
 
 /* ========================================================================== */
@@ -1524,7 +2633,10 @@ function base64url(value) {
   const bytes = new TextEncoder().encode(value);
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
 }
 
 /**
@@ -1532,7 +2644,9 @@ function base64url(value) {
  *
  * The payload is built field by field on purpose: spreading the card would put
  * `year` on another phone's screen, which is the one thing this game cannot
- * survive.
+ * survive. `s` is the table's playback source, so a game set to Spotify hands
+ * the scanning phone a streaming link instead of the preview player - still no
+ * year, and the title only inside the link the mode exists to open.
  */
 function listenUrl(card, turnNumber) {
   const payload = {
@@ -1540,6 +2654,10 @@ function listenUrl(card, turnNumber) {
     t: typeof card.title === 'string' ? card.title : '',
     a: typeof card.artist === 'string' ? card.artist : '',
     n: turnNumber,
+    s:
+      settings.playbackSource !== 'preview'
+        ? settings.playbackSource
+        : undefined,
   };
   const dir = window.location.pathname.replace(/[^/]*$/, '');
   return `${window.location.origin}${dir}listen.html#${base64url(JSON.stringify(payload))}`;
@@ -1547,64 +2665,44 @@ function listenUrl(card, turnNumber) {
 
 function isLoopback() {
   const host = window.location.hostname;
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host === '[::1]'
+  );
 }
-
-/** Kept so the file:// note can be restored after the loopback hint overwrites it. */
-let fileNoteHtml = '';
 
 function paintQr() {
   const box = el('qr-code');
   const note = el('qr-file-note');
-  const altBtn = el('btn-qr-alt');
-  const altWarn = el('qr-alt-warn');
   if (!box) return;
   // An empty white frame reads as a broken image, so the frame goes with the code.
   const frame = box.closest('.qr__frame');
 
   const card = state && state.card;
-  const offline = window.location.protocol === 'file:';
 
-  show(altBtn, offline);
-  pressed(altBtn, view.qrAlt);
-  show(altWarn, offline && view.qrAlt);
-
-  // Nothing has been drawn yet. Hiding the whole block would be tidier, but it
-  // also hides the single best feature of the game from anyone who has not
-  // played before - they never learn they can listen on their own phone. So the
-  // block stays, the frame goes (an empty white square reads as broken), and the
-  // caption explains why the code is not here yet. Drawing eagerly instead is
-  // not an option: it would close the buy-a-card window, which is only open
-  // until the deck is touched.
-  show(el('qr-block'), true);
+  // Nothing has been drawn yet, so there is nothing to scan - and a "Scan to
+  // play it" caption floating over no code read as something broken. The whole
+  // block waits for the draw. (Drawing eagerly instead is not an option: it
+  // would close the buy-a-card window, which is only open until the deck is
+  // touched.)
+  show(el('qr-block'), !!card);
   if (!card) {
-    // Caption only: the block's own heading already says what the code is for,
-    // and an extra "it will appear shortly" note just adds a boxed line that
-    // lands on the scroll fold and gets sliced in half.
     box.textContent = '';
     show(frame, false);
     show(note, false);
     return;
   }
 
-  if (offline && !view.qrAlt) {
-    // A listen.html URL off the local disk is unreachable from any other phone,
-    // so a code here would just be a dead end someone keeps scanning.
-    box.textContent = '';
-    show(frame, false);
-    if (note) note.innerHTML = fileNoteHtml;
-    show(note, true);
-    return;
-  }
-
-  const target = offline
-    ? `https://www.youtube.com/results?search_query=${encodeURIComponent(
-        `${card.title || ''} ${card.artist || ''}`.trim(),
-      )}`
-    : listenUrl(card, state.turn);
+  const target = listenUrl(card, state.turn);
 
   try {
-    box.innerHTML = qrSvg(target, { margin: 3, dark: '#0b0616', light: '#ffffff' });
+    box.innerHTML = qrSvg(target, {
+      margin: 3,
+      dark: '#0b0616',
+      light: '#ffffff',
+    });
     const svg = box.querySelector('svg');
     show(frame, !!svg);
     if (svg) {
@@ -1620,7 +2718,7 @@ function paintQr() {
   }
 
   if (note) {
-    if (!offline && isLoopback()) {
+    if (isLoopback()) {
       note.textContent =
         'This address only works on this device. Run "npm run music" and use the Wi-Fi address it prints so everyone can scan.';
       show(note, true);
@@ -1640,7 +2738,8 @@ function gapLabel(gap) {
 
 /** The same idea in as few characters as possible - the hint line is narrow. */
 function gapShort(gap) {
-  if (gap.left && gap.right) return `between ${gap.left.year} and ${gap.right.year}`;
+  if (gap.left && gap.right)
+    return `between ${gap.left.year} and ${gap.right.year}`;
   if (gap.right) return `before ${gap.right.year}`;
   if (gap.left) return `after ${gap.left.year}`;
   return 'as the first card';
@@ -1699,10 +2798,16 @@ function paintStrip(strip, gaps, timeline, selectedIndex) {
 function scrollIntoStrip(strip, node) {
   if (typeof strip.scrollTo !== 'function') return;
   const left = node.offsetLeft - strip.clientWidth / 2 + node.offsetWidth / 2;
-  const target = Math.max(0, Math.min(left, strip.scrollWidth - strip.clientWidth));
+  const target = Math.max(
+    0,
+    Math.min(left, strip.scrollWidth - strip.clientWidth),
+  );
   if (Math.abs(strip.scrollLeft - target) < 4) return;
   try {
-    strip.scrollTo({ left: target, behavior: motionIsReduced() ? 'auto' : 'smooth' });
+    strip.scrollTo({
+      left: target,
+      behavior: motionIsReduced() ? 'auto' : 'smooth',
+    });
   } catch {
     strip.scrollLeft = target;
   }
@@ -1730,7 +2835,8 @@ function rankOf(row) {
  */
 function seatLabel(row, mode) {
   const parts = [row.name];
-  if (mode !== 'coop') parts.push(`${row.cards} card${row.cards === 1 ? '' : 's'}`);
+  if (mode !== 'coop')
+    parts.push(`${row.cards} card${row.cards === 1 ? '' : 's'}`);
   if (row.isActive) parts.push('playing now');
   else if (row.isNext) parts.push('up next');
   if (row.isLeader) parts.push('leading');
@@ -1769,7 +2875,10 @@ function paintRoster(seats, team) {
 
   const key = rows.map((row) => row.playerId).join('|');
   if (seats.dataset.rosterKey !== key) {
-    replaceChildren(seats, rows.map(() => clone('tpl-roster-chip')));
+    replaceChildren(
+      seats,
+      rows.map(() => clone('tpl-roster-chip')),
+    );
     seats.dataset.rosterKey = key;
   }
 
@@ -1831,14 +2940,18 @@ function scrollSeatIntoView(seats, chip, nextChip) {
   if (inView(chip) && (!nextChip || inView(nextChip))) return;
   // Snap positions are start-aligned, offset by the scroll padding - which is
   // the container's own inline padding, so the first chip's is exactly 0.
-  const pad = Number.parseFloat(window.getComputedStyle(seats).paddingLeft) || 0;
+  const pad =
+    Number.parseFloat(window.getComputedStyle(seats).paddingLeft) || 0;
   const target = Math.max(
     0,
     Math.min(chip.offsetLeft - pad, seats.scrollWidth - seats.clientWidth),
   );
   if (Math.abs(left - target) < 2) return;
   try {
-    seats.scrollTo({ left: target, behavior: motionIsReduced() ? 'auto' : 'smooth' });
+    seats.scrollTo({
+      left: target,
+      behavior: motionIsReduced() ? 'auto' : 'smooth',
+    });
   } catch {
     seats.scrollLeft = target;
   }
@@ -1856,7 +2969,10 @@ function renderStandings() {
         node.dataset.rank = rankOf(row);
         node.dataset.leader = row.isLeader ? 'true' : 'false';
         applySeat(node, row.color);
-        node.style.setProperty('--fill', meterWidth(row.cards, state.targetCards));
+        node.style.setProperty(
+          '--fill',
+          meterWidth(row.cards, state.targetCards),
+        );
         paintAvatar(node.querySelector('.standing__avatar'), row);
         fill(node, {
           name: row.name,
@@ -1864,7 +2980,10 @@ function renderStandings() {
           target: state.targetCards,
           flag: row.isActive ? 'Playing now' : row.isNext ? 'Up next' : '',
         });
-        buildTokenPills(node.querySelector('[data-field="tokens"]'), row.tokens);
+        buildTokenPills(
+          node.querySelector('[data-field="tokens"]'),
+          row.tokens,
+        );
         return node;
       }),
     );
@@ -1882,7 +3001,10 @@ function renderStandings() {
       limit: state.mistakeLimit,
     });
     coop.style.setProperty('--fill', meterWidth(cards, state.targetCards));
-    buildTokenPills(coop.querySelector('[data-field="tokens"]'), state.sharedTokens);
+    buildTokenPills(
+      coop.querySelector('[data-field="tokens"]'),
+      state.sharedTokens,
+    );
   }
 }
 
@@ -1892,7 +3014,18 @@ function renderStandings() {
 
 function paintTokens(list, count, cap) {
   if (!list) return;
-  const pills = list.querySelectorAll('.token-pill');
+  // The markup ships the classic five pills; the cap is the engine's to set
+  // (co-op holds six), so the strip is rebuilt whenever the two disagree -
+  // restyling five pills for a six-token pool made 5 and 6 indistinguishable
+  // on the one screen where spend decisions happen.
+  let pills = list.querySelectorAll('.token-pill');
+  if (pills.length !== cap) {
+    replaceChildren(
+      list,
+      Array.from({ length: cap }, () => clone('tpl-token-pill')),
+    );
+    pills = list.querySelectorAll('.token-pill');
+  }
   pills.forEach((pill, index) => {
     pill.dataset.state = index < count ? 'full' : 'empty';
   });
@@ -1921,10 +3054,17 @@ function renderPlay() {
   const heading = el('timeline-heading');
   // "Shared", not "The shared": at 320px the longer version wraps the header
   // onto a second line and pushes the mystery card's Play button off screen.
-  if (heading) heading.textContent = state.mode === 'coop' ? 'Shared timeline' : 'Your timeline';
+  if (heading)
+    heading.textContent =
+      state.mode === 'coop' ? 'Shared timeline' : 'Your timeline';
 
   const timeline = timelineFor(state, active.id);
-  paintStrip(el('timeline-strip'), gapsFor(state, active.id), timeline, state.selectedGap);
+  paintStrip(
+    el('timeline-strip'),
+    gapsFor(state, active.id),
+    timeline,
+    state.selectedGap,
+  );
   const hint = el('timeline-hint');
   if (hint) {
     const gaps = gapsFor(state, active.id);
@@ -1946,12 +3086,30 @@ function renderPlay() {
   disable(el('btn-buy-card'), buyReason !== null);
   const reasonNode = el('btn-buy-card-reason');
   if (reasonNode) {
-    reasonNode.textContent = buyReason || `Costs ${BUY_COST} tokens`;
+    // The engine words the reason for one owner; in co-op the pool belongs to
+    // the table, and "you have 2" reads as a personal pile that does not exist.
+    const worded =
+      buyReason && state.mode === 'coop'
+        ? buyReason.replace('you have', 'the table has')
+        : buyReason;
+    reasonNode.textContent = worded || `Costs ${BUY_COST} tokens`;
     show(reasonNode, buyReason !== null);
   }
 
   pressed(el('btn-claim-identify'), state.claimIdentify);
-  text('year-guess-value', state.yearGuess === null ? DEFAULT_YEAR_GUESS : state.yearGuess);
+  const yearGuess =
+    state.yearGuess === null ? DEFAULT_YEAR_GUESS : state.yearGuess;
+  text('year-guess-value', yearGuess);
+  // The year call pins at 1900/2026 the way the setup steppers pin - a live
+  // "+" that silently no-ops at the clamp reads as a broken button.
+  disableStepper(
+    document.querySelector('[data-action="year-dec"]'),
+    yearGuess <= YEAR_MIN,
+  );
+  disableStepper(
+    document.querySelector('[data-action="year-inc"]'),
+    yearGuess >= YEAR_MAX,
+  );
 
   const count = state.challenges.length;
   const badge = el('challenge-count');
@@ -1969,6 +3127,11 @@ function renderPlay() {
         const node = clone('tpl-challenge-lock');
         if (!node) return null;
         fill(node, { label: `${nameOf(challenge.playerId)} challenged` });
+        // The template's contract: each pill wears the CHALLENGER's own seat
+        // colour. Without an inline --seat the pill inherits the ACTIVE
+        // player's colour from the body theming, which is the wrong identity.
+        const challenger = playerOf(challenge.playerId);
+        applySeat(node, challenger && challenger.color);
         return node;
       })
       .filter(Boolean);
@@ -1976,23 +3139,30 @@ function renderPlay() {
     show(locks, pills.length > 0);
   }
   // Before the draw nobody "can" challenge yet (there is no card), but the
-  // button must still be live: tapping it is what draws.
+  // button must still be live: tapping it is what draws. And while any
+  // challenge is locked in, the button stays live even when no NEW challenger
+  // is eligible - the sheet is the only way to a take-back, and a disabled
+  // button stranded that token forever.
   const others = state.players.filter((p) => p.id !== active.id);
   const anyCanChallenge =
-    state.phase === 'turn-start'
+    count > 0 ||
+    (state.phase === 'turn-start'
       ? others.some((p) => tokensFor(state, p.id) >= 1)
-      : others.some((p) => challengeBlockedReason(state, p.id) === null);
+      : others.some((p) => challengeBlockedReason(state, p.id) === null));
   disable(el('btn-challenge'), !anyCanChallenge);
 
   disable(
     el('btn-place'),
     state.selectedGap === null || state.placementCommitted,
-    state.placementCommitted ? 'Already placed this card' : 'Tap a gap in your timeline first',
+    state.placementCommitted
+      ? 'Already placed this card'
+      : 'Tap a gap in your timeline first',
   );
 
   // Audio + QR
   const status = el('audio-status');
-  if (status && status.textContent !== view.audio.status) status.textContent = view.audio.status;
+  if (status && status.textContent !== view.audio.status)
+    status.textContent = view.audio.status;
   disable(el('btn-play-song'), view.audio.resolving);
   disable(el('btn-replay'), !view.audio.resolved);
   show(el('audio-fallback'), view.audio.failed);
@@ -2025,7 +3195,9 @@ function paintStreamingLinks() {
         ]
       : [
           [
-            settings.playbackSource === 'apple' ? 'appleMusic' : settings.playbackSource,
+            settings.playbackSource === 'apple'
+              ? 'appleMusic'
+              : settings.playbackSource,
             SOURCE_LABELS[settings.playbackSource],
           ],
         ];
@@ -2064,6 +3236,15 @@ function renderPass() {
   show(el('pass-then'), !!upNext);
   if (upNext) text('pass-next-name', upNext.name);
 
+  // Fast flow's main tap draws the card, which closes the buy window - so the
+  // buy choice has to be visible BEFORE that tap, here, whenever it is legal.
+  show(
+    el('btn-pass-buy'),
+    settings.fastFlow &&
+      state.phase === 'turn-start' &&
+      buyBlockedReason(state) === null,
+  );
+
   renderStandings();
 }
 
@@ -2082,17 +3263,25 @@ function nameOf(playerId) {
 
 function verdictFor(outcome) {
   if (outcome.kind === 'buy') {
-    return { verdict: 'correct', message: `Bought and slotted in. That cost ${BUY_COST} tokens.` };
+    return {
+      verdict: 'correct',
+      message: `Bought and slotted in. That cost ${BUY_COST} tokens.`,
+    };
   }
   if (outcome.kind === 'skip') {
     return { verdict: 'neutral', message: 'Card skipped. No penalty.' };
   }
-  if (outcome.accepted) return { verdict: 'correct', message: 'Correct. The card is yours.' };
+  if (outcome.accepted)
+    return { verdict: 'correct', message: 'Correct. The card is yours.' };
   if (outcome.placementCorrect && !outcome.requirementsMet) {
     // Expert fails the same placement two very different ways, and the year is
     // the one the reveal never shows - "you had to name it too" is simply untrue
     // for somebody who named it and missed 1994 by a year.
-    if (outcome.titleOk === true && outcome.artistOk === true && outcome.yearGuessCorrect === false) {
+    if (
+      outcome.titleOk === true &&
+      outcome.artistOk === true &&
+      outcome.yearGuessCorrect === false
+    ) {
       return {
         verdict: 'wrong',
         message:
@@ -2101,10 +3290,16 @@ function verdictFor(outcome) {
             : `Right spot and you named it - but it was not ${outcome.yearGuess}.`,
       };
     }
-    return { verdict: 'wrong', message: 'Right spot, but you had to name it too.' };
+    return {
+      verdict: 'wrong',
+      message: 'Right spot, but you had to name it too.',
+    };
   }
   if (outcome.stolenBy) {
-    return { verdict: 'wrong', message: `Not quite - ${nameOf(outcome.stolenBy)} stole it.` };
+    return {
+      verdict: 'wrong',
+      message: `Not quite - ${nameOf(outcome.stolenBy)} stole it.`,
+    };
   }
   return { verdict: 'wrong', message: 'Not quite. The card is discarded.' };
 }
@@ -2116,6 +3311,7 @@ const REVEAL_SUB = {
 };
 
 function renderReveal() {
+  text('reveal-turn-number', state.turn);
   paintRoster(el('reveal-roster-seats'), el('reveal-roster-team'));
   const outcome = state.outcome;
   if (!outcome) return;
@@ -2154,7 +3350,15 @@ function renderReveal() {
     }
   }
 
-  const { verdict, message } = verdictFor(outcome);
+  // Until the group's vote lands in a gated mode, the banner holds the
+  // markup's own neutral state rather than calling the turn lost in past
+  // tense - the tint (a :has() on data-verdict) follows it automatically.
+  const { verdict, message } = verdictPending(outcome)
+    ? {
+        verdict: 'neutral',
+        message: 'Waiting for the group — vote Title and Artist to settle it.',
+      }
+    : verdictFor(outcome);
   const banner = el('verdict-banner');
   if (banner) {
     banner.dataset.verdict = verdict;
@@ -2164,7 +3368,9 @@ function renderReveal() {
   // Confirmations: advanced/expert gate the placement on them, and any mode
   // needs them when the player claimed they could name it.
   const showConfirm =
-    outcome.kind === 'placement' && state.phase === 'revealed' && (gated() || state.claimIdentify);
+    outcome.kind === 'placement' &&
+    state.phase === 'revealed' &&
+    (gated() || state.claimIdentify);
   show(el('confirm-panel'), showConfirm);
   text('confirm-player-name', nameOf(outcome.playerId));
   pressed(el('btn-confirm-title'), voted('title'));
@@ -2193,11 +3399,32 @@ function renderReveal() {
 
   // The house rule only speaks when it pays. A note that says "1 of 3" every
   // turn is noise; a note that appears exactly when a token lands is a reward.
-  show(el('reveal-streak'), outcome.streakAwarded === true);
+  // The payout clause comes from the LEDGER's own award, never assumed: at the
+  // 5-token cap the streak pays 0, and a banner promising "+1 token" directly
+  // above a ledger row that honestly says 0 read as the app cheating.
+  const streakNote = el('reveal-streak');
+  if (streakNote) {
+    const streakAward = outcome.tokenAwards.find((a) => a.reason === 'streak');
+    streakNote.textContent =
+      streakAward && streakAward.delta > 0
+        ? 'Streak bonus — three in a row, +1 token'
+        : streakAward
+          ? 'Streak bonus — three in a row (tokens already full)'
+          : 'Streak bonus — three in a row';
+    show(streakNote, outcome.streakAwarded === true);
+  }
 
   const pending = pendingResult(state);
   const next = el('btn-next-player');
-  if (next) next.textContent = pending ? 'See the result' : 'Next player';
+  // The label span, not textContent: the button also carries the static
+  // reduced-motion "auto" tag, which a bare textContent write would destroy.
+  text('btn-next-label', pending ? 'See the result' : 'Next player');
+  // While the gated vote is open, Next would silently discard a correctly
+  // placed card (unvoted = unconfirmed). Hold it until the group votes - any
+  // combination of the two chips settles the turn and unlocks it.
+  const voteOpen = verdictPending(outcome);
+  disable(next, voteOpen);
+  show(el('btn-next-reason'), voteOpen);
 }
 
 function renderAwards(outcome) {
@@ -2214,10 +3441,19 @@ function renderAwards(outcome) {
     // Three states, not two: a claim confirmed at the token cap moves the pool
     // by zero, and painting that in verdict red announces a loss that did not
     // happen. Nothing was gained and nothing was taken.
-    node.dataset.delta = award.delta > 0 ? 'gain' : award.delta < 0 ? 'loss' : 'none';
+    node.dataset.delta =
+      award.delta > 0 ? 'gain' : award.delta < 0 ? 'loss' : 'none';
     let what = 'Bought a card';
     if (award.reason === 'identify') {
-      what = award.delta === 0 ? 'Named it - tokens already full' : 'Named the song';
+      what =
+        award.delta === 0 ? 'Named it - tokens already full' : 'Named the song';
+    } else if (award.reason === 'streak') {
+      // Same cap-honesty as the identify row: a streak earned at the token cap
+      // pays nothing, and calling that a purchase started table arguments.
+      what =
+        award.delta === 0
+          ? 'Streak bonus - tokens already full'
+          : 'Streak bonus - three in a row';
     }
     fill(node, {
       who: state.mode === 'coop' ? 'Shared pool' : nameOf(award.playerId),
@@ -2233,7 +3469,10 @@ function renderAwards(outcome) {
       node.dataset.delta = 'loss';
       fill(node, {
         who: state.mode === 'coop' ? 'Shared pool' : nameOf(outcome.playerId),
-        what: outcome.identifyConfirmed === false ? 'Did not name it' : 'Claim not confirmed yet',
+        what:
+          outcome.identifyConfirmed === false
+            ? 'Did not name it'
+            : 'Claim not confirmed yet',
         delta: '0',
       });
       rows.push(node);
@@ -2329,7 +3568,8 @@ function renderOutcomes(outcome) {
     let what;
     if (challenge.won) what = 'Right spot - the card goes to them';
     else if (!challenge.resolved) what = 'The placement stood, token spent';
-    else if (challenge.correct) what = 'Right spot, but someone claimed it first';
+    else if (challenge.correct)
+      what = 'Right spot, but someone claimed it first';
     else what = 'Wrong spot, token spent';
     fill(node, { who: nameOf(challenge.playerId), what });
     return node;
@@ -2354,24 +3594,81 @@ function miniCard(card) {
   return node;
 }
 
+/**
+ * The co-op scoreboard: ONE shared block - timeline, pool, cards to go - and a
+ * compact list of who is at the table. The per-player rows are a race view,
+ * and co-op is not a race; eight copies of the same shared pile read as a
+ * rendering bug, because they were one.
+ */
+function coopScoreboardRows() {
+  const rows = [];
+  const team = clone('tpl-scoreboard-row');
+  if (team) {
+    const cards = state.sharedTimeline.length;
+    team.dataset.playerId = 'team';
+    team.dataset.active = 'false';
+    paintAvatar(team.querySelector('.score-row__avatar'), { name: 'The team' });
+    fill(team, {
+      name: 'The team',
+      togo: Math.max(0, state.targetCards - cards),
+    });
+    buildTokenPills(
+      team.querySelector('[data-field="tokens"]'),
+      state.sharedTokens,
+    );
+    const strip = team.querySelector('[data-field="timeline"]');
+    if (strip) replaceChildren(strip, state.sharedTimeline.map(miniCard));
+    rows.push(team);
+  }
+  const roster = clone('tpl-coop-roster');
+  if (roster) {
+    const inner = roster.querySelector('.coop-roster__list');
+    const active = currentPlayer(state);
+    if (inner) {
+      replaceChildren(
+        inner,
+        state.players.map((p) => {
+          const chip = clone('tpl-coop-player');
+          if (!chip) return null;
+          chip.dataset.rank = active && active.id === p.id ? 'active' : 'other';
+          applySeat(chip, p.color);
+          paintAvatar(chip.querySelector('.avatar'), p);
+          fill(chip, { name: p.name });
+          return chip;
+        }),
+      );
+    }
+    rows.push(roster);
+  }
+  return rows;
+}
+
 function renderScoreboard() {
   const list = el('scoreboard-list');
   if (!list) return;
-  const rows = scoreboard(state).map((row) => {
-    const node = clone('tpl-scoreboard-row');
-    if (!node) return null;
-    node.dataset.playerId = row.playerId;
-    // The row already says "Playing" in its own element, so the name stays the
-    // name - a screen reader used to hear it twice.
-    node.dataset.active = row.isActive ? 'true' : 'false';
-    applySeat(node, row.color);
-    paintAvatar(node.querySelector('.score-row__avatar'), row);
-    fill(node, { name: row.name, togo: row.cardsToGo });
-    buildTokenPills(node.querySelector('[data-field="tokens"]'), row.tokens);
-    const strip = node.querySelector('[data-field="timeline"]');
-    if (strip) replaceChildren(strip, row.timeline.map(miniCard));
-    return node;
-  });
+  // One shared pile is not a race, so co-op gets no "Standings" header.
+  text('scoreboard-title', state.mode === 'coop' ? 'The team' : 'Standings');
+  const rows =
+    state.mode === 'coop'
+      ? coopScoreboardRows()
+      : scoreboard(state).map((row) => {
+          const node = clone('tpl-scoreboard-row');
+          if (!node) return null;
+          node.dataset.playerId = row.playerId;
+          // The row already says "Playing" in its own element, so the name
+          // stays the name - a screen reader used to hear it twice.
+          node.dataset.active = row.isActive ? 'true' : 'false';
+          applySeat(node, row.color);
+          paintAvatar(node.querySelector('.score-row__avatar'), row);
+          fill(node, { name: row.name, togo: row.cardsToGo });
+          buildTokenPills(
+            node.querySelector('[data-field="tokens"]'),
+            row.tokens,
+          );
+          const strip = node.querySelector('[data-field="timeline"]');
+          if (strip) replaceChildren(strip, row.timeline.map(miniCard));
+          return node;
+        });
   replaceChildren(list, rows);
 
   // How much game is left. The scoreboard is where somebody checks whether it is
@@ -2406,16 +3703,23 @@ function renderWin() {
   const box = el('win');
   const coopLoss = result && result.coopWon === false;
   const noWinner = !result || won.length === 0;
-  if (box) box.dataset.outcome = coopLoss || noWinner ? 'loss' : 'win';
+  // A level early end is neither: 'win' would dress a tie in one player's
+  // victory styling and 'loss' would paint it as a defeat nobody suffered.
+  const levelEnd = !!result && result.reason === 'ended' && won.length > 1;
+  if (box)
+    box.dataset.outcome =
+      coopLoss || noWinner ? 'loss' : levelEnd ? 'level' : 'win';
 
   let eyebrow = 'Winner';
   let title = 'Nobody';
   let summary = '';
 
-  // The winner's face, big, and the whole screen in their colour. Co-op has no
-  // single winner and a loss has none at all, so the circle simply goes.
+  // The winner's face, big, and the whole screen in their colour. Co-op has
+  // no single winner, a loss has none at all, and a level early end or joint
+  // win must not paint the screen in whichever tied player sits first - so
+  // the circle only appears for exactly one champion.
   const face = el('win-avatar');
-  const champion = state.mode === 'coop' || won.length === 0 ? null : won[0];
+  const champion = state.mode === 'coop' || won.length !== 1 ? null : won[0];
   show(face, !!champion);
   if (champion) {
     paintAvatar(face, champion);
@@ -2428,7 +3732,7 @@ function renderWin() {
 
   if (state.mode === 'coop') {
     const cards = state.sharedTimeline.length;
-    const mistakes = `${state.mistakes} of ${state.mistakeLimit} mistakes used`;
+    const mistakes = `${state.mistakes} of ${plural(state.mistakeLimit, 'mistake')} used`;
     if (result && result.coopWon) {
       eyebrow = 'Co-op win';
       title = 'Everybody';
@@ -2444,7 +3748,7 @@ function renderWin() {
       title = 'So close';
       summary =
         result && result.reason === 'mistake-limit'
-          ? `${state.mistakeLimit} mistakes reached on ${plural(cards, 'card')}.`
+          ? `${plural(state.mistakeLimit, 'mistake')} reached on ${plural(cards, 'card')}.`
           : `The deck ran dry on ${cards} of ${state.targetCards} cards.`;
     }
     replaceChildren(el('win-timeline'), state.sharedTimeline.map(miniCard));
@@ -2458,8 +3762,23 @@ function renderWin() {
     }
     title = joinNames(won.map((p) => p.name));
     const lead = won[0];
-    summary = `${plural(lead.timeline.length, 'card')}, ${plural(lead.tokens, 'token')} left.`;
-    replaceChildren(el('win-timeline'), lead.timeline.map(miniCard));
+    // Tied players hold the same cards by definition (tokens can differ on a
+    // joint target win), and no single timeline is shown for the same reason
+    // no single face is.
+    summary =
+      won.length > 1
+        ? `${plural(lead.timeline.length, 'card')} each.`
+        : `${plural(lead.timeline.length, 'card')}, ${plural(lead.tokens, 'token')} left.`;
+    // A deck-dry finish is a designed ending (most cards wins), but a plain
+    // "Winner" made it indistinguishable from reaching the target - say why,
+    // the way the co-op branch already does.
+    if (result.reason === 'deck-exhausted') {
+      summary = `The deck ran dry — most cards wins. ${summary}`;
+    }
+    replaceChildren(
+      el('win-timeline'),
+      won.length === 1 ? lead.timeline.map(miniCard) : [],
+    );
   } else {
     eyebrow = 'Game over';
     title = 'No winner';
@@ -2468,6 +3787,10 @@ function renderWin() {
   }
 
   text('win-eyebrow', eyebrow);
+  // The heading's sr-only prefix must match the outcome: "Winner:" over a
+  // co-op loss announced a victory nobody had. The eyebrow already says the
+  // honest thing, so the prefix simply repeats it.
+  text('win-title-prefix', `${eyebrow}: `);
   text('win-player-name', title);
   text('win-summary', summary);
   renderRecap();
@@ -2500,7 +3823,10 @@ function renderRecap() {
     // left the game by a route neither covers comes back null. Name what we can.
     const { card, misses } = summary.hardestSong;
     const title = card && card.title ? card.title : 'One song';
-    push('Hardest song', `${title} - missed ${misses === 1 ? 'once' : `${misses} times`}`);
+    push(
+      'Hardest song',
+      `${title} - missed ${misses === 1 ? 'once' : `${misses} times`}`,
+    );
   }
   // One decade row, not one per player. The engine reports every player's best
   // decade, and printing all of them turns the recap into a table nobody reads -
@@ -2530,8 +3856,16 @@ function renderRecap() {
   // Dead level on both count and share: nobody stood out, so nobody is named.
   const shared =
     top !== null &&
-    contenders.filter((row) => !better(row, top) && !better(top, row)).length > 1;
-  if (top && !shared) {
+    contenders.filter((row) => !better(row, top) && !better(top, row)).length >
+      1;
+  // Co-op's one shared row has no siblings for that filter to catch, and
+  // recap() drops the engine's tied flag on the way out - so read it at the
+  // source: a timeline spread dead-level across decades names no best decade.
+  const coopTied =
+    state.mode === 'coop' &&
+    state.players.length > 0 &&
+    decadeStrengthFor(state, state.players[0].id).tied;
+  if (top && !shared && !coopTied) {
     const decade = `${String(top.decade).slice(2)}s`;
     // "Owns the 80s" is a claim; make it only when the engine says the lead is
     // big enough to be one, otherwise state the fact and let it speak.
@@ -2567,20 +3901,37 @@ function renderPot() {
   show(box, !!payout);
   if (!payout) return;
 
-  fill(box, { pot: payout.total, venmo: payout.handle ? `@${payout.handle}` : 'whoever is holding it' });
-  show(el('btn-venmo'), !!payout.url);
+  // Co-op has no one to pay: the pot was everybody's, however the game ended,
+  // so the block names the amount and stops - no payee, no button, no QR. A
+  // defeat screen handing out a scannable payment request was the worst case.
+  const coop = state.mode === 'coop';
+  show(el('win-pot-venmo'), !coop);
+  show(el('win-pot-coop'), coop);
+  fill(box, {
+    pot: payout.total,
+    venmo: payout.handle ? `@${payout.handle}` : 'whoever is holding it',
+    each: payout.perPlayer,
+  });
+  const payable = !coop && !!payout.url;
+  show(el('btn-venmo'), payable);
 
   const qr = el('win-qr');
   if (qr) {
     // The QR is one buy-in, same as the button, so a cousin across the table can
     // scan it and pay their own share without typing a handle.
-    qr.innerHTML = payout.url ? qrSvg(payout.url) : '';
-    if (payout.url) {
-      qr.setAttribute('aria-label', `Scan to send ${payout.perPlayer} to @${payout.handle}`);
+    qr.innerHTML = payable ? qrSvg(payout.url) : '';
+    if (payable) {
+      qr.setAttribute(
+        'aria-label',
+        `Scan to send ${payout.perPlayer} to @${payout.handle}`,
+      );
     }
   }
   const frame = qr && qr.closest('.pot__frame');
-  show(frame, !!payout.url);
+  show(frame, payable);
+  // The caption describes the QR, so it goes wherever the QR goes - with no
+  // handle there is nothing to scan and "scan this to pay" would be a lie.
+  show(box.querySelector('.pot__note'), payable);
 }
 
 /* ========================================================================== */
@@ -2605,7 +3956,10 @@ function closeSheet(id) {
   const sheet = el(id);
   if (!sheet) return;
   sheet.dataset.open = 'false';
-  if (id === 'menu-sheet') view.menuOpen = false;
+  if (id === 'menu-sheet') {
+    view.menuOpen = false;
+    disarmEndGame();
+  }
   if (id === 'challenge-sheet') {
     view.challengeOpen = false;
     view.challengerId = null;
@@ -2614,7 +3968,8 @@ function closeSheet(id) {
   render();
   const back = view.lastFocus;
   view.lastFocus = null;
-  if (back && document.contains(back)) requestAnimationFrame(() => back.focus());
+  if (back && document.contains(back))
+    requestAnimationFrame(() => back.focus());
 }
 
 function closeSheets() {
@@ -2626,13 +3981,23 @@ function closeSheets() {
   view.challengeOpen = false;
   view.challengerId = null;
   view.challengeGap = null;
+  disarmEndGame();
 }
 
 function renderSheets() {
-  const menuBtn = el('btn-menu');
-  if (menuBtn) menuBtn.setAttribute('aria-expanded', view.menuOpen ? 'true' : 'false');
+  // Play, reveal and pass each carry an open-menu button; every one mirrors
+  // the sheet, or the two currently hidden would hold a stale 'false'.
+  for (const id of ['btn-menu', 'btn-menu-reveal', 'btn-menu-pass']) {
+    const menuBtn = el(id);
+    if (menuBtn)
+      menuBtn.setAttribute('aria-expanded', view.menuOpen ? 'true' : 'false');
+  }
   const challengeBtn = el('btn-challenge');
-  if (challengeBtn) challengeBtn.setAttribute('aria-expanded', view.challengeOpen ? 'true' : 'false');
+  if (challengeBtn)
+    challengeBtn.setAttribute(
+      'aria-expanded',
+      view.challengeOpen ? 'true' : 'false',
+    );
   if (view.challengeOpen) renderChallengeSheet();
 }
 
@@ -2742,8 +4107,12 @@ function render() {
 
 function stepTarget(delta) {
   const index = TARGET_CHOICES.indexOf(view.setup.target);
-  const next = Math.min(TARGET_CHOICES.length - 1, Math.max(0, (index < 0 ? 1 : index) + delta));
+  const next = Math.min(
+    TARGET_CHOICES.length - 1,
+    Math.max(0, (index < 0 ? 1 : index) + delta),
+  );
   view.setup.target = TARGET_CHOICES[next];
+  queueSetupSave();
   render();
 }
 
@@ -2752,12 +4121,17 @@ function stepMistakes(delta) {
     MAX_MISTAKES,
     Math.max(MIN_MISTAKES, view.setup.mistakeLimit + delta),
   );
+  queueSetupSave();
   render();
 }
 
 function stepBuyin(delta) {
   const next = view.setup.buyin.amount + delta * BUYIN_STEP_CENTS;
-  view.setup.buyin.amount = Math.min(BUYIN_MAX_CENTS, Math.max(BUYIN_MIN_CENTS, next));
+  view.setup.buyin.amount = Math.min(
+    BUYIN_MAX_CENTS,
+    Math.max(BUYIN_MIN_CENTS, next),
+  );
+  queueSetupSave();
   render();
 }
 
@@ -2767,15 +4141,22 @@ function stepBuyin(delta) {
  * hide the offer rather than show a button that goes somewhere wrong.
  */
 function payoutFor() {
-  const buyin = view.setup.buyin;
-  if (!buyin.enabled) return null;
-  const handle = normaliseHandle(buyin.handle);
-  const pot = potFor({ amount: buyin.amount, playerCount: state ? state.players.length : 0 });
+  // The stake SNAPSHOT taken at Shuffle & start, never the live setup draft:
+  // the draft belongs to whatever game somebody is thinking about next, and
+  // editing it must not touch the pot of the game on the table.
+  const stake = getStored(ACTIVE_BUYIN_KEY, null);
+  if (!stake || typeof stake !== 'object' || stake.enabled !== true || !state)
+    return null;
+  const amount = Number.isInteger(stake.amount) ? stake.amount : 0;
+  const handle = normaliseHandle(stake.handle || '');
+  const pot = potFor({ amount, playerCount: state.players.length });
   if (!pot || pot.totalCents <= 0) return null;
 
   const won = winners(state);
   const champion = state.mode === 'coop' || won.length === 0 ? null : won[0];
-  const note = champion ? `Timeline - ${champion.name} took the pot` : 'Timeline - the pot';
+  const note = champion
+    ? `Timeline - ${champion.name} took the pot`
+    : 'Timeline - the pot';
   // The amount on the link is ONE buy-in, not the pot. Whoever taps this is a
   // person who owes their own share; a link pre-filled with the total would ask
   // every single player to pay for everybody, which is the one number here that
@@ -2784,7 +4165,9 @@ function payoutFor() {
     total: pot.total,
     perPlayer: pot.perPlayer,
     handle,
-    url: handle ? venmoPayUrl({ handle, amount: pot.perPlayerCents, note }) : null,
+    url: handle
+      ? venmoPayUrl({ handle, amount: pot.perPlayerCents, note })
+      : null,
   };
 }
 
@@ -2799,25 +4182,37 @@ function openVenmo() {
 function toggleChip(kind, value) {
   const bucket = kind === 'decade' ? view.setup.decades : view.setup.genres;
   const index = bucket.indexOf(value);
-  if (index >= 0) bucket.splice(index, 1);
-  else bucket.push(value);
+  if (index >= 0) {
+    bucket.splice(index, 1);
+    // filterDeck treats an empty selection as "everything", so the display has
+    // to as well: turning the LAST chip off re-presses the whole group rather
+    // than showing eight unpressed chips over a full deck.
+    if (bucket.length === 0) {
+      if (kind === 'decade') view.setup.decades = DECADES.slice();
+      else view.setup.genres = GENRES.slice();
+    }
+  } else {
+    bucket.push(value);
+  }
+  queueSetupSave();
   render();
 }
 
 function chipsAll(target) {
-  if (target === 'decade') {
-    view.setup.decades =
-      view.setup.decades.length === DECADES.length ? [] : DECADES.slice();
-  } else {
-    view.setup.genres = view.setup.genres.length === GENRES.length ? [] : GENRES.slice();
-  }
+  // The one-tap way back to a full deck - and only that. It used to toggle to
+  // an empty selection, which filterDeck reads as "everything": a full deck
+  // under eight unpressed chips, the same display lie toggleChip now refuses.
+  if (target === 'decade') view.setup.decades = DECADES.slice();
+  else view.setup.genres = GENRES.slice();
+  queueSetupSave();
   render();
 }
 
 function stepYear(delta) {
   if (!state) return;
   ensureCard();
-  const current = state.yearGuess === null ? DEFAULT_YEAR_GUESS : state.yearGuess;
+  const current =
+    state.yearGuess === null ? DEFAULT_YEAR_GUESS : state.yearGuess;
   const next = Math.min(YEAR_MAX, Math.max(YEAR_MIN, current + delta));
   dispatch({ type: ACTIONS.SET_YEAR_GUESS, year: next });
 }
@@ -2836,7 +4231,26 @@ function buyCard() {
   if (state.outcome) showReveal();
 }
 
+/**
+ * Guards `skip this card` against tap bursts. The button stays put and a skip
+ * repaints nothing around it, so a double-tap during the card-swap moment used
+ * to burn a second (unheard) song. Place and Buy get their guard from engine
+ * state; a skip lands on a fresh, skippable card, so this one is a cooldown -
+ * long enough to swallow a burst, short enough that no deliberate second skip
+ * ever meets a dead button.
+ */
+let skipGuardTimer = null;
+
 function skipCard() {
+  const button = el('btn-skip-card');
+  if (button && button.disabled) return;
+  disable(button, true);
+  if (skipGuardTimer !== null) clearTimeout(skipGuardTimer);
+  skipGuardTimer = window.setTimeout(() => {
+    skipGuardTimer = null;
+    disable(el('btn-skip-card'), false);
+  }, 650);
+
   stopAudio();
   dispatch({ type: ACTIONS.SKIP_CARD });
   if (state.card) {
@@ -2867,31 +4281,61 @@ function gated() {
  */
 function restoreIdentifyVote() {
   if (!state || gated()) return;
-  const confirmed = state.confirmations && state.confirmations.identify === true;
+  const confirmed =
+    state.confirmations && state.confirmations.identify === true;
   view.identifyVote = { title: confirmed, artist: confirmed };
 }
 
 /** True when the group has ticked that box, whichever store is in charge. */
 function voted(which) {
-  return gated() ? state.confirmations[which] === true : view.identifyVote[which];
+  return gated()
+    ? state.confirmations[which] === true
+    : view.identifyVote[which];
 }
 
 function confirmToggle(which) {
   if (!state) return;
+  const wasPending = verdictPending(state.outcome);
   const next = !voted(which);
   if (gated()) {
-    dispatch({ type: ACTIONS.CONFIRM_TITLE_ARTIST, [which]: next });
+    // The first tap settles the WHOLE vote: the untouched chip goes in as a
+    // "no" (false/false is the legitimate "they failed" resolution), so the
+    // reveal can never deadlock waiting on a chip nobody means to press.
+    dispatch({
+      type: ACTIONS.CONFIRM_TITLE_ARTIST,
+      title: which === 'title' ? next : voted('title'),
+      artist: which === 'artist' ? next : voted('artist'),
+    });
   } else {
     view.identifyVote = { ...view.identifyVote, [which]: next };
   }
   if (state.claimIdentify) {
-    dispatch({ type: ACTIONS.CONFIRM_IDENTIFY, ok: voted('title') && voted('artist') });
+    dispatch({
+      type: ACTIONS.CONFIRM_IDENTIFY,
+      ok: voted('title') && voted('artist'),
+    });
   } else {
     render();
   }
+  // The verdict cue showReveal held back while the vote was open (see there).
+  const outcome = state.outcome;
+  if (wasPending && outcome && !verdictPending(outcome)) {
+    if (outcome.accepted) sfx.win();
+    else sfx.lose();
+    if (outcome.tokenAwards.some((award) => award.delta > 0)) sfx.token();
+  }
+  // Deliberately NO armAutoNext here. A vote chip tap is an interaction like
+  // any other - the table is engaged - so it cancels the countdown (the
+  // screen-level pointerdown handler already did) and must not re-arm it.
+  // The countdown only ever arms on entering the reveal with no pending vote.
 }
 
 function nextTurn() {
+  // Next player renders at Place-here's exact coordinates, so the second half
+  // of a tap burst used to skip the whole reveal (and, in gated modes, forfeit
+  // a correctly placed card before anyone could vote). See TAP_GUARD_MS.
+  if (Date.now() < revealTapGuardUntil) return;
+  cancelAutoNext();
   stopAudio();
   dispatch({ type: ACTIONS.NEXT_TURN });
   if (isGameOver(state)) showWin();
@@ -2927,8 +4371,22 @@ const HANDLERS = {
       return;
     }
     state = saved;
+    // Adopt the save's write counter: this tab is now exactly as fresh as the
+    // slot, and the next persist() continues the count instead of losing to it.
+    saveCounter = storedWriteCount();
     resetCardAudio();
     restoreIdentifyVote();
+    // Resume can land straight on a reveal, whose artwork was fetched during
+    // playback - a step resume skips. The baked map answers synchronously when
+    // it has arrived; otherwise the placeholder stands in, as it always could.
+    if (
+      (saved.phase === 'revealed' || saved.phase === 'turn-end') &&
+      saved.outcome &&
+      saved.outcome.card
+    ) {
+      const baked = bakedTrackSync(saved.outcome.card);
+      if (baked && baked.artworkUrl) view.audio.resolved = baked;
+    }
     beginTurn();
   },
   'show-rules': () => {
@@ -2936,11 +4394,20 @@ const HANDLERS = {
     closeSheets();
     showScreen('rules');
   },
-  'rules-back': () => showScreen(view.returnScreen === 'rules' ? 'home' : view.returnScreen),
+  'rules-back': () =>
+    showScreen(view.returnScreen === 'rules' ? 'home' : view.returnScreen),
   home: () => goHome(),
   'add-player': () => {
     if (view.setup.players.length >= MAX_PLAYERS) return;
-    view.setup.players.push(playerDraft(view.setup.players.length));
+    // The lowest free "Player N", not the row count: after a remove, counting
+    // rows mints a duplicate of a name already on the roster.
+    view.setup.players.push(
+      playerDraft(view.setup.players.length, freePlaceholderName()),
+    );
+    // Persist immediately, exactly as remove-player does below: the added seat
+    // is a roster edit like any other, and without this it was the ONE setup
+    // control a mid-setup reload silently reverted - no save was ever queued.
+    rememberRoster();
     render();
   },
   'remove-player': (node) => {
@@ -2966,9 +4433,16 @@ const HANDLERS = {
     if (row) skipPhoto(Number(row.dataset.playerIndex));
   },
   'add-person': (node) => addPersonToGame(node.dataset.name),
+  // Armed tap, like End game: forgetting deletes the person and their saved
+  // photos, and there is no undo to offer afterwards.
   'forget-person': (node) => {
     const name = node.dataset.name;
     if (!name) return;
+    if (view.forgetArmed !== name) {
+      armForget(name);
+      return;
+    }
+    disarmForget();
     forgetPerson(name);
     announce(`${name} forgotten.`);
     render();
@@ -2980,7 +4454,10 @@ const HANDLERS = {
   'use-saved-photo': (node) => {
     const row = node.closest('[data-player-index]');
     if (!row) return;
-    applySavedPhoto(Number(row.dataset.playerIndex), Number(node.dataset.photoIndex));
+    applySavedPhoto(
+      Number(row.dataset.playerIndex),
+      Number(node.dataset.photoIndex),
+    );
   },
   'target-dec': () => stepTarget(-1),
   'target-inc': () => stepTarget(1),
@@ -2992,8 +4469,37 @@ const HANDLERS = {
   'toggle-decade': (node) => toggleChip('decade', Number(node.dataset.decade)),
   'toggle-genre': (node) => toggleChip('genre', node.dataset.genre),
   'chips-all': (node) => chipsAll(node.dataset.target),
-  'start-game': () => startGame(),
-  'pass-continue': () => enterPlay(),
+  // Armed tap, but only while an unfinished game sits in the save slot -
+  // starting would silently destroy it. A finished save is replaced silently.
+  'start-game': () => {
+    // The sticky Shuffle & start bar can also sit under a Play-again double
+    // tap - starting a game from a tap burst is worse than resetting a mode.
+    if (Date.now() < setupTapGuardUntil) return;
+    if (!view.startArmed) {
+      const saved = savedGame();
+      if (saved && saved.phase !== 'game-over') {
+        armStartGame();
+        return;
+      }
+    }
+    disarmStartGame();
+    startGame();
+  },
+  // Fast flow collapses the handoff to ONE tap: this tap is a real user
+  // gesture, so it can legally draw the card AND start the song in the same
+  // tick - the next player walks straight into music instead of a second play
+  // button. The buy window survives because `pass-buy` sits on the same screen
+  // whenever the player can afford it, so the choice is made before this tap.
+  'pass-continue': () => {
+    enterPlay();
+    if (settings.fastFlow && state && state.phase === 'turn-start') {
+      toggleAudio().catch(() => failAudio('The preview could not be loaded.'));
+    }
+  },
+  'pass-buy': () => {
+    enterPlay();
+    buyCard();
+  },
   'open-menu': (node) => openSheet('menu-sheet', node),
   'close-menu': () => closeSheet('menu-sheet'),
   'show-scoreboard': () => {
@@ -3003,7 +4509,16 @@ const HANDLERS = {
   },
   'close-scoreboard': () =>
     showScreen(view.returnScreen === 'scoreboard' ? 'play' : view.returnScreen),
-  'end-game': () => endGame(),
+  // Armed tap: ending is one row above "done" and cannot be undone, so the
+  // first tap only arms the row and says what a second one will do.
+  'end-game': () => {
+    if (!view.endGameArmed) {
+      armEndGame();
+      return;
+    }
+    disarmEndGame();
+    endGame();
+  },
   'toggle-audio': () => {
     toggleAudio().catch(() => failAudio('The preview could not be loaded.'));
   },
@@ -3013,10 +4528,6 @@ const HANDLERS = {
     render();
   },
   'skip-card': () => skipCard(),
-  'toggle-qr-alt': () => {
-    view.qrAlt = !view.qrAlt;
-    render();
-  },
   'select-gap': (node) => {
     const index = Number(node.dataset.gapIndex);
     if (node.closest('#challenge-timeline')) {
@@ -3046,6 +4557,11 @@ const HANDLERS = {
     view.challengerId = node.dataset.playerId;
     view.challengeGap = null;
     render();
+    // The render rebuilds the option list, destroying the focused button, and
+    // keyboard focus fell to <body>. The next step is choosing a gap, so put
+    // focus on the first gap of the newly revealed timeline.
+    const gap = document.querySelector('#challenge-timeline .gap');
+    if (gap) gap.focus();
   },
   // A challenge is a token spent on a guess, and the guess is made by tapping a
   // tiny gap on somebody else's timeline. Getting it wrong was unrecoverable:
@@ -3068,13 +4584,27 @@ const HANDLERS = {
   'confirm-artist': () => confirmToggle('artist'),
   'next-turn': () => nextTurn(),
   'play-again': () => {
+    // Nothing is cleared here. The finished game - winner, recap, pot QR - has
+    // to survive a reload during post-game setup (settling the pot in Venmo
+    // reloads the tab on most phones), so the record lives until Shuffle &
+    // start genuinely replaces it: startGame snapshots the new stake and
+    // writes with persist(true). Clearing at tap time was round 3's
+    // play-again-erases-finished-game-record.
     state = null;
-    clearGame();
+    // The setup screen appears under the finger that just tapped Play again,
+    // with the Classic mode row at those exact coordinates - a double tap was
+    // silently resetting the mode the table had chosen.
+    setupTapGuardUntil = Date.now() + TAP_GUARD_MS;
     if (view.confettiStop) {
       view.confettiStop();
       view.confettiStop = null;
     }
     showScreen('setup');
+  },
+  // The stale overlay's one live control. Allowed through the stale gate in
+  // onClick; everything else on a stale tab is refused.
+  'reload-page': () => {
+    window.location.reload();
   },
 };
 
@@ -3091,8 +4621,21 @@ function onClick(event) {
   const target = event.target;
   if (!target || typeof target.closest !== 'function') return;
   const node = target.closest('[data-action]');
+  // Any interaction other than Next player itself means the table is still
+  // using the reveal - stop the countdown and let them. This must run BEFORE
+  // the no-action early return: the most natural "wait, let me look" gestures
+  // are taps on the revealed card and the verdict banner, which carry no
+  // data-action at all and used to sail past the cancel entirely.
+  if (
+    autoNextTimer !== null &&
+    (!node || node.dataset.action !== 'next-turn')
+  ) {
+    cancelAutoNext();
+  }
   if (!node) return;
   if (node.disabled || node.getAttribute('aria-disabled') === 'true') return;
+  // A stale tab accepts exactly one input: the Reload button on its notice.
+  if (view.stale && node.dataset.action !== 'reload-page') return;
   const handler = HANDLERS[node.dataset.action];
   if (!handler) return;
   event.preventDefault();
@@ -3103,27 +4646,53 @@ function onClick(event) {
   // shapes toggleAudio(). unlock() is cheap and idempotent after the first tap.
   sfx.unlock();
   (ACTION_CUES[node.dataset.action] || sfx.tap)();
+  // Backstop for the reveal countdown: real taps and keys already cancelled
+  // it in onRevealPointerDown / onKeydown, but a synthetic .click() arrives
+  // with neither, and it is still an interaction.
+  if (autoNextTimer !== null && node.dataset.action !== 'next-turn')
+    cancelAutoNext();
   handler(node);
 }
 
 function onInput(event) {
   const node = event.target;
+  if (view.stale) return;
   if (node.dataset && node.dataset.role === 'player-name') {
     const row = node.closest('[data-player-index]');
     if (!row) return;
-    const draft = view.setup.players[Number(row.dataset.playerIndex)];
+    const index = Number(row.dataset.playerIndex);
+    const draft = view.setup.players[index];
     if (!draft) return;
     draft.name = node.value;
     // The initial in the circle is the fallback avatar, so it has to keep up
     // with the name as it is typed.
-    const avatar = row.querySelector('.player-row__avatar [data-field="initial"]');
+    const avatar = row.querySelector(
+      '.player-row__avatar [data-field="initial"]',
+    );
     if (avatar) avatar.textContent = initialFor(node.value);
-    // Two things follow from a name changing, and both are why the library is
-    // keyed on the name rather than the seat: a face chosen before the name was
-    // typed has to end up filed under the finished name, and a name we already
-    // know should immediately offer its faces.
-    if (draft.photo) rememberAvatar(draft.name, draft.photo);
-    paintSavedAvatars(row, draft, Number(row.dataset.playerIndex));
+    // The avatar library is FILED on commit only ('change' fires on blur or
+    // Enter, never per keystroke) but READ per keystroke. Filing on every
+    // input event stored the row's face under each prefix of the name being
+    // typed, and the library's 24-name cap then evicted every real person in
+    // it. The lookup below is read-only, so offering saved faces while typing
+    // stays live.
+    if (event.type === 'change' && draft.photo)
+      fileAvatar(draft.name, draft.photo);
+    // The roster draft persists as the name is typed (debounced) and settles
+    // on the commit, so a mid-setup reload restores what is on the screen
+    // rather than resurrecting the name from the last photo/skip action.
+    if (event.type === 'change') rememberRoster();
+    else queueRosterSave();
+    paintSavedAvatars(row, draft, index);
+    // Everything else keyed on this name follows the keystroke too: the row's
+    // control labels, and the guest chips' seated/full state - a renamed row
+    // used to leave "Zoe is already playing" on a chip for the rest of setup.
+    paintRowLabels(row, draft, index);
+    paintNameCount(row, draft);
+    // All rows, not just this one: this keystroke may have created a twin for
+    // another row's note - or dissolved one.
+    paintDupeNames();
+    paintPeople();
     return;
   }
   if (node.dataset && node.dataset.role === 'player-photo') {
@@ -3137,28 +4706,60 @@ function onInput(event) {
     const draft = view.setup.players[Number(row.dataset.playerIndex)];
     acceptPhoto(draft, file).catch(() => {
       if (draft) draft.pending = false;
-      alertUser('That photo could not be read. Try another one, or tap Skip photo.');
+      alertUser(
+        'That photo could not be read. Try another one, or tap Skip photo.',
+      );
       render();
     });
     return;
   }
   if (node.name === 'mode') {
+    // The setup form appears under the finger that tapped Play again, with a
+    // mode row at those coordinates - the second half of a tap burst must not
+    // reset the mode the table chose. Put the radio back and swallow it.
+    if (Date.now() < setupTapGuardUntil) {
+      const radio = el(`mode-${view.setup.mode}`);
+      if (radio) radio.checked = true;
+      return;
+    }
     view.setup.mode = node.value;
     document.body.dataset.mode = node.value;
+    queueSetupSave();
     render();
     return;
   }
   if (node.id === 'playback-source' || node.id === 'opt-playback-source') {
     updateSettings({ playbackSource: node.value });
-    if (view.screen === 'play') render();
+    // A preview left running under the new source would be an orphan: the
+    // controls would say "Open Spotify" while the song kept playing and the
+    // hub's Pause paused nothing. Stop it and repaint the card's audio state
+    // in the new source's terms.
+    if (view.screen === 'play' && state && state.card) {
+      stopAudio();
+      if (node.value !== 'preview') {
+        view.audio.failed = true;
+        view.audio.linksShown = false;
+        view.audio.status = `Open ${SOURCE_LABELS[node.value]} to play this card.`;
+      } else {
+        view.audio.failed = false;
+        view.audio.status = settings.sound
+          ? 'Tap play when everyone is listening.'
+          : 'Sound is off. Turn it on in the menu.';
+      }
+    }
+    // Setup renders too: the foldout's summary line carries a non-default
+    // source, and without a repaint it goes stale the moment this changes.
+    if (view.screen === 'play' || view.screen === 'setup') render();
     return;
   }
   if (node.id === 'opt-streak-bonus') {
     view.setup.streakBonus = node.checked;
+    queueSetupSave();
     return;
   }
   if (node.id === 'opt-buyin') {
     view.setup.buyin.enabled = node.checked;
+    queueSetupSave();
     render();
     return;
   }
@@ -3167,10 +4768,16 @@ function onInput(event) {
     // keystroke would delete the "@" the moment somebody typed it, and fight a
     // person halfway through their own name.
     view.setup.buyin.handle = node.value;
+    queueSetupSave();
+    // Repaint only the buy-in block: the hint under the field tracks the
+    // keystrokes, and a full render here would be work for nothing.
+    paintBuyin();
     return;
   }
+  if (node.id === 'opt-fast-flow') updateSettings({ fastFlow: node.checked });
   if (node.id === 'opt-skip-pass') updateSettings({ skipPass: node.checked });
-  if (node.id === 'opt-reduced-motion') updateSettings({ reducedMotion: node.checked });
+  if (node.id === 'opt-reduced-motion')
+    updateSettings({ reducedMotion: node.checked });
   if (node.id === 'opt-sound') {
     updateSettings({ sound: node.checked });
     if (!node.checked) stopAudio();
@@ -3189,12 +4796,79 @@ function onResize() {
   railResizeTimer = window.setTimeout(() => {
     railResizeTimer = null;
     if (!state) return;
-    if (view.screen === 'play') paintRoster(el('play-roster-seats'), el('play-roster-team'));
-    else if (view.screen === 'reveal') paintRoster(el('reveal-roster-seats'), el('reveal-roster-team'));
+    if (view.screen === 'play')
+      paintRoster(el('play-roster-seats'), el('play-roster-team'));
+    else if (view.screen === 'reveal')
+      paintRoster(el('reveal-roster-seats'), el('reveal-roster-team'));
   }, 180);
 }
 
+/** What openSheet() considers focusable; the Tab trap has to agree with it. */
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+/** The open sheet layer, or null. The two are mutually exclusive by design. */
+function openSheetLayer() {
+  if (view.challengeOpen) return el('challenge-sheet');
+  if (view.menuOpen) return el('menu-sheet');
+  return null;
+}
+
+/**
+ * Keep Tab inside the open sheet. The sheets claim aria-modal="true", and
+ * without this the claim was a lie: Shift+Tab walked straight out onto the
+ * covered play screen, where Enter could commit a placement from behind the
+ * scrim. Escape still closes (below), and closeSheet restores focus.
+ */
+function trapSheetFocus(event, sheet) {
+  const focusable = [...sheet.querySelectorAll(FOCUSABLE_SELECTOR)].filter(
+    (node) => !node.closest('[hidden]'),
+  );
+  if (!focusable.length) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const current = document.activeElement;
+  const inside = sheet.contains(current);
+  if (event.shiftKey) {
+    if (!inside || current === first) {
+      event.preventDefault();
+      last.focus();
+    }
+  } else if (!inside || current === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function onKeydown(event) {
+  // Keyboard interaction is interaction: ANY key while the reveal countdown
+  // is armed cancels it, exactly like a pointerdown - Tab included, because a
+  // keyboard user surveying the screen is the table engaged. The key itself
+  // still does its normal job below.
+  if (autoNextTimer !== null) cancelAutoNext();
+  // A stale tab is read-only until it reloads. Its overlay claims aria-modal,
+  // so Tab is trapped inside it (Reload is the only stop - the sheets' trap
+  // does the arithmetic) and Escape is swallowed; Enter/Space on Reload -
+  // plain button activation - passes through.
+  if (view.stale) {
+    if (event.key === 'Tab') {
+      const overlay = el('stale-overlay');
+      if (overlay && !overlay.hidden) trapSheetFocus(event, overlay);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      return;
+    }
+  }
+  if (event.key === 'Tab') {
+    const sheet = openSheetLayer();
+    if (sheet) trapSheetFocus(event, sheet);
+    return;
+  }
   if (event.key !== 'Escape') return;
   if (view.challengeOpen) {
     closeSheet('challenge-sheet');
@@ -3228,9 +4902,6 @@ function registerServiceWorker() {
 }
 
 function init() {
-  const note = el('qr-file-note');
-  fileNoteHtml = note ? note.innerHTML : '';
-
   // Start fetching the baked previews immediately. By the time anyone reaches a
   // play button the map is in memory, which is what lets the tap handler look a
   // card up without awaiting - see the note at the top of toggleAudio().
@@ -3240,6 +4911,9 @@ function init() {
   applySettings();
   loadSavedPlayers();
   loadSavedBuyin();
+  // After the stake: the draft is the fresher record of the whole setup form
+  // (the buy-in included), so what was on screen at the reload comes back.
+  loadSetupDraft();
   buildChips();
 
   document.addEventListener('click', onClick);
@@ -3247,6 +4921,27 @@ function init() {
   document.addEventListener('change', onInput);
   document.addEventListener('keydown', onKeydown);
   window.addEventListener('resize', onResize);
+  // The debounced setup saves flush before the page can vanish - see
+  // flushPendingSaves() for why both events, and why flush rather than wait.
+  window.addEventListener('pagehide', flushPendingSaves);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPendingSaves();
+  });
+  // The reveal screen only: any tap on it cancels the fast-flow countdown.
+  const revealScreen = el('reveal');
+  if (revealScreen)
+    revealScreen.addEventListener('pointerdown', onRevealPointerDown);
+
+  // Two tabs on one game must not be a silent time machine. The storage event
+  // only fires in the OTHER tab, so this is exactly the cross-tab signal: a
+  // home screen refreshes its resume card; a mid-game tab is now provably
+  // stale and gets locked behind the reload notice. persist() backstops this
+  // with the write counter, for browsers that drop the event.
+  window.addEventListener('storage', (event) => {
+    if (event.key !== `${NAMESPACE}:v${VERSION}:${KEYS.game}`) return;
+    if (view.screen === 'home') render();
+    else if (state && storedWriteCount() > saveCounter) enterStaleState();
+  });
 
   // Nothing here should ever throw, but if something does the player gets a
   // sentence instead of a frozen screen.

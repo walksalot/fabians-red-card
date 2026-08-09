@@ -30,7 +30,7 @@
 // Bump this on any deploy that must reach returning players immediately. It is a
 // belt to the stale-while-revalidate braces below: changing it changes this file,
 // which is the only thing that makes a browser reinstall the worker at all.
-const VERSION = 'v7-redesign';
+const VERSION = 'v15-qa7';
 const CACHE = `music-timeline-${VERSION}`;
 const CACHE_PREFIX = 'music-timeline-';
 
@@ -45,6 +45,7 @@ const SHELL = [
   './listen.css',
   './manifest.json',
   './icon.svg',
+  './apple-touch-icon.png',
   // Load-bearing, not an extra: this is the build-time answer for the deck.
   // Without it audio.js falls through to a live iTunes lookup, so a family that
   // loaded the game once and then lost the wifi could not play a single song.
@@ -99,17 +100,49 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE);
+      // How hard to hit the network depends on WHY this install is running:
+      //
+      // - First-ever install (no active worker, no old cache): the page that
+      //   registered us finished downloading this exact shell seconds ago, so
+      //   default HTTP-cache semantics reuse those bytes instead of downloading
+      //   the whole game a second time. Before this distinction existed, every
+      //   install used `cache: 'reload'` and a family's first visit paid for
+      //   the shell twice (~2.5 MB moved for ~1.3 MB of app).
+      //
+      // - Update install (a VERSION bump reaching a returning player): here
+      //   `cache: 'reload'` is load-bearing, do not "simplify" it away. The LAN
+      //   server (scripts/music-server.mjs) marks the shell immutable for a
+      //   year WITHOUT validators, so a default-mode fetch would happily
+      //   install year-old bytes out of the HTTP cache and `no-cache` could
+      //   not revalidate them. Skipping the HTTP cache entirely is the only
+      //   thing that makes a new VERSION actually get new bytes - and it costs
+      //   nothing extra here, because a returning player's page load was served
+      //   from the old SW cache, not the network, so there is no double fetch
+      //   to avoid on this path.
+      //
+      // If a first install ever did race a genuinely stale HTTP cache, the
+      // stale-while-revalidate fetch handler below refreshes every shell file
+      // behind its first use anyway - a bad copy can outlive neither the next
+      // load nor the next VERSION bump, so nobody gets locked out.
+      const names = await caches.keys();
+      const isUpdate =
+        Boolean(self.registration.active) ||
+        names.some((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE);
+      const fetchMode = isUpdate ? 'reload' : 'default';
       // One at a time, failures tolerated: addAll() rejects the whole install if
       // a single file 404s, and a half-written checkout (or a game served
       // without listen.js yet) should not leave players with no worker at all.
       // Anything missed here is picked up by the runtime cache on first use.
-      // `cache: 'reload'` skips the HTTP cache, which the LAN server marks
-      // immutable - this is how a new VERSION actually gets new bytes.
       await Promise.all(
-        SHELL.map(async (path) => {
+        SHELL.filter((path) => path !== './').map(async (path) => {
           try {
-            const response = await fetch(new Request(path, { cache: 'reload' }));
-            if (response.ok) await cache.put(path, response);
+            const response = await fetch(new Request(path, { cache: fetchMode }));
+            if (!response.ok) return;
+            // Both servers answer './' with index.html, and HTML is no-store
+            // everywhere, so filling both cache keys from ONE fetch saves a
+            // full second download of the document on every install.
+            if (path === './index.html') await cache.put('./', response.clone());
+            await cache.put(path, response);
           } catch {
             /* offline or missing file - runtime caching will fill it in */
           }

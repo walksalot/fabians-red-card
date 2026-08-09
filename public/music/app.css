@@ -39,12 +39,17 @@
 
   /* Secondary ink. Six stops, all the same hue, because a party game read at
      arm's length needs a real hierarchy and tinting is cheaper than a second
-     colour. .45 meta / .5 labels / .55-.65 body / .85 reading text. */
-  --ink-45:       rgba(36, 28, 21, 0.45);
-  --ink-50:       rgba(36, 28, 21, 0.5);
-  --ink-55:       rgba(36, 28, 21, 0.55);
-  --ink-60:       rgba(36, 28, 21, 0.6);
-  --ink-65:       rgba(36, 28, 21, 0.65);
+     colour. The NAMES keep the design's original stops (meta / labels / body /
+     reading text); the VALUES are pushed up because every one of these tiers
+     is used on 10.5-15px text, where WCAG AA wants 4.5:1 - ink over the butter
+     paper only crosses that line at about alpha .62 (.45 composited to 2.8:1,
+     with "skip this card" and the audio status among the casualties). The
+     ladder stays a ladder, just starting where AA starts. */
+  --ink-45:       rgba(36, 28, 21, 0.63);
+  --ink-50:       rgba(36, 28, 21, 0.65);
+  --ink-55:       rgba(36, 28, 21, 0.67);
+  --ink-60:       rgba(36, 28, 21, 0.7);
+  --ink-65:       rgba(36, 28, 21, 0.73);
   --ink-85:       rgba(36, 28, 21, 0.85);
   --ink-line:     rgba(36, 28, 21, 0.16);
   --ink-line-2:   rgba(36, 28, 21, 0.35);
@@ -198,7 +203,14 @@ a:hover { color: var(--accent-link); }
   background: var(--paper);
   border-left: 1.5px solid var(--ink-line);
   border-right: 1.5px solid var(--ink-line);
+  /* clip, not hidden: hidden makes .app a scroll container, and since .app
+     never actually scrolls (the page does), every position:sticky inside it -
+     the Shuffle & start bar, the play screen's Place-here foot - silently
+     never pinned. clip clips the decorations the same way without becoming
+     anybody's scrollport. hidden stays first as the fallback for engines
+     without clip (they lose the pinning, not the layout). */
   overflow: hidden;
+  overflow: clip;
 }
 
 /* Paper grain. Inline SVG turbulence at 6% alpha - no request, no asset, and
@@ -409,7 +421,11 @@ body[data-screen='rules']      #rules { display: flex; }
   color: var(--ink-45);
   white-space: nowrap;
 }
-.sect__match { font-weight: 600; color: var(--good-text); }
+/* Ink, not the verdict green: 12px/600 green on the paper is 4.29:1, short of
+   AA - and green is reserved for verdicts anyway. Zero matches goes red,
+   because a 0 above two red warnings must not look like success. */
+.sect__match { font-weight: 600; color: var(--ink-85); }
+.sect__match[data-tone='bad'] { color: var(--bad-text); }
 .sect__match strong { font-weight: 600; }
 .sect__hint {
   font-size: 12px;
@@ -486,7 +502,13 @@ body[data-screen='rules']      #rules { display: flex; }
   cursor: pointer;
   transition: transform var(--t-fast) ease;
 }
-.stepper__btn:active { transform: scale(0.9); }
+.stepper__btn:active:not(:disabled) { transform: scale(0.9); }
+/* Pinned at a bound, same treatment as the roster buttons on this screen. */
+.stepper__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  box-shadow: none;
+}
 .stepper__value {
   font-family: var(--font-display);
   font-size: 26px;
@@ -608,6 +630,9 @@ body[data-screen='rules']      #rules { display: flex; }
   min-width: 0;
 }
 .field__input::placeholder { color: var(--ink-45); }
+/* The live reading of the Venmo field: the handle the winner screen will pay,
+   or the warning that there is none. */
+.field__hint[data-tone='bad'] { color: var(--bad-text); font-weight: 600; }
 
 .select { position: relative; }
 .select select {
@@ -624,6 +649,10 @@ body[data-screen='rules']      #rules { display: flex; }
   box-shadow: var(--sh-small);
   appearance: none;
   -webkit-appearance: none;
+  /* An option longer than the box must trail off, not hard-clip mid-word. */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .select__caret {
   position: absolute;
@@ -649,7 +678,10 @@ body[data-screen='rules']      #rules { display: flex; }
   padding: 0;
   border: var(--bd);
   border-radius: 50%;
-  background: var(--seat);
+  /* --seat-fill is the seat colour nudged (in ui.js) until the initial's ink
+     clears 4.5:1 - two of the eight crayons left white a shade short. A photo
+     covers it, so only the fallback circle is ever affected. */
+  background: var(--seat-fill, var(--seat));
   overflow: hidden;
 }
 button.avatar { cursor: pointer; }
@@ -844,7 +876,10 @@ button.avatar { cursor: pointer; }
   gap: 10px;
   overflow-x: auto;
   scrollbar-width: none;
-  padding: 2px var(--gutter) 4px;
+  /* 10px on top, not 2: overflow-x:auto makes overflow-y clip too, and the
+     crown pokes 8px above the leader's avatar (top:-8px) - anything less
+     slices it to an orange dash. */
+  padding: 10px var(--gutter) 4px;
 }
 .roster__seats::-webkit-scrollbar { width: 0; height: 0; }
 .roster__seat { flex: none; }
@@ -1018,7 +1053,9 @@ body[data-mode='coop'] .roster__team { display: flex; }
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--accent);
+  /* The text accent, not the raw accent: #d6336c on the paper is 4.36:1,
+     just under AA for 11px text; #c2255c clears it with room. */
+  color: var(--accent-text);
   animation: rise 0.4s ease 0.06s both;
 }
 .home__title {
@@ -1191,6 +1228,22 @@ body[data-mode='coop'] .roster__team { display: flex; }
   font-size: 11.5px;
   color: var(--ink-50);
 }
+/* The countdown to the name field's maxlength; ui.js shows it near the cap. */
+.player-row__count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-55);
+}
+/* The duplicate-name note; ui.js shows it when two rows fold to the same
+   name. Informational only - deliberate twins are a real party guest list. */
+.player-row__dupe {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-50);
+}
 .player-row[data-photo-state='photo'] .player-row__status { color: var(--good-text); }
 .player-row__skip[aria-pressed='true'] {
   border: var(--bd);
@@ -1281,6 +1334,20 @@ body[data-mode='coop'] .roster__team { display: flex; }
   cursor: pointer;
 }
 .person__add .avatar { --avatar-size: 24px; }
+/* A chip that cannot seat anybody must look it - it used to be pixel-identical
+   to a live one, with the reason hidden in a title attribute phones never
+   show. The note carries the reason instead. */
+.person__add:disabled {
+  opacity: 0.45;
+  cursor: default;
+  box-shadow: none;
+  border-style: dashed;
+}
+.person__note {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink-55);
+}
 .person__forget {
   display: none;
   position: absolute;
@@ -1297,6 +1364,11 @@ body[data-mode='coop'] .roster__team { display: flex; }
 }
 .person__forget svg { width: 12px; height: 12px; display: block; margin: auto; }
 .people[data-editing='true'] .person__forget { display: block; }
+/* First tap arms the cross (same pattern as End game); the halo says "this one
+   is primed" while the aria-label carries the words. */
+.person__forget[data-armed='true'] {
+  box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--bad);
+}
 
 /* Mode rows */
 .mode-list {
@@ -1362,27 +1434,30 @@ body[data-mode='coop'] #field-mistake-limit { display: flex; }
 }
 .foldout__summary {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--s-2);
+  gap: 2px var(--s-2);
   padding: 14px 16px;
   cursor: pointer;
   list-style: none;
 }
 .foldout__summary::-webkit-details-marker { display: none; }
 .foldout__title {
+  flex: 1;
   font-size: 14.5px;
   font-weight: 700;
 }
+/* The live state gets its own full-width line and wraps: it is the one thing
+   folding must never hide, and beside the title it was ellipsised before the
+   song count - the number the line exists for - ever fit, at every width. */
 .foldout__state {
-  flex: 1;
+  flex: 1 0 100%;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: 11px;
+  line-height: 1.45;
   color: var(--ink-45);
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: left;
 }
 .foldout__caret {
   flex: none;
@@ -1397,6 +1472,9 @@ body[data-mode='coop'] #field-mistake-limit { display: flex; }
   gap: var(--s-2);
 }
 .foldout > .sect + .sect { padding-top: var(--s-4); border-top: 1.5px dashed var(--ink-track); }
+
+/* The storage-blocked notice sits between the bar and the form, outside both. */
+.setup__storage-warn { margin: 0 var(--gutter) var(--s-2); }
 
 /* Sticky footer: Start is the one control that must never scroll away. */
 .setup__go {
@@ -1465,7 +1543,17 @@ body[data-mode='coop'] #field-mistake-limit { display: flex; }
 .pass__name {
   display: block;
   font-family: var(--font-display);
-  font-size: clamp(32px, 10vw, 40px);
+  /* Same lesson the win screen learned twice (rounds 4 and 5): a huge display
+     name with no width clamp lets an unbroken 16-char name clip off BOTH
+     screen edges - measured 492px wide at 320w, dragging the hint line
+     off-screen with it. max-width contains it, overflow-wrap breaks what a
+     single word cannot fit (two big lines beat edge-clipping on the hero),
+     and the vw slice under the old 10vw curve shrinks realistic long names
+     enough that most stay on one line. */
+  font-size: clamp(26px, min(14.18vw - 18.78px, 10vw), 40px);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
   font-weight: 400;
   line-height: 1.1;
 }
@@ -1720,6 +1808,14 @@ body[data-mode='coop'] #pass-standings { display: none; }
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
+}
+/* Link playback: the hub names the service instead of counting down. */
+.disc__time[data-mode='link'] {
+  max-width: 90%;
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: center;
 }
 
 .playstatus {
@@ -2069,7 +2165,10 @@ body[data-mode='coop'] #btn-challenge { display: none; }
 .verdict[data-verdict='correct'] {
   border-color: var(--good);
   background: var(--good-tint);
-  color: var(--good-text);
+  /* Ink, not --good-text: the green on its own tint is 3.81:1 at this size and
+     WCAG wants 4.5. The border and the dot keep the verdict green; the words
+     just have to be readable. (The red pairing passes as-is.) */
+  color: var(--ink-85);
   transform: rotate(-1.5deg);
 }
 .verdict[data-verdict='correct'] .verdict__dot { background: var(--good); }
@@ -2114,7 +2213,8 @@ body[data-mode='coop'] #btn-challenge { display: none; }
 .vote[aria-pressed='true'] {
   border: 1.5px solid var(--good);
   background: var(--good-tint);
-  color: var(--good-text);
+  /* Ink for the same AA reason as the correct verdict above. */
+  color: var(--ink-85);
 }
 
 .screen--reveal > .card { margin: 0 var(--gutter); }
@@ -2262,6 +2362,35 @@ body[data-mode='coop'] #btn-challenge { display: none; }
   color: var(--ink-45);
 }
 
+/* Co-op: one shared score-row ("The team") plus this compact who-is-playing
+   card - never a row per player, which was eight copies of one shared pile. */
+.coop-roster {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: 12px 16px;
+  border: var(--bd);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--sh-card);
+}
+.coop-roster__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+}
+.coop-player {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.coop-player .avatar { --avatar-size: 24px; }
+.coop-player__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.coop-player[data-rank='active'] .coop-player__name { color: var(--accent-text); }
+
 /* 6.7 Win ----------------------------------------------------------------- */
 .screen--win { position: relative; }
 .confetti {
@@ -2296,9 +2425,25 @@ body[data-mode='coop'] #btn-challenge { display: none; }
 }
 .win__name {
   font-family: var(--font-display);
-  font-size: clamp(34px, 11vw, 42px);
+  /* Scales with the viewport, and overflow-wrap catches whatever a single
+     unbroken name still cannot fit - clipped off both screen edges is never
+     acceptable. The slope is tuned so the WORST case, a 16-char maxlength
+     name of wide Paytone glyphs, fits on ONE line at the 320px floor. The
+     original 9.5vw shed a lone orphan "e" there; the round-4 retune
+     (10.4vw - 3.9px) fixed single words but a two-WORD 16-char name
+     ("Christopherina Q") still needed 254.5px against the 254px on offer -
+     a 0.5px miss that wrapped a lone "Q" onto its own centred line. This
+     curve lands ~28.8px at 320 (that name measures 249.5px, ~4.5px spare),
+     drifts under a third of a pixel below the round-4 curve at 375px+, and
+     reaches the 42px cap at the same ~441px width. balance stays for
+     multi-word names; it cannot fix the orphan itself because Chromium does
+     not rebalance overflow-wrap's emergency mid-word breaks. */
+  font-size: clamp(24px, 10.88vw - 6.02px, 42px);
   font-weight: 400;
   line-height: 1.1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 .win__summary {
   margin-top: var(--s-3);
@@ -2324,8 +2469,12 @@ body[data-mode='coop'] #btn-challenge { display: none; }
 }
 .recap__row {
   display: flex;
+  /* Wrap, so a long key ("Wilhelmina Woods's decade" at 320px) pushes the
+     value onto its own full-width line instead of squeezing it into a one-
+     word-per-line column. */
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: var(--s-3);
+  gap: var(--s-1) var(--s-3);
   padding: 12px 16px;
   border: var(--bd);
   border-radius: 13px;
@@ -2335,7 +2484,7 @@ body[data-mode='coop'] #btn-challenge { display: none; }
   text-align: left;
 }
 .recap__key { flex: none; color: var(--ink-50); }
-.recap__value { font-weight: 600; text-align: right; }
+.recap__value { flex: 1; min-width: 14ch; font-weight: 600; text-align: right; }
 
 .pot {
   display: flex;
@@ -2672,8 +2821,48 @@ body[data-mode='coop'] #btn-challenge { display: none; }
   color: var(--card);
   font-size: 12.5px;
   font-weight: 600;
-  white-space: nowrap;
+  /* Wraps: error sentences are longer than the design's "Two players minimum"
+     and a nowrap pill runs off a 320px screen. */
+  width: max-content;
+  max-width: min(92vw, 480px);
+  text-align: center;
   animation: popIn var(--t-mid) ease both;
+}
+
+/* The stale-tab notice. Above everything (sheets are 90s, toast 95): once
+   another tab holds a newer save, every control under this scrim is a trap. */
+.stale {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--gutter);
+  background: rgba(36, 28, 21, 0.55);
+}
+.stale__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  max-width: 340px;
+  padding: var(--s-5);
+  border: var(--bd-2);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--sh-card);
+  text-align: center;
+}
+.stale__title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+.stale__body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-65);
 }
 
 /* --------------------------------------------------------------- 8 motion */
@@ -2720,15 +2909,184 @@ body[data-motion='reduce'] *::after {
 /* ------------------------------------------------------- narrow phones */
 /* 320px is the floor (iPhone SE 1). Everything below trims spend, never
    content - no control is dropped and nothing is allowed to overflow. */
+/* Short viewports - a phone held sideways. The sticky timeline drawer used to
+   bury the vinyl outright (it and the header covered the whole height, and
+   elementFromPoint on the hub hit the drawer). Here the drawer collapses to a
+   strip with its own scroll, the rail and the up-next line yield their rows
+   (the scoreboard stays one tap away on the menu), and the vinyl, countdown,
+   status, replay/skip links and the QR are on screen or a scroll below. */
+@media (max-height: 480px) {
+  body[data-screen='play'] .roster { display: none; }
+  .upnext { display: none; }
+  .screen--play .statusbar { padding-top: 8px; }
+  .whostrip { padding-top: 6px; }
+  .disc { margin-top: 0; }
+  .play__scroll { padding-top: 4px; }
+  .playfoot {
+    max-height: 38dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: 10px;
+  }
+}
+
 @media (max-width: 360px) {
   :root { --gutter: 16px; }
   .home__title { font-size: 38px; }
   .motif__rule--long { width: 22px; }
   .motif__rule { width: 12px; }
+  /* Smaller and tucked into the corner: at 320px the sticker's resting spot
+     lands on the motif's "1999" pill. */
+  .rpm { width: 50px; height: 50px; top: 44px; right: 8px; }
   .flip__face { min-height: 208px; padding: var(--s-4) var(--s-3); }
   .qr__code { width: 160px; }
   .whostrip__name { font-size: 15px; }
   .stepper__label { flex: 1 0 100%; margin-right: 0; }
   .betbtn { font-size: 12px; padding: 10px 6px; }
   .recap__row { font-size: 12px; }
+}
+
+/* --------------------------------------------------------------------------
+   Fast flow (live-playtest feedback: too many mandatory taps per turn)
+   -------------------------------------------------------------------------- */
+
+/* The self-advancing Next button: a fill drains left-to-right over the
+   auto-advance window so the room can see the turn is about to move on. The
+   fill is soft ink over the button's own raspberry, so no new palette colour
+   is introduced. Duration mirrors AUTONEXT_MS in ui.js. */
+#btn-next-player { position: relative; overflow: hidden; }
+#btn-next-player[data-autonext]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(36, 28, 21, 0.22);
+  transform-origin: left center;
+  transform: scaleX(0);
+  animation: autonext-drain 15s linear forwards;
+  pointer-events: none;
+}
+#btn-next-player > * { position: relative; }
+@keyframes autonext-drain {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+/* Reduced motion: the global kill rules above collapse every animation to
+   0.001ms, which would leave this fill fully drawn for the whole window - a
+   dark slab instead of a countdown. Drop the visual there; the auto-advance
+   itself is a JS timer and still runs. */
+body[data-motion='reduce'] #btn-next-player[data-autonext]::before { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  #btn-next-player[data-autonext]::before { display: none; }
+}
+/* ...but a JS timer with no indication is a silent context change. The static
+   "auto" tag in the button is the non-animated stand-in for the drain: shown
+   only while the advance is armed AND the fill is suppressed, and cleared the
+   moment any tap or key cancels the countdown. Soft ink over the button's own
+   raspberry, same as the fill - no new colour. */
+.btn__autotag {
+  display: none;
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: rgba(36, 28, 21, 0.22);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+body[data-motion='reduce'] #btn-next-player[data-autonext] .btn__autotag { display: inline-block; }
+@media (prefers-reduced-motion: reduce) {
+  #btn-next-player[data-autonext] .btn__autotag { display: inline-block; }
+}
+
+/* The pass screen's buy-instead escape hatch: quiet, under the hero tap. */
+.pass__buy {
+  display: block;
+  margin: 10px auto 0;
+  padding: 10px 16px;
+  max-width: 320px;
+  border: 1.5px dashed rgba(36, 28, 21, 0.4);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pass__buy:active { background: var(--accent-tint); }
+
+/* --------------------------------------------- 9 desktop and tall glass */
+/* (live-playtest feedback: on a desktop browser the moment screens scatter -
+   a thumbnail roster in the top-left corner, four hundred empty pixels, the
+   card, more empty pixels, Next pinned to the floor.)
+   The column keeps its phone width, but on big glass the moment screens
+   (pass / reveal / play) stop stretching to fill the viewport: each stack
+   gathers into one composed group, the reveal roster grows into real faces
+   spread across the column, and the artwork earns its place. Both gates sit
+   far above any handset - a phone in landscape clears 700 of width but never
+   700 of height - so phones cannot match this block. */
+@media (min-width: 700px) and (min-height: 700px) {
+
+  /* REVEAL - one composed card, centred as a block. The auto margins move to
+     the first and last children so the free height splits above and below the
+     whole group instead of being wedged between its pieces; when the reveal
+     DOES overflow (challenges, awards, votes), autos collapse to zero and the
+     screen scrolls from the top exactly as before. */
+  .screen--reveal { gap: var(--s-4); }
+  .roster--reveal { margin-top: auto; margin-bottom: 0; padding-top: 0; }
+  .screen--reveal .screen__foot {
+    margin-top: 0;
+    margin-bottom: auto;
+    padding-top: var(--s-2);
+    padding-bottom: var(--s-4);
+  }
+
+  /* The roster: real faces, spread evenly across the column. Auto inline
+     margins share the leftover width between every seat and collapse to the
+     plain gap if eight seats ever overflow - the rail still scrolls. */
+  .roster--reveal .roster__seats { padding-top: 12px; }
+  .roster--reveal .roster__seat { margin-inline: auto; }
+  .roster--reveal .roster__face { padding-bottom: 15px; }
+  .roster--reveal .roster__face .avatar { --avatar-size: 56px; }
+  .roster--reveal .roster__seat[data-rank='active'] .avatar { --avatar-size: 64px; }
+  /* Eight seats at 56px (64 active) plus gaps outgrow the 520px column, and
+     the rail hides its scrollbar - so the 8th avatar rendered half-clipped
+     with no affordance. A full table sizes its faces down until every seat
+     fits: 7x46 + 54 active + 7x8 gaps + 48 gutter = 480px, inside the ~517px
+     column. Engines without :has() keep the scrolling rail as before. */
+  .roster--reveal .roster__seats:has(> :nth-child(8)) { gap: 8px; }
+  .roster--reveal .roster__seats:has(> :nth-child(8)) .roster__face .avatar { --avatar-size: 46px; }
+  .roster--reveal .roster__seats:has(> :nth-child(8)) .roster__seat[data-rank='active'] .avatar { --avatar-size: 54px; }
+  .roster--reveal .roster__count {
+    right: -2px;
+    top: -2px;
+    min-width: 20px;
+    padding: 0 4px;
+    border-radius: 10px;
+    font-size: 11px;
+    line-height: 18px;
+  }
+  .roster--reveal .roster__crown { left: -4px; top: -10px; width: 18px; height: 18px; }
+  .roster--reveal .roster__flag { font-size: 10px; }
+  .roster--reveal .roster__team { justify-content: center; }
+
+  /* The artwork stops being a thumbnail. */
+  .reveal__art { width: 160px; height: 160px; margin-bottom: var(--s-3); }
+  .reveal__art-empty { font-size: 56px; }
+  .reveal__who .avatar--md { --avatar-size: 40px; }
+
+  /* PASS - hero and standings travel together instead of splitting the
+     leftover height between them. Same first/last auto-margin centring. */
+  .pass__hero {
+    flex: 0 0 auto;
+    margin-top: auto;
+    padding-top: var(--s-6);
+    padding-bottom: var(--s-5);
+  }
+  .screen--pass .standings { margin-bottom: auto; padding-bottom: var(--s-5); }
+
+  /* PLAY - the column flows from the top, so the timeline drawer follows the
+     QR block instead of being pushed a screenful below the vinyl. The drawer
+     is still sticky for the viewports where the column genuinely overflows. */
+  .play__scroll { flex: 0 0 auto; }
 }

@@ -128,7 +128,7 @@ It's built for a group sitting round a table with their phones out. No accounts,
 no sign-up, nothing to do with the league or your picks — anyone in the room can
 play, and once it has loaded once it keeps working even if the wifi drops.
 
-**Three ways to start it**
+**Two ways to start it**
 
 1. **Everyone's own phone, over your wifi** — the good one:
 
@@ -148,16 +148,15 @@ play, and once it has loaded once it keeps working even if the wifi drops.
    address everyone already has. It's deliberately outside the login, so guests
    don't need a league account to play.
 
-3. **Just open the file** — double-click `public/music/index.html`. Works
-   instantly on one device, no commands at all; it's the pass-the-phone way to
-   play. (The scan-to-listen QR can't work in this mode, and the game says so.)
+(Double-clicking `public/music/index.html` does **not** work — browsers refuse
+to run the game's modules from a bare file, so the page renders but no button
+does anything. Use `npm run music`; it's one command and needs no internet.)
 
 **The QR bit** — this is the trick that replaces physical cards. On the play
 screen there's a QR code next to the mystery song. Whoever's turn it is scans it
 with their own phone and the clip plays there instead, on a tiny page that shows
 nothing but a play button — no year, no title, no artist, so scanning can't
-spoil the answer for anyone. (This needs option 1 or 2 above —
-another phone can't open a file sitting on your laptop.)
+spoil the answer for anyone.
 
 **House rules, briefly**
 

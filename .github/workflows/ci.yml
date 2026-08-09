@@ -91,6 +91,13 @@ jobs:
         run: npm run test:e2e -- --trace retain-on-failure
       - name: Gameplay suite (mid-tournament)
         run: npm run test:e2e:gameplay -- --trace retain-on-failure
+      # The Music Timeline game (public/music/) is a static page with its own
+      # zero-dependency server on port 4310 — no build or database involved,
+      # so this reuses the browser install above and nothing else. Third in
+      # sequence for the same reason the first two are: one local server at a
+      # time.
+      - name: Music Timeline suite (party game)
+        run: npm run test:e2e:music -- --trace retain-on-failure
       # failure() alone would skip this when the job TIMES OUT (timeout
       # cancels rather than fails) — exactly the hung-run case where the
       # already-written traces matter most.

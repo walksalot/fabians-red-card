@@ -1,10 +1,10 @@
 // Zero-dependency LAN server for the Music Timeline game (public/music/).
 //
 // Why this exists: the game is meant to be played by a family sitting around one
-// table with a phone each. Opening index.html from file:// only ever works on the
-// device it lives on, and `npm run dev` boots the whole league app (database,
-// session cookies) just to hand out four static files. This serves those files
-// and nothing else, over the wifi everyone is already on, in one command.
+// table with a phone each. Opening index.html from file:// does not work at all -
+// browsers refuse ES module imports off disk - and `npm run dev` boots the whole
+// league app (database, session cookies) just to hand out four static files. This
+// serves those files and nothing else, over the wifi everyone is already on.
 //
 //   node scripts/music-server.mjs [--port 4173]      (or PORT=4173, or -p 4173)
 //
@@ -86,8 +86,10 @@ function contentType(filePath) {
  * Cache policy. HTML is never cached so an edit to index.html shows up on the
  * next pull-to-refresh; sw.js is never cached because it is the app's own update
  * channel and a year-old copy pinned in the HTTP cache would freeze the game for
- * good. Everything else is immutable — the service worker fetches its shell with
- * `cache: 'reload'`, so it can still pick up new bytes when its version bumps.
+ * good. Everything else is immutable — safe because the service worker fetches
+ * its shell with `cache: 'reload'` on VERSION-bump installs, which is the one
+ * moment new bytes must beat the year-long HTTP cache. (First-ever installs use
+ * default cache semantics instead, so a family's first visit is not paid twice.)
  */
 function cacheControl(filePath) {
   const ext = path.extname(filePath).toLowerCase();

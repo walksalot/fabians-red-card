@@ -6,8 +6,8 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b0b12",
-  "theme_color": "#0b0b12",
+  "background_color": "#ece3cd",
+  "theme_color": "#fff8e7",
   "lang": "en",
   "dir": "ltr",
   "categories": ["games", "music", "entertainment"],
@@ -23,6 +23,12 @@
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "maskable"
+    },
+    {
+      "src": "./apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

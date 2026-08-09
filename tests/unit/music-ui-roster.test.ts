@@ -1,0 +1,269 @@
+// The setup screen's name input used to file the row's photo into the avatar
+// library on EVERY keystroke - typing "Chris" stored the face under "c", "ch",
+// "chr"... and the library's 24-name cap then evicted every real person a
+// family had accumulated. The fix files on the commit only (the 'change' event,
+// which fires on blur/Enter) while still reading the library per keystroke.
+// These tests drive the real ui.js input wiring through a minimal DOM stand-in,
+// because the browser repro is exactly "type three prefixes, blur once".
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+/** Minimal Storage stand-in (same shape as music-storage.test.ts uses). */
+class FakeStorage {
+  private map = new Map<string, string>();
+
+  get length() {
+    return this.map.size;
+  }
+  key(i: number) {
+    return [...this.map.keys()][i] ?? null;
+  }
+  getItem(k: string) {
+    return this.map.has(k) ? (this.map.get(k) as string) : null;
+  }
+  setItem(k: string, v: string) {
+    this.map.set(k, v);
+  }
+  removeItem(k: string) {
+    this.map.delete(k);
+  }
+  clear() {
+    this.map.clear();
+  }
+}
+
+const photo = (tag: string) => `data:image/jpeg;base64,${tag}`;
+
+type Listener = (event: unknown) => void;
+
+/**
+ * The least DOM ui.js needs to boot headless: a document that collects
+ * listeners (readyState 'loading' defers init until we fire DOMContentLoaded
+ * ourselves), a body with a dataset, and getElementById that finds nothing -
+ * every render path in ui.js tolerates a missing node.
+ */
+function fakeDom() {
+  const listeners: Record<string, Listener[]> = {};
+  const collect = (type: string, fn: Listener) => {
+    (listeners[type] ??= []).push(fn);
+  };
+  const doc = {
+    readyState: 'loading',
+    addEventListener: collect,
+    getElementById: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    contains: () => false,
+    body: {
+      dataset: {} as Record<string, string>,
+      style: { setProperty() {} },
+    },
+  };
+  const win = {
+    location: {
+      search: '?debug=1',
+      protocol: 'http:',
+      hostname: '127.0.0.1',
+      pathname: '/music/',
+      origin: 'http://127.0.0.1',
+    },
+    addEventListener: collect,
+    matchMedia: undefined,
+    // Late-bound on purpose: a .bind() taken here would capture the REAL
+    // timers before a test installs vi.useFakeTimers(), and the debounce test
+    // below depends on fake timers reaching ui.js's window.setTimeout.
+    setTimeout: (...args: Parameters<typeof globalThis.setTimeout>) =>
+      globalThis.setTimeout(...args),
+    clearTimeout: (...args: Parameters<typeof globalThis.clearTimeout>) =>
+      globalThis.clearTimeout(...args),
+  };
+  return { doc, win, listeners };
+}
+
+/** A name input inside a roster row, as the delegated handler sees them. */
+function nameInput(playerIndex: number) {
+  const row = {
+    dataset: { playerIndex: String(playerIndex) },
+    querySelector: () => null,
+  };
+  return {
+    dataset: { role: 'player-name' },
+    value: '',
+    closest: (selector: string) =>
+      selector === '[data-player-index]' ? row : null,
+  };
+}
+
+let store: FakeStorage;
+let listeners: Record<string, Listener[]>;
+type StorageModule = typeof import('../../public/music/storage.js');
+let storage: StorageModule;
+// The debug seam ui.js publishes as window.__timeline when ?debug=1 is set.
+let seam: {
+  view: { setup: { players: Array<{ name: string; photo: string | null }> } };
+};
+
+const fire = (type: string, target: unknown) => {
+  // preventDefault: the delegated click handler calls it unconditionally once
+  // it finds a handler; input/change handlers never do.
+  for (const fn of listeners[type] ?? [])
+    fn({ type, target, preventDefault() {} });
+};
+
+/** The "+ Add player" button, as the delegated click handler sees it. */
+function addPlayerButton() {
+  const node: {
+    dataset: Record<string, string>;
+    disabled: boolean;
+    getAttribute: () => null;
+    closest: (selector: string) => typeof node | null;
+  } = {
+    dataset: { action: 'add-player' },
+    disabled: false,
+    getAttribute: () => null,
+    closest: (selector: string) => (selector === '[data-action]' ? node : null),
+  };
+  return node;
+}
+
+beforeEach(async () => {
+  vi.resetModules();
+  store = new FakeStorage();
+  const dom = fakeDom();
+  listeners = dom.listeners;
+  vi.stubGlobal('localStorage', store);
+  vi.stubGlobal('document', dom.doc);
+  vi.stubGlobal('window', dom.win);
+
+  storage = await import('../../public/music/storage.js');
+  await import('../../public/music/ui.js');
+  // readyState was 'loading', so init() is parked behind DOMContentLoaded.
+  fire('DOMContentLoaded', dom.doc);
+  seam = (dom.win as unknown as { __timeline: typeof seam }).__timeline;
+});
+
+describe('renaming a player with a photo', () => {
+  it('files the face under the finished name only, on blur - never per keystroke', () => {
+    // A library the family has accumulated, and a photo on row 2.
+    storage.rememberAvatar('Ana', photo('ana'));
+    const draft = seam.view.setup.players[1];
+    draft.photo = photo('mo');
+    draft.name = 'Mo';
+    storage.rememberAvatar('Mo', photo('mo'));
+
+    const input = nameInput(1);
+    for (const typed of ['C', 'Ch', 'Chris']) {
+      input.value = typed;
+      fire('input', input);
+    }
+    // Nothing filed yet: prefixes must never become library names.
+    expect(Object.keys(storage.loadAvatars()).sort()).toEqual(['ana', 'mo']);
+
+    // Blur commits ('change' fires on blur for a text input).
+    fire('change', input);
+
+    const names = Object.keys(storage.loadAvatars()).sort();
+    expect(names).toEqual(['ana', 'chris', 'mo']);
+    expect(storage.avatarsFor('Chris')).toContain(photo('mo'));
+    // The accumulated library survived the rename.
+    expect(storage.avatarsFor('Ana')).toContain(photo('ana'));
+  });
+
+  it('persists the typed name to the roster draft without waiting for another photo/skip action', () => {
+    // Fake timers, not a wall-clock sleep: a real 650ms wait flakes on a
+    // loaded runner and silently stops testing anything if the debounce
+    // constant ever grows past it. Advancing the clock is exact either way.
+    vi.useFakeTimers();
+    try {
+      const draft = seam.view.setup.players[0];
+      draft.name = 'Ana';
+      storage.savePlayers([{ name: 'Ana', photo: null, skipped: true }]);
+
+      const input = nameInput(0);
+      input.value = 'Annie';
+      fire('input', input);
+      // Just under the debounce: nothing must be saved yet (proves the wait
+      // below is testing the debounce, not an immediate write).
+      vi.advanceTimersByTime(400);
+      expect((storage.loadPlayers() as Array<{ name: string }>)[0].name).toBe(
+        'Ana',
+      );
+      vi.advanceTimersByTime(300);
+
+      const saved = storage.loadPlayers() as Array<{ name: string }>;
+      expect(saved[0].name).toBe('Annie');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('adding a player row', () => {
+  it('persists the added seat immediately, like every sibling setup control', () => {
+    // The round-5 repro: tap "+ Add player" once, touch nothing else, reload.
+    // The handler used to push the draft and render() without ever queueing a
+    // save - the ONE setup edit a reload silently reverted. No wait duration
+    // helps (nothing was queued), so this is deliberately not a debounce test:
+    // the write must exist synchronously after the tap.
+    expect(storage.loadPlayers()).toBeNull();
+    expect(seam.view.setup.players).toHaveLength(4);
+
+    fire('click', addPlayerButton());
+
+    expect(seam.view.setup.players).toHaveLength(5);
+    // The reload-shaped read: loadSavedPlayers() restores from exactly this.
+    const saved = storage.loadPlayers() as Array<{ name: string }> | null;
+    expect(saved).not.toBeNull();
+    expect(saved).toHaveLength(5);
+    expect(saved?.[4].name).toBe('Player 5');
+  });
+});
+
+describe('leaving the page mid-debounce', () => {
+  // The round-7 repro: edit the setup form, reload (or app-switch into a tab
+  // discard) within 500ms - every edit still sitting on a debounce timer was
+  // silently lost, against the code's own "everything set on this screen
+  // persists" promise. The fix flushes pending saves on pagehide and on the
+  // tab going hidden; these drive both events through the real listeners.
+  it('flushes a pending roster save on pagehide instead of losing the keystrokes', () => {
+    vi.useFakeTimers();
+    try {
+      const input = nameInput(0);
+      input.value = 'Zo';
+      fire('input', input);
+      // Inside the debounce window: nothing saved yet, which is exactly the
+      // reload-shaped loss the flush exists to stop.
+      vi.advanceTimersByTime(100);
+      expect(storage.loadPlayers()).toBeNull();
+
+      fire('pagehide', window);
+
+      const saved = storage.loadPlayers() as Array<{ name: string }> | null;
+      expect(saved?.[0].name).toBe('Zo');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flushes a pending setup-draft save when the tab goes hidden', () => {
+    vi.useFakeTimers();
+    try {
+      // The venmo handle rides the same 500ms setup-draft debounce as the
+      // target and buy-in switch; the delegated handler needs only id+value.
+      const field = { id: 'buyin-venmo', value: '@fabian-pays', dataset: {} };
+      fire('input', field);
+      vi.advanceTimersByTime(100);
+      expect(storage.get('setup')).toBeNull();
+
+      (document as unknown as { visibilityState: string }).visibilityState =
+        'hidden';
+      fire('visibilitychange', document);
+
+      const draft = storage.get('setup') as {
+        buyin: { handle: string };
+      } | null;
+      expect(draft?.buyin.handle).toBe('@fabian-pays');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

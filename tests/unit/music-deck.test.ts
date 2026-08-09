@@ -26,7 +26,11 @@ describe('deck data', () => {
     // A single game consumes roughly 40-80 cards (measured by playing games
     // through the engine), so a 300-card deck started repeating by the third
     // game of the night. This floor is what keeps that from creeping back.
-    expect(DECK.length).toBeGreaterThanOrEqual(550);
+    // Raised to the deck's actual size after the 2026-08 expansion so an
+    // accidental deletion of cards cannot pass unnoticed. 1185, not 1186:
+    // round-4 QA found "Puff, the Magic Dragon" listed twice ('&' vs 'and' in
+    // the artist slug), and the 'and' duplicate was removed.
+    expect(DECK.length).toBeGreaterThanOrEqual(1185);
   });
 
   it('has unique ids', () => {
@@ -70,7 +74,7 @@ describe('deck data', () => {
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     // Four, not three: at 300 cards a third card by one artist was 1% of the
-    // deck, and the cap was cutting genuinely famous songs. At 1080 it is under
+    // deck, and the cap was cutting genuinely famous songs. At 1185 it is under
     // half a percent, so the cap can afford to breathe without the deck starting
     // to feel like somebody's favourites list.
     const offenders = [...counts.entries()].filter(([, n]) => n > 4);
