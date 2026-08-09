@@ -1236,6 +1236,14 @@ body[data-mode='coop'] .roster__team { display: flex; }
   font-weight: 600;
   color: var(--ink-55);
 }
+/* The duplicate-name note; ui.js shows it when two rows fold to the same
+   name. Informational only - deliberate twins are a real party guest list. */
+.player-row__dupe {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-50);
+}
 .player-row[data-photo-state='photo'] .player-row__status { color: var(--good-text); }
 .player-row__skip[aria-pressed='true'] {
   border: var(--bd);

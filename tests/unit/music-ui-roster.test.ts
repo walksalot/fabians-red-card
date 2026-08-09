@@ -217,3 +217,53 @@ describe('adding a player row', () => {
     expect(saved?.[4].name).toBe('Player 5');
   });
 });
+
+describe('leaving the page mid-debounce', () => {
+  // The round-7 repro: edit the setup form, reload (or app-switch into a tab
+  // discard) within 500ms - every edit still sitting on a debounce timer was
+  // silently lost, against the code's own "everything set on this screen
+  // persists" promise. The fix flushes pending saves on pagehide and on the
+  // tab going hidden; these drive both events through the real listeners.
+  it('flushes a pending roster save on pagehide instead of losing the keystrokes', () => {
+    vi.useFakeTimers();
+    try {
+      const input = nameInput(0);
+      input.value = 'Zo';
+      fire('input', input);
+      // Inside the debounce window: nothing saved yet, which is exactly the
+      // reload-shaped loss the flush exists to stop.
+      vi.advanceTimersByTime(100);
+      expect(storage.loadPlayers()).toBeNull();
+
+      fire('pagehide', window);
+
+      const saved = storage.loadPlayers() as Array<{ name: string }> | null;
+      expect(saved?.[0].name).toBe('Zo');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('flushes a pending setup-draft save when the tab goes hidden', () => {
+    vi.useFakeTimers();
+    try {
+      // The venmo handle rides the same 500ms setup-draft debounce as the
+      // target and buy-in switch; the delegated handler needs only id+value.
+      const field = { id: 'buyin-venmo', value: '@fabian-pays', dataset: {} };
+      fire('input', field);
+      vi.advanceTimersByTime(100);
+      expect(storage.get('setup')).toBeNull();
+
+      (document as unknown as { visibilityState: string }).visibilityState =
+        'hidden';
+      fire('visibilitychange', document);
+
+      const draft = storage.get('setup') as {
+        buyin: { handle: string };
+      } | null;
+      expect(draft?.buyin.handle).toBe('@fabian-pays');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

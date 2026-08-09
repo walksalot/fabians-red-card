@@ -11,7 +11,7 @@
   --bg: #08070c;
   --ink: #f7f5fc;
   --ink-dim: #a8a2c0;
-  --ink-faint: #6d6788;
+  --ink-faint: #817aa0; /* 5.0:1 on --bg - the footnote is body copy, AA applies */
 
   --violet: #8b5cf6;
   --violet-soft: #a78bfa;

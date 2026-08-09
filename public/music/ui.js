@@ -755,6 +755,20 @@ function queueSetupSave() {
   }, 500);
 }
 
+/**
+ * The debounces above trade sixteen writes for one - the wrong trade in the
+ * one moment the page is going away, when an edit made inside the 500ms
+ * window would simply be lost. Flush, never re-debounce: a timer restarted on
+ * pagehide runs after the page is gone, which is to say never. Wired to both
+ * pagehide (the last reliable tick on iOS Safari - beforeunload is not) and
+ * the tab going hidden, because a hidden tab can be discarded without ever
+ * coming back.
+ */
+function flushPendingSaves() {
+  if (rosterSaveTimer !== null) rememberRoster();
+  if (setupSaveTimer !== null) saveSetupDraft();
+}
+
 /** Restore the draft, field by field - a corrupt or partial payload restores
  * what it can and defaults the rest, never throws. */
 function loadSetupDraft() {
@@ -1515,6 +1529,33 @@ function paintNameCount(row, draft) {
   show(count, near);
 }
 
+/**
+ * Two family members really can share a name, so a duplicate never blocks the
+ * start - but the pass screen's one job is naming who gets the phone, and
+ * "Alex, then Alex" deserves a heads-up while a thumb is still on the
+ * keyboard. Painted across ALL rows on every name edit, because clearing the
+ * clash in one row has to clear the note in the other.
+ */
+function paintDupeNames() {
+  const list = el('player-list');
+  if (!list) return;
+  const folded = view.setup.players.map((p) =>
+    (p.name || '').trim().toLowerCase(),
+  );
+  folded.forEach((name, index) => {
+    const row = list.children[index];
+    if (!row) return;
+    const note = row.querySelector('[data-field="dupe"]');
+    if (!note) return;
+    const twin = name
+      ? folded.findIndex((other, j) => j !== index && other === name)
+      : -1;
+    if (twin !== -1)
+      note.textContent = `Same name as player ${twin + 1} — fine if that's on purpose.`;
+    show(note, twin !== -1);
+  });
+}
+
 function renderPlayerRows() {
   const list = el('player-list');
   if (!list) return;
@@ -1598,6 +1639,8 @@ function renderPlayerRows() {
     );
   });
 
+  paintDupeNames();
+
   text(
     'player-count-note',
     `${drafts.length} player${drafts.length === 1 ? '' : 's'}`,
@@ -1639,24 +1682,42 @@ function paintBuyin() {
   // caret to the end while somebody is still typing their handle.
   if (field && field.value !== buyin.handle) field.value = buyin.handle;
 
+  // Both hints below talk about "the winner", and co-op does not have one -
+  // its win screen deliberately pays nobody ("settle it together"). Mode
+  // changes reach here through renderSetup(), so the copy follows the mode
+  // radio, not just the buy-in fields.
+  const coop = view.setup.mode === 'coop';
+  const switchHint = el('buyin-switch-hint');
+  if (switchHint) {
+    switchHint.textContent = coop
+      ? 'Everyone chips in the same. Co-op has no winner — settle it together.'
+      : 'Everyone chips in the same. Winner takes the pot.';
+  }
+
   // Live validation, in normaliseHandle's own terms: the winner screen will
   // pay whatever that function reads out of this field, so the person typing
   // gets shown that exact reading - or told there is none - right here, not
-  // after the game. Empty is fine (the handle is optional).
+  // after the game. Empty is fine (the handle is optional). In co-op the
+  // handle is not used at all, and the one thing this line must never do is
+  // promise a payout the co-op win screen was designed not to make.
   const hint = el('buyin-venmo-hint');
   const typed = (buyin.handle || '').trim();
   const handle = normaliseHandle(typed);
   if (hint) {
-    hint.dataset.tone = typed && !handle ? 'bad' : 'ok';
+    hint.dataset.tone = !coop && typed && !handle ? 'bad' : 'ok';
     hint.textContent = !typed
       ? ''
-      : handle
-        ? `The winner screen will pay @${handle}`
-        : "That's not a Venmo handle or profile link — it won't be on the winner screen";
+      : coop
+        ? "Co-op has no single winner — you'll settle it together, so this handle isn't used."
+        : handle
+          ? `The winner screen will pay @${handle}`
+          : "That's not a Venmo handle or profile link — it won't be on the winner screen";
     show(hint, !!typed);
   }
   if (field) {
-    if (typed && !handle) field.setAttribute('aria-invalid', 'true');
+    // Validation noise over a field the mode ignores would contradict the
+    // hint, so co-op never flags the handle invalid.
+    if (!coop && typed && !handle) field.setAttribute('aria-invalid', 'true');
     else field.removeAttribute('aria-invalid');
   }
 
@@ -2362,12 +2423,24 @@ async function toggleAudio(quiet = false) {
     // frozen countdown and a button already relabelled "Play song" - the one
     // line on the screen stating a falsehood. Written here, on the deliberate
     // pause only, so the failure and fallback copies are never overwritten.
+    //
+    // The bump matters as much as the copy: this pause also rejects any play()
+    // still settling from an EARLIER call (the fast-flow autostart, a resume)
+    // with an AbortError the player deliberately reports as success. Without a
+    // new token that stale continuation would stamp "Playing the preview."
+    // right back over this line - a paused, silent player captioned as playing
+    // until the next tap.
+    view.audio.token += 1;
     view.audio.status = 'Paused — tap play to continue.';
     render();
     return;
   }
   if (view.audio.resolved && view.audio.resolved.previewUrl) {
+    // Same token guard as the paths below: a pause taken while this play()
+    // settles must win the last word on the status line.
+    const resumeToken = view.audio.token;
     const started = await p.play(view.audio.resolved.previewUrl);
+    if (resumeToken !== view.audio.token) return;
     if (!started && !quiet) failAudio('That preview would not play here.');
     else if (started) {
       // The resume must speak too, or the paused copy above outlives the
@@ -2467,8 +2540,12 @@ function replayAudio() {
   const p = player();
   p.seek(0);
   if (view.audio.resolved && view.audio.resolved.previewUrl) {
+    // The toggle paths' token guard, for the same reason: a vinyl tap that
+    // pauses while this replay settles must not be talked over.
+    const token = view.audio.token;
     p.play(view.audio.resolved.previewUrl)
       .then((started) => {
+        if (token !== view.audio.token) return;
         if (!started) failAudio('That preview would not play here.');
         else {
           // A replay taken while paused (or after the 30s ran out) is playing
@@ -4612,6 +4689,9 @@ function onInput(event) {
     // used to leave "Zoe is already playing" on a chip for the rest of setup.
     paintRowLabels(row, draft, index);
     paintNameCount(row, draft);
+    // All rows, not just this one: this keystroke may have created a twin for
+    // another row's note - or dissolved one.
+    paintDupeNames();
     paintPeople();
     return;
   }
@@ -4841,6 +4921,12 @@ function init() {
   document.addEventListener('change', onInput);
   document.addEventListener('keydown', onKeydown);
   window.addEventListener('resize', onResize);
+  // The debounced setup saves flush before the page can vanish - see
+  // flushPendingSaves() for why both events, and why flush rather than wait.
+  window.addEventListener('pagehide', flushPendingSaves);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPendingSaves();
+  });
   // The reveal screen only: any tap on it cancels the fast-flow countdown.
   const revealScreen = el('reveal');
   if (revealScreen)

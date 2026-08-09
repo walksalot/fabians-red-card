@@ -663,7 +663,9 @@
             <input type="checkbox" id="opt-buyin">
             <span class="switch__text">
               <span class="switch__title">Buy-in</span>
-              <span class="switch__hint">Everyone chips in the same. Winner takes the pot.</span>
+              <!-- ui.js repaints this per mode: co-op has no winner to take
+                   anything, so its variant says "settle it together" instead. -->
+              <span class="switch__hint" id="buyin-switch-hint">Everyone chips in the same. Winner takes the pot.</span>
             </span>
             <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
           </label>
@@ -1447,6 +1449,9 @@
         Skip photo
       </button>
     </p>
+    <!-- Two rows folding to the same name. Deliberate twins are allowed, so
+         this only informs - ui.js paints and shows it; it never blocks Start. -->
+    <p class="player-row__dupe" data-field="dupe" hidden>Same name as another player</p>
     <!-- Faces already saved under this name. ui.js fills and unhides it as the
          name is typed; it stays [hidden] when we hold nothing for that name. -->
     <div class="player-row__saved" data-role="saved-avatars" hidden>
