@@ -77,4 +77,4 @@ jobs:
             Be concrete: cite file:line, describe the failure scenario, and
             keep style nitpicks out unless they hide a bug. If everything is
             sound, say so briefly.
-          claude_args: --model claude-fable-5
+          claude_args: --model claude-fable-5-1
