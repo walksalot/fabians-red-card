@@ -1,4 +1,4 @@
-# Automatic PR review by Claude (pinned to Fable 5) — the league's preferred
+# Automatic PR review by Claude (pinned to Opus 5.5) — the league's preferred
 # reviewer. Advisory by design: it can never block a merge or a deploy.
 #
 #   - Requires the ANTHROPIC_API_KEY repository secret (Settings → Secrets and
@@ -36,7 +36,7 @@ concurrency:
 
 jobs:
   claude-review:
-    name: Review by Claude (Fable 5)
+    name: Review by Claude (Opus 5.5)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: ${{ !github.event.pull_request.draft }}
@@ -77,4 +77,4 @@ jobs:
             Be concrete: cite file:line, describe the failure scenario, and
             keep style nitpicks out unless they hide a bug. If everything is
             sound, say so briefly.
-          claude_args: --model claude-fable-5-1
+          claude_args: --model claude-opus-5-5
