@@ -17,7 +17,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - Install with `npx npm@11 ci`: the lockfile needs npm >= 11, and Node 22's bundled npm 10 fails with a misleading "Missing: esbuild… from lock file".
 - `npm run setup` writes `.env.local` and creates `.data/app.db` with all 104 matches, printing the admin login on first run; `npm run seed` re-seeds and never overwrites results or users.
-- CI runs `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, then `npm run test:e2e` and `npm run test:e2e:gameplay` one after the other (servers on ports 3100/3200; never run both suites at once, `npm run test:e2e:all` runs them in sequence).
+- CI (`.github/workflows/ci.yml`) runs fixture validation, `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, both e2e suites and a Docker build-and-boot. Never run the two e2e suites at once (ports 3100/3200, and each re-seeds both e2e databases); `npm run test:e2e:all` runs them in sequence.
 - `CONTRACTS.md` is the contract for schema, services, API envelope and Next 16 conventions; logic reads time from `now()` in `@/lib/clock` (e2e pins it with `FAKE_NOW`), never `new Date()`.
 - Merging to `main` deploys to the live league on Railway (https://fabians-red-card-production.up.railway.app); `main` has no branch protection or ruleset, so a PR can merge with red checks.
 - Never run `scripts/verify-prod.mjs`: it writes to the live league (launch-day only).
