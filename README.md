@@ -6,18 +6,21 @@
 > - **Where the league data lives:** a final copy of everything (all 17 entries' picks for
 >   all 104 matches, results, points, standings, league settings, the calendar feed, and a
 >   saved copy of the Table, Rules, History, Profile, Bracket and final-day pages with
->   screenshots and PDFs) is kept privately on Kris's Mac Studio in
+>   screenshots and PDFs, plus a copy of the SQLite database and its daily backups) is
+>   kept privately on Kris's Mac Studio in
 >   `~/Documents/Archives/fabians-red-card-2026/`. It is not in this repo because the repo
 >   is public and the data holds the friends' names and picks.
 > - **The database itself is kept:** the Railway project `fabians-red-card` and its volume
->   (`/data/app.db` plus the daily backups in `/data/backups`) were not deleted. Only the
->   running deployment was removed.
+>   (the live database `/data/league.db`, which `DB_PATH` points to, plus the daily backups
+>   in `/data/backups`) were not deleted. Only the running deployment was removed.
 > - **Merging to `main` no longer deploys:** the Railway auto-deploy from GitHub was
 >   switched off, and the 6-hourly "Live site smoke check" workflow is disabled.
-> - **To bring it back:** in Railway, reconnect this repo to the `fabians-red-card`
->   service (Settings, Source, branch `main`) and redeploy; the volume and `DB_PATH`
->   variable are still in place. Then re-enable the smoke check with
->   `gh workflow enable smoke.yml`.
+> - **To bring it back:** the repo is still connected to the `fabians-red-card` service;
+>   only its `main` branch deploy trigger was removed. In Railway, service Settings, Source,
+>   re-add the `main` branch trigger and deploy, or run `railway up` from a clean copy of
+>   `main` (on 2026-09-25 a plain Redeploy failed with an empty build log, while `railway up`
+>   worked). The volume and `DB_PATH` variable are still in place. Then re-enable the smoke
+>   check with `gh workflow enable smoke.yml`.
 
 **👀 Click around the demo:** https://walksalot.github.io/fabians-red-card/
 *(read-only preview with sample data — the real app is fully interactive; see `DEPLOY.md` to put the real league online in ~5 minutes)*
