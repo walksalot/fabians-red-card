@@ -1,5 +1,24 @@
 # Fabian's Red Card — World Cup 2026 Prediction Pool
 
+> **Season archived (2026-09-25).** The World Cup ended on July 19, 2026, and the live
+> league site (`fabians-red-card-production.up.railway.app`) has been shut down.
+>
+> - **Where the league data lives:** a final copy of everything (all 17 entries' picks for
+>   all 104 matches, results, points, standings, league settings, the calendar feed, and a
+>   saved copy of the Table, Rules, History, Profile, Bracket and final-day pages with
+>   screenshots and PDFs) is kept privately on Kris's Mac Studio in
+>   `~/Documents/Archives/fabians-red-card-2026/`. It is not in this repo because the repo
+>   is public and the data holds the friends' names and picks.
+> - **The database itself is kept:** the Railway project `fabians-red-card` and its volume
+>   (`/data/app.db` plus the daily backups in `/data/backups`) were not deleted. Only the
+>   running deployment was removed.
+> - **Merging to `main` no longer deploys:** the Railway auto-deploy from GitHub was
+>   switched off, and the 6-hourly "Live site smoke check" workflow is disabled.
+> - **To bring it back:** in Railway, reconnect this repo to the `fabians-red-card`
+>   service (Settings, Source, branch `main`) and redeploy; the volume and `DB_PATH`
+>   variable are still in place. Then re-enable the smoke check with
+>   `gh workflow enable smoke.yml`.
+
 **👀 Click around the demo:** https://walksalot.github.io/fabians-red-card/
 *(read-only preview with sample data — the real app is fully interactive; see `DEPLOY.md` to put the real league online in ~5 minutes)*
 
