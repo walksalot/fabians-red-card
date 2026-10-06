@@ -1,0 +1,24 @@
+{
+  "_source": "ESPN public scoreboard (DraftKings lines), fetched 2026-06-11 for WC2026 group matches. American moneylines (close, falling back to open) + over/under total.",
+  "matches": [
+    { "home": "Canada", "away": "Bosnia", "homeML": -120, "drawML": 250, "awayML": 360, "ou": 2.5 },
+    { "home": "United States", "away": "Paraguay", "homeML": -105, "drawML": 240, "awayML": 310, "ou": 2.5 },
+    { "home": "Switzerland", "away": "Qatar", "homeML": 1200, "drawML": 550, "awayML": -425, "ou": 2.5 },
+    { "home": "Morocco", "away": "Brazil", "homeML": -160, "drawML": 285, "awayML": 475, "ou": 2.5 },
+    { "home": "Scotland", "away": "Haiti", "homeML": 500, "drawML": 320, "awayML": -175, "ou": 2.5 },
+    { "home": "Australia", "away": "Turkiye", "homeML": 400, "drawML": 280, "awayML": -140, "ou": 2.5 },
+    { "home": "Germany", "away": "Curacao", "homeML": -3000, "drawML": 1500, "awayML": 2800, "ou": 4.5 },
+    { "home": "Netherlands", "away": "Japan", "homeML": 100, "drawML": 245, "awayML": 260, "ou": 2.5 },
+    { "home": "Ivory Coast", "away": "Ecuador", "homeML": 260, "drawML": 185, "awayML": 145, "ou": 1.5 },
+    { "home": "Sweden", "away": "Tunisia", "homeML": -110, "drawML": 245, "awayML": 330, "ou": 2.5 },
+    { "home": "Spain", "away": "Cape Verde", "homeML": -1200, "drawML": 1100, "awayML": 2500, "ou": 3.5 },
+    { "home": "Belgium", "away": "Egypt", "homeML": -160, "drawML": 285, "awayML": 425, "ou": 2.5 },
+    { "home": "Saudi Arabia", "away": "Uruguay", "homeML": 650, "drawML": 350, "awayML": -220, "ou": 2.5 },
+    { "home": "Iran", "away": "New Zealand", "homeML": -120, "drawML": 250, "awayML": 370, "ou": 2.5 },
+    { "home": "Austria", "away": "Jordan", "homeML": -310, "drawML": 450, "awayML": 850, "ou": 2.5 },
+    { "home": "Portugal", "away": "Congo DR", "homeML": -350, "drawML": 475, "awayML": 1000, "ou": 2.5 },
+    { "home": "England", "away": "Croatia", "homeML": -140, "drawML": 285, "awayML": 380, "ou": 2.5 },
+    { "home": "Ghana", "away": "Panama", "homeML": 110, "drawML": 245, "awayML": 260, "ou": 2.5 },
+    { "home": "Uzbekistan", "away": "Colombia", "homeML": 750, "drawML": 370, "awayML": -250, "ou": 2.5 }
+  ]
+}

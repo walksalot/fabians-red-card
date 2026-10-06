@@ -1,0 +1,851 @@
+{
+  "rosterTeams": 48,
+  "totalPlayers": 1246,
+  "evaluableFixtures": 72,
+  "nonEvaluableFixtures": 32,
+  "teamSurnameCollisions": {
+    "teamsWithCollisions": 27,
+    "totalCollidingSurnameGroups": 44,
+    "totalPlayersInCollidingGroups": 93,
+    "perTeam": {
+      "ARG": {
+        "team": "Argentina",
+        "collisions": [
+          {
+            "token": "martinez",
+            "count": 3,
+            "players": [
+              "Emiliano Martínez",
+              "Lisandro Martínez",
+              "Lautaro Martínez"
+            ]
+          }
+        ]
+      },
+      "AUT": {
+        "team": "Austria",
+        "collisions": [
+          {
+            "token": "schlager",
+            "count": 2,
+            "players": [
+              "Alexander Schlager",
+              "Xaver Schlager"
+            ]
+          }
+        ]
+      },
+      "BRA": {
+        "team": "Brazil",
+        "collisions": [
+          {
+            "token": "ederson",
+            "count": 2,
+            "players": [
+              "Ederson",
+              "Éderson"
+            ]
+          },
+          {
+            "token": "santos",
+            "count": 2,
+            "players": [
+              "Douglas Santos",
+              "Danilo Santos"
+            ]
+          },
+          {
+            "token": "null",
+            "count": 2,
+            "players": [
+              "Casemiro null",
+              "Endrick null"
+            ]
+          }
+        ]
+      },
+      "CAN": {
+        "team": "Canada",
+        "collisions": [
+          {
+            "token": "david",
+            "count": 2,
+            "players": [
+              "Jonathan David",
+              "Promise David"
+            ]
+          }
+        ]
+      },
+      "CPV": {
+        "team": "Cabo Verde",
+        "collisions": [
+          {
+            "token": "costa",
+            "count": 2,
+            "players": [
+              "Logan Costa",
+              "Nuno da Costa"
+            ]
+          },
+          {
+            "token": "cabral",
+            "count": 2,
+            "players": [
+              "Sidny Lopes Cabral",
+              "Jovane Cabral"
+            ]
+          },
+          {
+            "token": "pina",
+            "count": 2,
+            "players": [
+              "Wagner Pina",
+              "Kevin Pina"
+            ]
+          },
+          {
+            "token": "semedo",
+            "count": 2,
+            "players": [
+              "Yannick Semedo",
+              "Willy Semedo"
+            ]
+          },
+          {
+            "token": "duarte",
+            "count": 2,
+            "players": [
+              "Laros Duarte",
+              "Deroy Duarte"
+            ]
+          }
+        ]
+      },
+      "COL": {
+        "team": "Colombia",
+        "collisions": [
+          {
+            "token": "arias",
+            "count": 2,
+            "players": [
+              "Santiago Arias",
+              "Jhon Arias"
+            ]
+          }
+        ]
+      },
+      "COD": {
+        "team": "Congo DR",
+        "collisions": [
+          {
+            "token": "kayembe",
+            "count": 2,
+            "players": [
+              "Joris Kayembe",
+              "Edo Kayembe"
+            ]
+          }
+        ]
+      },
+      "CRO": {
+        "team": "Croatia",
+        "collisions": [
+          {
+            "token": "pasalic",
+            "count": 2,
+            "players": [
+              "Mario Pasalic",
+              "Marco Pasalic"
+            ]
+          },
+          {
+            "token": "sucic",
+            "count": 2,
+            "players": [
+              "Luka Sucic",
+              "Petar Sucic"
+            ]
+          }
+        ]
+      },
+      "CUW": {
+        "team": "Curaçao",
+        "collisions": [
+          {
+            "token": "bacuna",
+            "count": 2,
+            "players": [
+              "Leandro Bacuna",
+              "Juninho Bacuna"
+            ]
+          }
+        ]
+      },
+      "ECU": {
+        "team": "Ecuador",
+        "collisions": [
+          {
+            "token": "caicedo",
+            "count": 2,
+            "players": [
+              "Moisés Caicedo",
+              "Jordy Caicedo"
+            ]
+          },
+          {
+            "token": "valencia",
+            "count": 2,
+            "players": [
+              "Enner Valencia",
+              "Anthony Valencia"
+            ]
+          }
+        ]
+      },
+      "EGY": {
+        "team": "Egypt",
+        "collisions": [
+          {
+            "token": "alaa",
+            "count": 2,
+            "players": [
+              "Mohamed Alaa",
+              "Tarek Alaa"
+            ]
+          },
+          {
+            "token": "null",
+            "count": 2,
+            "players": [
+              "Trézéguet null",
+              "Zizo null"
+            ]
+          }
+        ]
+      },
+      "ENG": {
+        "team": "England",
+        "collisions": [
+          {
+            "token": "henderson",
+            "count": 2,
+            "players": [
+              "Dean Henderson",
+              "Jordan Henderson"
+            ]
+          }
+        ]
+      },
+      "FRA": {
+        "team": "France",
+        "collisions": [
+          {
+            "token": "hernandez",
+            "count": 2,
+            "players": [
+              "Lucas Hernández",
+              "Theo Hernández"
+            ]
+          }
+        ]
+      },
+      "HAI": {
+        "team": "Haiti",
+        "collisions": [
+          {
+            "token": "pierre",
+            "count": 3,
+            "players": [
+              "Alexandre Pierre",
+              "Leverton Pierre",
+              "Woodensky Pierre"
+            ]
+          }
+        ]
+      },
+      "IRQ": {
+        "team": "Iraq",
+        "collisions": [
+          {
+            "token": "ali",
+            "count": 2,
+            "players": [
+              "Hussein Ali",
+              "Mohanad Ali"
+            ]
+          }
+        ]
+      },
+      "CIV": {
+        "team": "Côte d'Ivoire",
+        "collisions": [
+          {
+            "token": "fofana",
+            "count": 2,
+            "players": [
+              "Yahia Fofana",
+              "Seko Fofana"
+            ]
+          },
+          {
+            "token": "diomande",
+            "count": 2,
+            "players": [
+              "Ousmane Diomande",
+              "Yan Diomande"
+            ]
+          }
+        ]
+      },
+      "JPN": {
+        "team": "Japan",
+        "collisions": [
+          {
+            "token": "suzuki",
+            "count": 3,
+            "players": [
+              "Zion Suzuki",
+              "Junnosuke Suzuki",
+              "Yuito Suzuki"
+            ]
+          },
+          {
+            "token": "ito",
+            "count": 2,
+            "players": [
+              "Hiroki Ito",
+              "Junya Ito"
+            ]
+          }
+        ]
+      },
+      "MEX": {
+        "team": "Mexico",
+        "collisions": [
+          {
+            "token": "chavez",
+            "count": 2,
+            "players": [
+              "Mateo Chávez",
+              "Luis Chávez"
+            ]
+          }
+        ]
+      },
+      "PAN": {
+        "team": "Panama",
+        "collisions": [
+          {
+            "token": "rodriguez",
+            "count": 2,
+            "players": [
+              "José Luis Rodríguez",
+              "Tomás Rodríguez"
+            ]
+          }
+        ]
+      },
+      "PAR": {
+        "team": "Paraguay",
+        "collisions": [
+          {
+            "token": "gomez",
+            "count": 2,
+            "players": [
+              "Gustavo Gómez",
+              "Diego Gómez"
+            ]
+          }
+        ]
+      },
+      "POR": {
+        "team": "Portugal",
+        "collisions": [
+          {
+            "token": "silva",
+            "count": 2,
+            "players": [
+              "Rui Silva",
+              "Bernardo Silva"
+            ]
+          },
+          {
+            "token": "costa",
+            "count": 2,
+            "players": [
+              "Diogo Costa",
+              "Samú Costa"
+            ]
+          },
+          {
+            "token": "neves",
+            "count": 2,
+            "players": [
+              "Rúben Neves",
+              "João Neves"
+            ]
+          }
+        ]
+      },
+      "KSA": {
+        "team": "Saudi Arabia",
+        "collisions": [
+          {
+            "token": "al-dawsari",
+            "count": 2,
+            "players": [
+              "Salem Al-Dawsari",
+              "Nasser Al-Dawsari"
+            ]
+          }
+        ]
+      },
+      "SEN": {
+        "team": "Senegal",
+        "collisions": [
+          {
+            "token": "sarr",
+            "count": 3,
+            "players": [
+              "Mamadou Sarr",
+              "Pape Matar Sarr",
+              "Ismaïla Sarr"
+            ]
+          },
+          {
+            "token": "ndiaye",
+            "count": 3,
+            "players": [
+              "Bara Sapoko Ndiaye",
+              "Cherif Ndiaye",
+              "Iliman Ndiaye"
+            ]
+          },
+          {
+            "token": "mendy",
+            "count": 2,
+            "players": [
+              "Édouard Mendy",
+              "Antoine Mendy"
+            ]
+          },
+          {
+            "token": "diouf",
+            "count": 2,
+            "players": [
+              "Yehvann Diouf",
+              "El Hadji Malick Diouf"
+            ]
+          },
+          {
+            "token": "gueye",
+            "count": 2,
+            "players": [
+              "Idrissa Gueye",
+              "Pape Gueye"
+            ]
+          }
+        ]
+      },
+      "ESP": {
+        "team": "Spain",
+        "collisions": [
+          {
+            "token": "garcia",
+            "count": 2,
+            "players": [
+              "Joan García",
+              "Eric García"
+            ]
+          }
+        ]
+      },
+      "SWE": {
+        "team": "Sweden",
+        "collisions": [
+          {
+            "token": "johansson",
+            "count": 2,
+            "players": [
+              "Viktor Johansson",
+              "Herman Johansson"
+            ]
+          }
+        ]
+      },
+      "USA": {
+        "team": "United States",
+        "collisions": [
+          {
+            "token": "robinson",
+            "count": 2,
+            "players": [
+              "Antonee Robinson",
+              "Miles Robinson"
+            ]
+          }
+        ]
+      },
+      "URU": {
+        "team": "Uruguay",
+        "collisions": [
+          {
+            "token": "araujo",
+            "count": 2,
+            "players": [
+              "Ronald Araújo",
+              "Maxi Araújo"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "top10ExploitableFixtures": [
+    {
+      "n": 5,
+      "fixture": "Haiti v Scotland",
+      "codes": "HAI/SCO",
+      "bestPick": "pierre",
+      "playersCovered": 3,
+      "matchedPlayers": [
+        "Alexandre Pierre",
+        "Leverton Pierre",
+        "Woodensky Pierre"
+      ],
+      "crossesTeams": false
+    },
+    {
+      "n": 11,
+      "fixture": "Netherlands v Japan",
+      "codes": "NED/JPN",
+      "bestPick": "suzuki",
+      "playersCovered": 3,
+      "matchedPlayers": [
+        "Zion Suzuki",
+        "Junnosuke Suzuki",
+        "Yuito Suzuki"
+      ],
+      "crossesTeams": false
+    },
+    {
+      "n": 17,
+      "fixture": "France v Senegal",
+      "codes": "FRA/SEN",
+      "bestPick": "sarr",
+      "playersCovered": 3,
+      "matchedPlayers": [
+        "Mamadou Sarr",
+        "Pape Matar Sarr",
+        "Ismaïla Sarr"
+      ],
+      "crossesTeams": false
+    },
+    {
+      "n": 19,
+      "fixture": "Argentina v Algeria",
+      "codes": "ARG/ALG",
+      "bestPick": "martinez",
+      "playersCovered": 3,
+      "matchedPlayers": [
+        "Emiliano Martínez",
+        "Lisandro Martínez",
+        "Lautaro Martínez"
+      ],
+      "crossesTeams": false
+    },
+    {
+      "n": 29,
+      "fixture": "Brazil v Haiti",
+      "codes": "BRA/HAI",
+      "bestPick": "pierre",
+      "playersCovered": 3,
+      "matchedPlayers": [
+        "Alexandre Pierre",
+        "Leverton Pierre",
+        "Woodensky Pierre"
+      ],
+      "crossesTeams": false
+    },
+    {
+      "n": 36,
+      "fixture": "Tunisia v Japan",
+      "codes": "TUN/JPN",
+      "bestPick": "suzuki",
+      "playersCovered": 3,
+      "matchedPlayers": [
+        "Zion Suzuki",
+        "Junnosuke Suzuki",
+        "Yuito Suzuki"
+      ],
+      "crossesTeams": false
+    },
+    {
+      "n": 41,
+      "fixture": "Norway v Senegal",
+      "codes": "NOR/SEN",
+      "bestPick": "sarr",
+      "playersCovered": 3,
+      "matchedPlayers": [
+        "Mamadou Sarr",
+        "Pape Matar Sarr",
+        "Ismaïla Sarr"
+      ],
+      "crossesTeams": false
+    },
+    {
+      "n": 43,
+      "fixture": "Argentina v Austria",
+      "codes": "ARG/AUT",
+      "bestPick": "martinez",
+      "playersCovered": 3,
+      "matchedPlayers": [
+        "Emiliano Martínez",
+        "Lisandro Martínez",
+        "Lautaro Martínez"
+      ],
+      "crossesTeams": false
+    },
+    {
+      "n": 50,
+      "fixture": "Morocco v Haiti",
+      "codes": "MAR/HAI",
+      "bestPick": "pierre",
+      "playersCovered": 3,
+      "matchedPlayers": [
+        "Alexandre Pierre",
+        "Leverton Pierre",
+        "Woodensky Pierre"
+      ],
+      "crossesTeams": false
+    },
+    {
+      "n": 57,
+      "fixture": "Japan v Sweden",
+      "codes": "JPN/SWE",
+      "bestPick": "suzuki",
+      "playersCovered": 3,
+      "matchedPlayers": [
+        "Zion Suzuki",
+        "Junnosuke Suzuki",
+        "Yuito Suzuki"
+      ],
+      "crossesTeams": false
+    }
+  ],
+  "genericStrings": {
+    "junior": {
+      "maxPlayersInOneFixture": 1,
+      "maxFixture": "Brazil v Morocco (match 7)",
+      "avgPlayersPerFixture": 0.083,
+      "fixturesWithAtLeastOneHit": 6
+    },
+    "jr": {
+      "maxPlayersInOneFixture": 1,
+      "maxFixture": "Haiti v Scotland (match 5)",
+      "avgPlayersPerFixture": 0.042,
+      "fixturesWithAtLeastOneHit": 3
+    },
+    "silva": {
+      "maxPlayersInOneFixture": 2,
+      "maxFixture": "Portugal v Congo DR (match 23)",
+      "avgPlayersPerFixture": 0.083,
+      "fixturesWithAtLeastOneHit": 3
+    },
+    "hernandez": {
+      "maxPlayersInOneFixture": 2,
+      "maxFixture": "France v Senegal (match 17)",
+      "avgPlayersPerFixture": 0.125,
+      "fixturesWithAtLeastOneHit": 6
+    },
+    "lopez": {
+      "maxPlayersInOneFixture": 1,
+      "maxFixture": "Argentina v Algeria (match 19)",
+      "avgPlayersPerFixture": 0.042,
+      "fixturesWithAtLeastOneHit": 3
+    },
+    "gonzalez": {
+      "maxPlayersInOneFixture": 1,
+      "maxFixture": "Mexico v South Africa (match 1)",
+      "avgPlayersPerFixture": 0.083,
+      "fixturesWithAtLeastOneHit": 6
+    },
+    "rodriguez": {
+      "maxPlayersInOneFixture": 2,
+      "maxFixture": "Ghana v Panama (match 21)",
+      "avgPlayersPerFixture": 0.25,
+      "fixturesWithAtLeastOneHit": 15
+    },
+    "martinez": {
+      "maxPlayersInOneFixture": 3,
+      "maxFixture": "Argentina v Algeria (match 19)",
+      "avgPlayersPerFixture": 0.25,
+      "fixturesWithAtLeastOneHit": 12
+    },
+    "garcia": {
+      "maxPlayersInOneFixture": 2,
+      "maxFixture": "Spain v Cabo Verde (match 14)",
+      "avgPlayersPerFixture": 0.083,
+      "fixturesWithAtLeastOneHit": 3
+    },
+    "fernandez": {
+      "maxPlayersInOneFixture": 1,
+      "maxFixture": "United States v Paraguay (match 4)",
+      "avgPlayersPerFixture": 0.083,
+      "fixturesWithAtLeastOneHit": 6
+    },
+    "santos": {
+      "maxPlayersInOneFixture": 2,
+      "maxFixture": "Brazil v Morocco (match 7)",
+      "avgPlayersPerFixture": 0.125,
+      "fixturesWithAtLeastOneHit": 6
+    },
+    "mohammed": {
+      "maxPlayersInOneFixture": 0,
+      "maxFixture": null,
+      "avgPlayersPerFixture": 0,
+      "fixturesWithAtLeastOneHit": 0
+    },
+    "ali": {
+      "maxPlayersInOneFixture": 2,
+      "maxFixture": "Iraq v Norway (match 18)",
+      "avgPlayersPerFixture": 0.167,
+      "fixturesWithAtLeastOneHit": 9
+    },
+    "kim": {
+      "maxPlayersInOneFixture": 0,
+      "maxFixture": null,
+      "avgPlayersPerFixture": 0,
+      "fixturesWithAtLeastOneHit": 0
+    },
+    "lee": {
+      "maxPlayersInOneFixture": 0,
+      "maxFixture": null,
+      "avgPlayersPerFixture": 0,
+      "fixturesWithAtLeastOneHit": 0
+    },
+    "park": {
+      "maxPlayersInOneFixture": 0,
+      "maxFixture": null,
+      "avgPlayersPerFixture": 0,
+      "fixturesWithAtLeastOneHit": 0
+    },
+    "son": {
+      "maxPlayersInOneFixture": 0,
+      "maxFixture": null,
+      "avgPlayersPerFixture": 0,
+      "fixturesWithAtLeastOneHit": 0
+    },
+    "sane": {
+      "maxPlayersInOneFixture": 1,
+      "maxFixture": "Germany v Curaçao (match 10)",
+      "avgPlayersPerFixture": 0.042,
+      "fixturesWithAtLeastOneHit": 3
+    },
+    "williams": {
+      "maxPlayersInOneFixture": 1,
+      "maxFixture": "Mexico v South Africa (match 1)",
+      "avgPlayersPerFixture": 0.125,
+      "fixturesWithAtLeastOneHit": 9
+    },
+    "jones": {
+      "maxPlayersInOneFixture": 1,
+      "maxFixture": "Canada v Bosnia and Herzegovina (match 3)",
+      "avgPlayersPerFixture": 0.042,
+      "fixturesWithAtLeastOneHit": 3
+    },
+    "smith": {
+      "maxPlayersInOneFixture": 1,
+      "maxFixture": "Sweden v Tunisia (match 12)",
+      "avgPlayersPerFixture": 0.083,
+      "fixturesWithAtLeastOneHit": 6
+    },
+    "dia": {
+      "maxPlayersInOneFixture": 0,
+      "maxFixture": null,
+      "avgPlayersPerFixture": 0,
+      "fixturesWithAtLeastOneHit": 0
+    },
+    "traore": {
+      "maxPlayersInOneFixture": 0,
+      "maxFixture": null,
+      "avgPlayersPerFixture": 0,
+      "fixturesWithAtLeastOneHit": 0
+    },
+    "toure": {
+      "maxPlayersInOneFixture": 1,
+      "maxFixture": "Australia v Türkiye (match 6)",
+      "avgPlayersPerFixture": 0.083,
+      "fixturesWithAtLeastOneHit": 6
+    },
+    "mendy": {
+      "maxPlayersInOneFixture": 2,
+      "maxFixture": "France v Senegal (match 17)",
+      "avgPlayersPerFixture": 0.083,
+      "fixturesWithAtLeastOneHit": 3
+    },
+    "ndiaye": {
+      "maxPlayersInOneFixture": 3,
+      "maxFixture": "France v Senegal (match 17)",
+      "avgPlayersPerFixture": 0.125,
+      "fixturesWithAtLeastOneHit": 3
+    },
+    "sarr": {
+      "maxPlayersInOneFixture": 3,
+      "maxFixture": "France v Senegal (match 17)",
+      "avgPlayersPerFixture": 0.125,
+      "fixturesWithAtLeastOneHit": 3
+    }
+  },
+  "honestVsExploiter": {
+    "honestPickCoverage": 1,
+    "bestSinglePickPerFixture": {
+      "median": 2,
+      "max": 3,
+      "mean": 2,
+      "distribution": {
+        "1": 12,
+        "2": 48,
+        "3": 12
+      }
+    },
+    "anyCollidingPick": {
+      "totalCollidingPickFixturePairs": 136,
+      "median": 2,
+      "max": 3
+    }
+  },
+  "fullNameCollisions": {
+    "crossTeam": [
+      {
+        "normalized": "emiliano martinez",
+        "occurrences": [
+          {
+            "code": "ARG",
+            "name": "Emiliano Martínez"
+          },
+          {
+            "code": "URU",
+            "name": "Emiliano Martínez"
+          }
+        ]
+      }
+    ],
+    "sameTeam": [
+      {
+        "normalized": "ederson",
+        "occurrences": [
+          {
+            "code": "BRA",
+            "name": "Ederson"
+          },
+          {
+            "code": "BRA",
+            "name": "Éderson"
+          }
+        ]
+      }
+    ]
+  }
+}
